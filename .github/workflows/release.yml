@@ -111,8 +111,13 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json manifest.json index.ts dist CHANGELOG.md
-          if ! git diff --cached --quiet; then
+          paths=(package.json package-lock.json manifest.json CHANGELOG.md)
+          [[ -f index.ts ]] && paths+=(index.ts)
+          [[ -d src ]] && paths+=(src)
+          git add "${paths[@]}"
+          if git diff --cached --quiet; then
+            echo "Release files are already current; tagging existing commit."
+          else
             git commit -m "Release pm-brief ${{ steps.decide.outputs.tag }}"
           fi
           git tag "${{ steps.decide.outputs.tag }}"
