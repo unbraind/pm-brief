@@ -96,9 +96,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run changelog
+          # For the first release (no prior tag), pm-changelog emits the full closed-item window once.
+          npm run changelog -- --github-step-summary
           npm run changelog:check
-          npx pm-changelog --pm-root .agents/pm --stdout --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --github-step-summary > RELEASE_NOTES.md
+          npm run release:notes > RELEASE_NOTES.md
 
       - name: Run release checks
         if: steps.decide.outputs.should_release == 'true'
