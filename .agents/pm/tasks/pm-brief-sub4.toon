@@ -6,13 +6,15 @@ status: closed
 priority: 1
 tags[1]: release
 created_at: "2026-06-06T21:37:24.908Z"
-updated_at: "2026-06-06T21:45:50.368Z"
+updated_at: "2026-06-06T22:06:01.876Z"
 author: unknown
 estimated_minutes: 45
 acceptance_criteria: "release:check passes, pm validate has no blocking errors, npm audit is clean, npm pack dry-run succeeds, and local extension commands run against real pm data"
 resolution: Verification complete
 expected_result: pm-brief is ready for PR and public package setup
 actual_result: npm test passed; pm extension doctor reported activation ok; pm brief/next/stale ran against local pm data.
+comments[1]{created_at,author,text}:
+  "2026-06-06T22:06:01.876Z",unknown,"2026-06-06 follow-up: added missing CI workflow and hardened daily release publish verification. CI now runs npm ci, typecheck, build, tests, production audit, pack dry-run, changelog check, and Bun install graph check. Release publish now retries provenance publish, detects versions that land despite errors, falls back once without provenance after repeated registry failures, and logs Bun install retry attempts."
 files[3]{path,scope,note}:
   CHANGELOG.md,project,pm-changelog output
   package-lock.json,project,locked dependencies
