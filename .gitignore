@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-test/
+*.tgz
+RELEASE_NOTES.md
+.agents/pm/extensions/
+.agents/pm/locks/
+.agents/pm/runtime/
+.agents/pm/search/

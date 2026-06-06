@@ -1,0 +1,95 @@
+{
+  "name": "pm-brief",
+  "version": "0.1.0",
+  "description": "Token-budgeted agent briefs and next-work plans for pm workspaces",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "manifest.json",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build && npm run build:test && node --test dist-test/*.js",
+    "prepack": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck",
+    "audit:prod": "npm audit --omit=dev",
+    "pack:dry-run": "npm pack --dry-run",
+    "changelog": "pm-changelog --pm-root .agents/pm --mode prepend --output CHANGELOG.md --release-version-from-package --since-previous-tag --until-release-tag --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm",
+    "changelog:full": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm",
+    "changelog:check": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm --check",
+    "release:check": "npm run typecheck && npm run build && npm test && npm run audit:prod && npm run pack:dry-run && npm run changelog:check"
+  },
+  "keywords": [
+    "agent",
+    "brief",
+    "context",
+    "handoff",
+    "pm-cli",
+    "pm-package",
+    "project-management"
+  ],
+  "author": "@unbraind",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unbraind/pm-brief.git"
+  },
+  "homepage": "https://github.com/unbraind/pm-brief#readme",
+  "bugs": {
+    "url": "https://github.com/unbraind/pm-brief/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "peerDependencies": {
+    "@unbrained/pm-cli": ">=2026.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "@unbrained/pm-cli": "^2026.6.6",
+    "pm-changelog": "^2026.6.6",
+    "typescript": "^6.0.3"
+  },
+  "pm": {
+    "aliases": [
+      "brief"
+    ],
+    "extensions": [
+      "."
+    ],
+    "catalog": {
+      "display_name": "Brief",
+      "category": "context",
+      "summary": "Token-budgeted agent briefs and next-work plans for pm workspaces",
+      "tags": [
+        "agent",
+        "context",
+        "handoff"
+      ],
+      "links": {
+        "docs": "https://github.com/unbraind/pm-brief#readme",
+        "npm": "https://www.npmjs.com/package/pm-brief",
+        "repository": "https://github.com/unbraind/pm-brief",
+        "report": "https://github.com/unbraind/pm-brief/issues"
+      }
+    },
+    "docs": [
+      "README.md",
+      "CHANGELOG.md"
+    ],
+    "examples": [
+      "README.md"
+    ],
+    "capabilities": [
+      "commands",
+      "schema"
+    ]
+  }
+}

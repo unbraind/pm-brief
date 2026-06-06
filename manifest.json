@@ -1,0 +1,14 @@
+{
+  "name": "pm-brief",
+  "version": "0.1.0",
+  "description": "Token-budgeted agent briefs and next-work plans for pm workspaces",
+  "author": "@unbraind",
+  "entry": "dist/index.js",
+  "capabilities": [
+    "commands",
+    "schema"
+  ],
+  "compatibility": {
+    "pm": ">=2026.6.6"
+  }
+}

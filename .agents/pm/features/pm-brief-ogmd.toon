@@ -1,0 +1,24 @@
+id: pm-brief-ogmd
+title: Build pm-brief MVP
+description: "Create the production-ready TypeScript MVP for pm-brief: markdown/json agent briefs, next-work ranking, blocker and stale-context detection, token budgeting, SDK exports, tests, changelog, and release workflow."
+type: Feature
+status: closed
+priority: 0
+tags[2]: agent,context
+created_at: "2026-06-06T21:37:24.623Z"
+updated_at: "2026-06-06T21:45:32.481Z"
+author: unknown
+estimated_minutes: 120
+acceptance_criteria: "pm brief, pm brief next, and pm brief stale activate through the pm extension runtime, provide markdown/json output, rank next work, detect blockers/stale context/risks, and pass release checks"
+resolution: MVP implemented
+expected_result: A production-ready TypeScript pm-brief MVP exists for agent handoffs
+actual_result: npm test passed and local pm extension command testing succeeded against real pm-brief workspace data.
+files[6]{path,scope,note}:
+  index.ts,project,brief engine and extension commands
+  test/brief.test.ts,project,brief unit and rendering tests
+  README.md,project,usage and API docs
+  package.json,project,package metadata and scripts
+  manifest.json,project,extension metadata
+  .github/workflows/release.yml,project,daily release workflow
+close_reason: "Implemented pm-brief MVP with TypeScript SDK exports, extension commands, token-budgeted markdown/json briefs, next-work ranking, stale context and risk detection, docs, tests, and release workflow."
+body: ""
