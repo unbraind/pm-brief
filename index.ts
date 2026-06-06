@@ -550,7 +550,7 @@ function registerCommands(api: any): void {
 
 export default defineExtension({
   name: "pm-brief",
-  version: "0.1.0",
+  version: "2026.6.7",
   description: "Token-budgeted agent briefs and next-work plans for pm workspaces",
   activate(api: any) {
     registerCommands(api);
