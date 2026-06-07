@@ -50,12 +50,12 @@
     "node": ">=20.0.0"
   },
   "peerDependencies": {
-    "@unbrained/pm-cli": ">=2026.6.6"
+    "@unbrained/pm-cli": ">=2026.6.7"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
-    "@unbrained/pm-cli": "^2026.6.6",
-    "pm-changelog": "^2026.6.6",
+    "@unbrained/pm-cli": "^2026.6.7",
+    "pm-changelog": "^2026.6.7",
     "typescript": "^6.0.3"
   },
   "pm": {
