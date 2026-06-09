@@ -72,6 +72,22 @@ export interface BriefItem {
   tokenCostEstimate: number;
 }
 
+export interface NextItemScoreBreakdown {
+  total: number;
+  priority: number;
+  blocked: number;
+  active: number;
+  stale: number;
+}
+
+export interface NextItemExplanation {
+  rank: number;
+  item: BriefItem;
+  score: NextItemScoreBreakdown;
+  activeDependencies: number;
+  activeDependents: number;
+}
+
 export interface BriefBlocker {
   itemId: string;
   blockedBy: string;
@@ -100,6 +116,12 @@ export interface RecommendedPmUpdate {
   safeToAutoApply: boolean;
 }
 
+export interface BriefInsight {
+  level: "info" | "warning";
+  message: string;
+  suggestion?: string;
+}
+
 export interface AgentBrief {
   generatedAt: string;
   workspace: {
@@ -119,12 +141,26 @@ export interface AgentBrief {
   staleContext: StaleContextFinding[];
   decisionsNeeded: BriefItem[];
   recommendedPmUpdates: RecommendedPmUpdate[];
+  insights?: BriefInsight[];
 }
 
 interface Relationship {
   from: string;
   to: string;
   kind: string;
+}
+
+interface RankedCandidate {
+  item: PmItem;
+  score: NextItemScoreBreakdown;
+  activeDependencies: number;
+  activeDependents: number;
+}
+
+interface FocusSelection {
+  items: PmItem[];
+  missingIds: string[];
+  closedExcludedIds: string[];
 }
 
 function text(value: unknown): string {
@@ -222,6 +258,10 @@ function itemUpdatedAt(item: PmItem): string {
   return text(item.updated_at) || text(item.created_at);
 }
 
+function hasVisibleDependencyBlocker(item: PmItem, rels: Relationship[]): boolean {
+  return rels.some((rel) => rel.from === item.id && (rel.kind === "blocked_by" || rel.kind === "depends_on"));
+}
+
 function ageDays(item: PmItem, now: Date): number {
   const raw = itemUpdatedAt(item);
   if (!raw) return 0;
@@ -244,7 +284,7 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     ...linksFor(item),
   ].slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
-  const blocked = rels.some((rel) => rel.from === item.id && (rel.kind === "blocked_by" || rel.kind === "depends_on"));
+  const blocked = hasVisibleDependencyBlocker(item, rels);
   const whyNow = blocked
     ? "blocked: resolve prerequisite before implementation"
     : priority !== undefined
@@ -277,12 +317,19 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
   };
 }
 
-function scoreItem(item: PmItem, rels: Relationship[], now: Date): number {
+function scoreBreakdown(item: PmItem, rels: Relationship[], now: Date): NextItemScoreBreakdown {
   const priority = typeof item.priority === "number" ? item.priority : 5;
-  const blockedPenalty = rels.some((rel) => rel.from === item.id && (rel.kind === "blocked_by" || rel.kind === "depends_on")) ? 100 : 0;
+  const priorityScore = priority * 10;
+  const blockedPenalty = hasVisibleDependencyBlocker(item, rels) ? 100 : 0;
   const activeBoost = statusOf(item).toLowerCase() === "in_progress" ? -10 : 0;
   const stalePenalty = Math.min(ageDays(item, now), 30) / 10;
-  return priority * 10 + blockedPenalty + activeBoost + stalePenalty;
+  return {
+    total: priorityScore + blockedPenalty + activeBoost + stalePenalty,
+    priority: priorityScore,
+    blocked: blockedPenalty,
+    active: activeBoost,
+    stale: stalePenalty,
+  };
 }
 
 function activeDependencyCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
@@ -293,28 +340,52 @@ function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set
   return rels.filter((rel) => rel.to === item.id && activeIds.has(rel.from)).length;
 }
 
-export function selectNextItems(items: PmItem[], options: BriefOptions = {}): BriefItem[] {
-  const now = new Date(options.generatedAt ?? Date.now());
-  const rels = items.flatMap(extractRelationships);
-  const candidates = items
+function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
+  return items
     .filter((item) => !isClosed(item))
     .filter((item) => !options.assignee || text(item.assignee) === options.assignee)
     .filter((item) => !options.statuses?.length || options.statuses.includes(statusOf(item)));
+}
+
+function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[]): RankedCandidate[] {
+  const candidates = filterCandidates(items, options);
   const activeIds = new Set(candidates.map((item) => item.id));
   return candidates
-    .sort((a, b) => scoreItem(a, rels, now) - scoreItem(b, rels, now) || itemUpdatedAt(b).localeCompare(itemUpdatedAt(a)) || a.id.localeCompare(b.id))
+    .map((item) => ({
+      item,
+      score: scoreBreakdown(item, rels, now),
+      activeDependencies: activeDependencyCount(item, rels, activeIds),
+      activeDependents: activeDependentCount(item, rels, activeIds),
+    }))
     .sort((a, b) => {
-      if (!options.dependencyOrder) return 0;
-      const depsA = activeDependencyCount(a, rels, activeIds);
-      const depsB = activeDependencyCount(b, rels, activeIds);
-      if (depsA !== depsB) return depsA - depsB;
-      const fanoutA = activeDependentCount(a, rels, activeIds);
-      const fanoutB = activeDependentCount(b, rels, activeIds);
-      if (fanoutA !== fanoutB) return fanoutB - fanoutA;
-      return 0;
-    })
+      if (options.dependencyOrder) {
+        if (a.activeDependencies !== b.activeDependencies) return a.activeDependencies - b.activeDependencies;
+        if (a.activeDependents !== b.activeDependents) return b.activeDependents - a.activeDependents;
+      }
+      return a.score.total - b.score.total || itemUpdatedAt(b.item).localeCompare(itemUpdatedAt(a.item)) || a.item.id.localeCompare(b.item.id);
+    });
+}
+
+export function selectNextItems(items: PmItem[], options: BriefOptions = {}): BriefItem[] {
+  const now = new Date(options.generatedAt ?? Date.now());
+  const rels = items.flatMap(extractRelationships);
+  return rankCandidates(items, options, now, rels)
     .slice(0, options.nextCount ?? 5)
-    .map((item) => toBriefItem(item, rels, items, now));
+    .map(({ item }) => toBriefItem(item, rels, items, now));
+}
+
+export function explainNextItems(items: PmItem[], options: BriefOptions = {}): NextItemExplanation[] {
+  const now = new Date(options.generatedAt ?? Date.now());
+  const rels = items.flatMap(extractRelationships);
+  return rankCandidates(items, options, now, rels)
+    .slice(0, options.nextCount ?? 5)
+    .map((candidate, index) => ({
+      rank: index + 1,
+      item: toBriefItem(candidate.item, rels, items, now),
+      score: candidate.score,
+      activeDependencies: candidate.activeDependencies,
+      activeDependents: candidate.activeDependents,
+    }));
 }
 
 export function detectStaleContext(items: PmItem[], options: BriefOptions = {}): StaleContextFinding[] {
@@ -347,20 +418,115 @@ export function summarizeRisks(items: PmItem[], options: BriefOptions = {}): Bri
   return risks;
 }
 
-function selectedFocus(items: PmItem[], options: BriefOptions): PmItem[] {
-  const ids = new Set(options.focusIds ?? []);
-  const candidates = ids.size > 0 ? items.filter((item) => ids.has(item.id)) : selectNextItems(items, { ...options, nextCount: 3 }).map((next) => items.find((item) => item.id === next.id)).filter((item): item is PmItem => Boolean(item));
-  return candidates.filter((item) => options.includeClosed || !isClosed(item));
+function selectedFocus(items: PmItem[], options: BriefOptions): FocusSelection {
+  const requestedIds = Array.from(new Set(options.focusIds ?? []));
+  if (requestedIds.length === 0) {
+    const derived = selectNextItems(items, { ...options, nextCount: 3 })
+      .map((next) => items.find((item) => item.id === next.id))
+      .filter((item): item is PmItem => Boolean(item));
+    return {
+      items: derived,
+      missingIds: [],
+      closedExcludedIds: [],
+    };
+  }
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const missingIds = requestedIds.filter((id) => !byId.has(id));
+  const closedExcludedIds: string[] = [];
+  const selected = requestedIds
+    .map((id) => byId.get(id))
+    .filter((item): item is PmItem => Boolean(item))
+    .filter((item) => {
+      if (options.includeClosed || !isClosed(item)) return true;
+      closedExcludedIds.push(item.id);
+      return false;
+    });
+  return {
+    items: selected,
+    missingIds,
+    closedExcludedIds,
+  };
+}
+
+function summarizeIds(ids: string[]): string {
+  const shown = ids.slice(0, 3);
+  const suffix = ids.length > shown.length ? ` (+${ids.length - shown.length} more)` : "";
+  return `${shown.join(", ")}${suffix}`;
+}
+
+function describeFilters(options: BriefOptions): string {
+  const parts: string[] = [];
+  if (options.assignee) parts.push(`assignee=${options.assignee}`);
+  if (options.statuses?.length) parts.push(`status=${options.statuses.join(",")}`);
+  return parts.join(", ");
+}
+
+function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: FocusSelection, next: BriefItem[]): BriefInsight[] {
+  const insights: BriefInsight[] = [];
+  if (focusSelection.missingIds.length > 0) {
+    insights.push({
+      level: "warning",
+      message: `requested focus id(s) were not found: ${summarizeIds(focusSelection.missingIds)}`,
+      suggestion: `pm show ${focusSelection.missingIds[0]}`,
+    });
+  }
+  if (focusSelection.closedExcludedIds.length > 0) {
+    insights.push({
+      level: "info",
+      message: `closed focus item(s) were omitted: ${summarizeIds(focusSelection.closedExcludedIds)}`,
+      suggestion: "pm brief --include-closed --format markdown",
+    });
+  }
+  const openItems = items.filter((item) => !isClosed(item));
+  const candidates = filterCandidates(items, options);
+  if (next.length === 0) {
+    if (openItems.length === 0) {
+      insights.push({
+        level: "info",
+        message: "no open work items are available in this workspace",
+        suggestion: "pm list-open --limit 20",
+      });
+    } else if (options.assignee || options.statuses?.length) {
+      const activeFilters = describeFilters(options);
+      const filterSuffix = activeFilters ? ` (${activeFilters})` : "";
+      insights.push({
+        level: "warning",
+        message: `no open work matched filters${filterSuffix}`,
+        suggestion: "pm brief --format markdown",
+      });
+    }
+  } else if (candidates.length < Math.min(options.nextCount ?? 5, openItems.length) && (options.assignee || options.statuses?.length)) {
+    const activeFilters = describeFilters(options);
+    const filterSuffix = activeFilters ? ` (${activeFilters})` : "";
+    insights.push({
+      level: "info",
+      message: `filters narrowed next-work candidates to ${candidates.length} item(s)${filterSuffix}`,
+    });
+  }
+  return insights;
 }
 
 function compactToBudget(brief: AgentBrief): AgentBrief {
   const budget = brief.budget.requestedTokens;
   let estimated = estimateTokens(brief);
   if (estimated <= budget) return { ...brief, budget: { ...brief.budget, estimatedTokens: estimated, truncated: false } };
-  const next = { ...brief, recommendedPmUpdates: brief.recommendedPmUpdates.slice(0, 5), staleContext: brief.staleContext.slice(0, 5), risks: brief.risks.slice(0, 8) };
+  const next = {
+    ...brief,
+    insights: brief.insights?.slice(0, 4),
+    recommendedPmUpdates: brief.recommendedPmUpdates.slice(0, 5),
+    staleContext: brief.staleContext.slice(0, 5),
+    risks: brief.risks.slice(0, 8),
+  };
   estimated = estimateTokens(next);
   if (estimated <= budget) return { ...next, budget: { ...next.budget, estimatedTokens: estimated, truncated: true } };
-  const tighter = { ...next, next: next.next.slice(0, 3), blockers: next.blockers.slice(0, 6), focus: next.focus.slice(0, 3), decisionsNeeded: next.decisionsNeeded.slice(0, 3) };
+  const tighter = {
+    ...next,
+    insights: next.insights?.slice(0, 2),
+    next: next.next.slice(0, 3),
+    blockers: next.blockers.slice(0, 6),
+    focus: next.focus.slice(0, 3),
+    decisionsNeeded: next.decisionsNeeded.slice(0, 3),
+  };
   estimated = estimateTokens(tighter);
   return { ...tighter, budget: { ...tighter.budget, estimatedTokens: estimated, truncated: true } };
 }
@@ -369,8 +535,10 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const now = new Date(generatedAt);
   const rels = items.flatMap(extractRelationships);
-  const focus = selectedFocus(items, options).map((item) => toBriefItem(item, rels, items, now));
+  const focusSelection = selectedFocus(items, options);
+  const focus = focusSelection.items.map((item) => toBriefItem(item, rels, items, now));
   const next = selectNextItems(items, options);
+  const insights = buildInsights(items, options, focusSelection, next);
   const blockers = rels
     .filter((rel) => rel.kind === "blocked_by" || rel.kind === "depends_on")
     .map((rel) => {
@@ -416,11 +584,26 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     staleContext,
     decisionsNeeded,
     recommendedPmUpdates,
+    insights,
   });
 }
 
 function escapeLine(value: unknown): string {
   return String(value ?? "").replace(/\r?\n/g, " ").trim();
+}
+
+function formatScoreValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+}
+
+function formatSignedScoreValue(value: number): string {
+  if (value === 0) return "0";
+  const abs = formatScoreValue(Math.abs(value));
+  return `${value > 0 ? "+" : "-"}${abs}`;
+}
+
+function renderNextExplanationLine(entry: NextItemExplanation): string {
+  return `${entry.rank}. ${entry.item.id}: ${escapeLine(entry.item.title)} - ${entry.item.whyNow} [score ${formatScoreValue(entry.score.total)} = priority ${formatSignedScoreValue(entry.score.priority)}, blocked ${formatSignedScoreValue(entry.score.blocked)}, active ${formatSignedScoreValue(entry.score.active)}, stale ${formatSignedScoreValue(entry.score.stale)}; deps ${entry.activeDependencies}, dependents ${entry.activeDependents}]`;
 }
 
 export function renderMarkdownBrief(brief: AgentBrief): string {
@@ -431,9 +614,16 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
     `Workspace: ${brief.workspace.root} | pm ${brief.workspace.pmVersion} | items ${brief.workspace.itemCount}`,
     `Budget: requested ${brief.budget.requestedTokens}, estimated ${brief.budget.estimatedTokens}, truncated ${brief.budget.truncated}`,
     "",
-    "## Next Work",
-    "",
   ];
+  if (brief.insights?.length) {
+    lines.push("## Brief Insights", "");
+    for (const insight of brief.insights) {
+      const suggestion = insight.suggestion ? ` | suggestion: \`${insight.suggestion}\`` : "";
+      lines.push(`- ${insight.level}: ${escapeLine(insight.message)}${suggestion}`);
+    }
+    lines.push("");
+  }
+  lines.push("## Next Work", "");
   if (brief.next.length === 0) lines.push("_No open work matched the filters._");
   for (const item of brief.next) lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) - ${item.whyNow}`);
   lines.push("", "## Focus", "");
@@ -528,23 +718,32 @@ function registerCommands(api: any): void {
       { long: "--count", short: "-n", value_name: "n", description: "Number of next items (default: 5)", type: "string" },
       { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
       { long: "--dependency-order", description: "Prefer prerequisite work before dependents", type: "boolean" },
+      { long: "--explain", description: "Include score and dependency signals for each ranked item", type: "boolean" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
     async run(ctx: any) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
-      const next = selectNextItems(readPmItems(ctx.pm_root), {
+      const nextOptions: BriefOptions = {
         nextCount: readInt(options, ["count"], 5),
         assignee: readString(options, "assignee"),
         dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
         generatedAt: new Date().toISOString(),
-      });
+      };
+      const allItems = readPmItems(ctx.pm_root);
+      const next = selectNextItems(allItems, nextOptions);
+      const explain = readBool(options, "explain");
+      const explained = explain ? explainNextItems(allItems, nextOptions) : [];
       if (format === "json") {
-        console.error(JSON.stringify({ next }, null, 2));
+        const payload = explain ? { next, explanations: explained } : { next };
+        console.error(JSON.stringify(payload, null, 2));
         return { next: next.length, format };
       }
-      console.error(next.map((item) => `${item.id}: ${item.title} - ${item.whyNow}`).join("\n"));
+      const textOutput = explain
+        ? explained.map((entry) => renderNextExplanationLine(entry)).join("\n")
+        : next.map((item) => `${item.id}: ${item.title} - ${item.whyNow}`).join("\n");
+      console.error(textOutput);
       return { next: next.length, format };
     },
   });

@@ -3,6 +3,7 @@ import test from "node:test";
 import extension, {
   buildBrief,
   detectStaleContext,
+  explainNextItems,
   extractRelationships,
   renderMarkdownBrief,
   selectNextItems,
@@ -56,6 +57,15 @@ test("extension registers brief commands", () => {
   assert.deepEqual(commands.map((command) => command.name), ["brief", "brief next", "brief stale"]);
 });
 
+test("brief next command exposes explain flag", () => {
+  const commands: Array<Record<string, unknown>> = [];
+  extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
+  const nextCommand = commands.find((command) => command.name === "brief next");
+  assert.ok(nextCommand, "brief next command should be registered");
+  const flags = (nextCommand.flags as Array<{ long?: string }>).map((flag) => flag.long);
+  assert.ok(flags.includes("--explain"));
+});
+
 test("extractRelationships normalizes dependency fields", () => {
   assert.deepEqual(extractRelationships(items[0]!), [{ from: "pm-a", to: "pm-b", kind: "blocked_by" }]);
 });
@@ -103,6 +113,14 @@ test("selectNextItems supports dependency-first ordering for prerequisite planni
   assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-a", "pm-c"]);
 });
 
+test("explainNextItems provides score breakdown and dependency signals", () => {
+  const explained = explainNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
+  assert.deepEqual(explained.map((entry) => entry.item.id), ["pm-b", "pm-c", "pm-a"]);
+  assert.equal(explained[0]?.activeDependents, 1);
+  assert.equal(explained[2]?.score.blocked, 100);
+  assert.ok((explained[2]?.score.total ?? 0) > (explained[1]?.score.total ?? 0));
+});
+
 test("detectStaleContext reports stale open work only", () => {
   const stale = detectStaleContext(items, { generatedAt: "2026-06-06T00:00:00Z", staleDays: 7 });
   assert.deepEqual(stale.map((item) => item.itemId), ["pm-c", "pm-b"]);
@@ -131,6 +149,21 @@ test("buildBrief creates deterministic agent brief with suggestions", () => {
   assert.equal(brief.budget.truncated, false);
 });
 
+test("buildBrief adds insights for missing focus and empty filtered results", () => {
+  const brief = buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-missing", "pm-d"],
+    assignee: "nobody",
+  });
+  const messages = brief.insights?.map((insight) => insight.message) ?? [];
+  assert.ok(messages.some((message) => message.includes("requested focus id(s) were not found")));
+  assert.ok(messages.some((message) => message.includes("closed focus item(s) were omitted")));
+  assert.ok(messages.some((message) => message.includes("no open work matched filters")));
+  const suggestions = brief.insights?.flatMap((insight) => insight.suggestion ? [insight.suggestion] : []) ?? [];
+  assert.ok(suggestions.includes("pm show pm-missing"));
+  assert.ok(suggestions.includes("pm brief --format markdown"));
+});
+
 test("buildBrief compacts when token budget is small", () => {
   const brief = buildBrief(items, { generatedAt: "2026-06-06T00:00:00Z", tokenBudget: 50 });
   assert.equal(brief.budget.truncated, true);
@@ -152,4 +185,14 @@ test("renderMarkdownBrief emits stable agent sections", () => {
   assert.match(markdown, /## Next Work/);
   assert.match(markdown, /pm-a blocked_by pm-b Approve changelog \(open\)/);
   assert.match(markdown, /Recommended PM Updates/);
+});
+
+test("renderMarkdownBrief includes brief insights section when available", () => {
+  const markdown = renderMarkdownBrief(buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-missing"],
+  }));
+  assert.match(markdown, /## Brief Insights/);
+  assert.match(markdown, /requested focus id\(s\) were not found/);
+  assert.match(markdown, /suggestion: `pm show pm-missing`/);
 });

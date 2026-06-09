@@ -21,6 +21,7 @@ pm brief --max-tokens 4000 --format markdown
 pm brief --dependency-order --format markdown
 pm brief --focus pm-1234 --include-closed --format json
 pm brief next --count 5 --dependency-order --format json
+pm brief next --count 5 --explain --format text
 pm brief stale --days 7
 ```
 
@@ -34,6 +35,8 @@ pm brief stale --days 7
 
 - `--max-tokens` is an alias for `--token-budget`.
 - `--dependency-order` prefers prerequisite items before dependent work in next-work ranking.
+- `pm brief next --explain` adds transparent score and dependency signals for each ranked item.
+- `pm brief` emits a `Brief Insights` section when focus ids are missing, closed focus items are excluded, or active filters hide all open work.
 
 ## Agent Brief Contents
 
@@ -42,6 +45,7 @@ pm brief stale --days 7
 - blocker relationships and dependency context
 - stale context findings
 - decision items that need human or agent follow-up
+- brief insights with actionable command hints when filters or focus ids need attention
 - safe suggested pm commands, never auto-applied
 - deterministic token-budget trimming
 
