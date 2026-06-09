@@ -66,6 +66,43 @@ test("selectNextItems ranks unblocked priority before blocked work", () => {
   assert.equal(next[2]?.whyNow, "blocked: resolve prerequisite before implementation");
 });
 
+test("selectNextItems supports dependency-first ordering for prerequisite planning", () => {
+  const dependencyItems: PmItem[] = [
+    {
+      id: "pm-a",
+      title: "Implement parser",
+      type: "Task",
+      status: "open",
+      priority: 2,
+      updated_at: "2026-06-05T00:00:00Z",
+      deps: ["pm-b"],
+    },
+    {
+      id: "pm-b",
+      title: "Define schema",
+      type: "Task",
+      status: "open",
+      priority: 2,
+      updated_at: "2026-06-04T00:00:00Z",
+    },
+    {
+      id: "pm-c",
+      title: "Add parser tests",
+      type: "Task",
+      status: "open",
+      priority: 2,
+      updated_at: "2026-06-03T00:00:00Z",
+      deps: ["pm-a"],
+    },
+  ];
+  const next = selectNextItems(dependencyItems, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    dependencyOrder: true,
+    nextCount: 3,
+  });
+  assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-a", "pm-c"]);
+});
+
 test("detectStaleContext reports stale open work only", () => {
   const stale = detectStaleContext(items, { generatedAt: "2026-06-06T00:00:00Z", staleDays: 7 });
   assert.deepEqual(stale.map((item) => item.itemId), ["pm-c", "pm-b"]);

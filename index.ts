@@ -45,6 +45,7 @@ export interface PmItem {
 
 export interface BriefOptions {
   tokenBudget?: number;
+  dependencyOrder?: boolean;
   focusIds?: string[];
   statuses?: string[];
   assignee?: string;
@@ -284,14 +285,34 @@ function scoreItem(item: PmItem, rels: Relationship[], now: Date): number {
   return priority * 10 + blockedPenalty + activeBoost + stalePenalty;
 }
 
+function activeDependencyCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
+  return rels.filter((rel) => rel.from === item.id && activeIds.has(rel.to)).length;
+}
+
+function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
+  return rels.filter((rel) => rel.to === item.id && activeIds.has(rel.from)).length;
+}
+
 export function selectNextItems(items: PmItem[], options: BriefOptions = {}): BriefItem[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const rels = items.flatMap(extractRelationships);
-  return items
+  const candidates = items
     .filter((item) => !isClosed(item))
     .filter((item) => !options.assignee || text(item.assignee) === options.assignee)
-    .filter((item) => !options.statuses?.length || options.statuses.includes(statusOf(item)))
+    .filter((item) => !options.statuses?.length || options.statuses.includes(statusOf(item)));
+  const activeIds = new Set(candidates.map((item) => item.id));
+  return candidates
     .sort((a, b) => scoreItem(a, rels, now) - scoreItem(b, rels, now) || itemUpdatedAt(b).localeCompare(itemUpdatedAt(a)) || a.id.localeCompare(b.id))
+    .sort((a, b) => {
+      if (!options.dependencyOrder) return 0;
+      const depsA = activeDependencyCount(a, rels, activeIds);
+      const depsB = activeDependencyCount(b, rels, activeIds);
+      if (depsA !== depsB) return depsA - depsB;
+      const fanoutA = activeDependentCount(a, rels, activeIds);
+      const fanoutB = activeDependentCount(b, rels, activeIds);
+      if (fanoutA !== fanoutB) return fanoutB - fanoutA;
+      return 0;
+    })
     .slice(0, options.nextCount ?? 5)
     .map((item) => toBriefItem(item, rels, items, now));
 }
@@ -459,11 +480,13 @@ function pmVersion(): string {
 
 function registerCommands(api: any): void {
   const commonFlags = [
-    { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (default: 4000)", type: "string" },
+    { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens, default: 4000)", type: "string" },
+    { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget", type: "string" },
     { long: "--focus", value_name: "id", description: "Focus item id (repeatable or comma-separated)", type: "string" },
     { long: "--status", value_name: "status", description: "Statuses to include (comma-separated)", type: "string" },
     { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
     { long: "--stale-days", value_name: "n", description: "Days before an open item is stale (default: 7)", type: "string" },
+    { long: "--dependency-order", description: "Prefer prerequisite work before dependents in next-work ranking", type: "boolean" },
     { long: "--format", value_name: "format", description: "Output format: markdown or json", type: "string" },
     { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     { long: "--include-closed", description: "Allow closed focus items in the brief", type: "boolean" },
@@ -472,14 +495,15 @@ function registerCommands(api: any): void {
     name: "brief",
     description: "Generate a token-budgeted agent brief from pm items.",
     intent: "turn pm state into compact next-work context for agents",
-    examples: ["pm brief", "pm brief --focus pm-1234 --token-budget 3000", "pm brief --format json"],
+    examples: ["pm brief", "pm brief --focus pm-1234 --max-tokens 3000", "pm brief --dependency-order --format json"],
     flags: commonFlags,
     async run(ctx: any) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
       if (format !== "markdown" && format !== "json") throw new CommandError("--format must be markdown or json", EXIT_CODE.USAGE);
       const brief = buildBrief(readPmItems(ctx.pm_root), {
-        tokenBudget: readInt(options, ["token-budget", "tokenBudget"], 4000),
+        tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
+        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
         focusIds: asArray(options.focus),
         statuses: asArray(options.status),
         assignee: readString(options, "assignee"),
@@ -499,10 +523,11 @@ function registerCommands(api: any): void {
   api.registerCommand({
     name: "brief next",
     description: "Return ranked next work items from pm state.",
-    examples: ["pm brief next --count 5", "pm brief next --format json"],
+    examples: ["pm brief next --count 5", "pm brief next --dependency-order --format json"],
     flags: [
       { long: "--count", short: "-n", value_name: "n", description: "Number of next items (default: 5)", type: "string" },
       { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
+      { long: "--dependency-order", description: "Prefer prerequisite work before dependents", type: "boolean" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
     async run(ctx: any) {
@@ -512,6 +537,7 @@ function registerCommands(api: any): void {
       const next = selectNextItems(readPmItems(ctx.pm_root), {
         nextCount: readInt(options, ["count"], 5),
         assignee: readString(options, "assignee"),
+        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
         generatedAt: new Date().toISOString(),
       });
       if (format === "json") {
