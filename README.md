@@ -17,9 +17,10 @@ pm install github.com/unbraind/pm-brief --project
 
 ```bash
 pm brief
-pm brief --token-budget 4000 --format markdown
+pm brief --max-tokens 4000 --format markdown
+pm brief --dependency-order --format markdown
 pm brief --focus pm-1234 --include-closed --format json
-pm brief next --count 5 --format json
+pm brief next --count 5 --dependency-order --format json
 pm brief stale --days 7
 ```
 
@@ -28,6 +29,11 @@ pm brief stale --days 7
 - `pm brief` renders a markdown or JSON project brief.
 - `pm brief next` returns the ranked next items only.
 - `pm brief stale` returns stale open or in-progress items.
+
+### Ranking and Budget Flags
+
+- `--max-tokens` is an alias for `--token-budget`.
+- `--dependency-order` prefers prerequisite items before dependent work in next-work ranking.
 
 ## Agent Brief Contents
 

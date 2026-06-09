@@ -1,0 +1,22 @@
+id: pm-brief-nu7u
+title: Add max-tokens alias and dependency-aware ordering
+description: Add --max-tokens alias for --token-budget and an opt-in dependency-order ranking mode so prerequisite work appears before dependents.
+type: Feature
+status: closed
+priority: 1
+tags: []
+created_at: "2026-06-09T21:24:56.384Z"
+updated_at: "2026-06-09T21:29:25.979Z"
+author: codex-5-3
+acceptance_criteria: "brief accepts --max-tokens alias for token-budget; brief and brief next support --dependency-order to prioritize prerequisites; behavior covered by tests and docs with release:check green"
+resolution: Implemented max-tokens alias and dependency-aware ordering mode
+expected_result: Agents can budget output with intuitive flag names and sequence prerequisite work before dependents
+actual_result: "Added alias/flags, dependency-order ranking logic, tests, docs, and passing release checks"
+files[3]{path,scope,note}:
+  index.ts,project,null
+  README.md,project,null
+  test/brief.test.ts,project,null
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
+  "npm run release:check",null,project,null,null,null,null,null,null,null,null,null,null,null,null,null
+close_reason: max-tokens alias and dependency-order ranking shipped
+body: ""
