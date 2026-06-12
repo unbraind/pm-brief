@@ -397,8 +397,8 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
 }
 
 function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
-  const dependencyIds = rels.filter((rel) => rel.from === item.id).map((rel) => rel.to);
-  const dependentIds = rels.filter((rel) => rel.to === item.id).map((rel) => rel.from);
+  const dependencyIds = uniqueStrings(rels.filter((rel) => rel.from === item.id).map((rel) => rel.to));
+  const dependentIds = uniqueStrings(rels.filter((rel) => rel.to === item.id).map((rel) => rel.from));
   const stale = ageDays(item, now);
   const requiredContext = uniqueStrings([
     ...dependencyIds.map((id) => `dependency:${id}`),
@@ -470,11 +470,11 @@ function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<strin
 }
 
 function activeDependencyCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return rels.filter((rel) => rel.from === item.id && activeIds.has(rel.to)).length;
+  return uniqueStrings(rels.filter((rel) => rel.from === item.id && activeIds.has(rel.to)).map((rel) => rel.to)).length;
 }
 
 function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return rels.filter((rel) => rel.to === item.id && activeIds.has(rel.from)).length;
+  return uniqueStrings(rels.filter((rel) => rel.to === item.id && activeIds.has(rel.from)).map((rel) => rel.from)).length;
 }
 
 function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {

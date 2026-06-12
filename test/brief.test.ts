@@ -206,6 +206,32 @@ test("explainNextItems provides score breakdown and dependency signals", () => {
   }
 });
 
+test("explainNextItems deduplicates repeated relationship signals", () => {
+  const explained = explainNextItems([
+    {
+      id: "pm-work",
+      title: "Implement duplicate relationship handling",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      deps: ["pm-dep", "pm-dep"],
+    },
+    {
+      id: "pm-dep",
+      title: "Single prerequisite",
+      type: "Task",
+      status: "open",
+      priority: 2,
+    },
+  ], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 2 });
+  const work = explained.find((entry) => entry.item.id === "pm-work");
+  assert.ok(work);
+  assert.equal(work.activeDependencies, 1);
+  assert.deepEqual(work.item.dependencyIds, ["pm-dep"]);
+  assert.deepEqual(work.item.requiredContext, ["dependency:pm-dep"]);
+  assert.equal(work.score.dependencies, -20);
+});
+
 test("detectStaleContext reports stale open work only", () => {
   const stale = detectStaleContext(items, { generatedAt: "2026-06-06T00:00:00Z", staleDays: 7 });
   assert.deepEqual(stale.map((item) => item.itemId), ["pm-c", "pm-b"]);
