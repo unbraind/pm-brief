@@ -66,6 +66,9 @@ export interface BriefItem {
   assignee?: string;
   tags: string[];
   whyNow: string;
+  rankingScore: number;
+  confidence: number;
+  rankingReasons: string[];
   requiredContext: string[];
   dependencyIds: string[];
   dependentIds: string[];
@@ -76,8 +79,13 @@ export interface NextItemScoreBreakdown {
   total: number;
   priority: number;
   blocked: number;
+  dependencies: number;
+  dependents: number;
   active: number;
   stale: number;
+  linkedEvidence: number;
+  release: number;
+  deadline: number;
 }
 
 export interface NextItemExplanation {
@@ -152,6 +160,7 @@ interface Relationship {
 
 interface RankedCandidate {
   item: PmItem;
+  rank: RankEvidence;
   score: NextItemScoreBreakdown;
   activeDependencies: number;
   activeDependents: number;
@@ -163,8 +172,31 @@ interface FocusSelection {
   closedExcludedIds: string[];
 }
 
+interface RankEvidence {
+  score: number;
+  confidence: number;
+  reasons: string[];
+  blocked: boolean;
+  activeDependencies: number;
+  activeDependents: number;
+}
+
+interface RenderedCommandResult {
+  pmBriefRendered: true;
+  output: string;
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function renderedCommandResult(output: string): RenderedCommandResult {
+  return { pmBriefRendered: true, output: output.endsWith("\n") ? output : `${output}\n` };
+}
+
+function renderCommandResult(context: { result?: unknown }): string | null {
+  const result = context.result as Partial<RenderedCommandResult> | null | undefined;
+  return result?.pmBriefRendered === true && typeof result.output === "string" ? result.output : null;
 }
 
 function asArray(value: unknown): string[] {
@@ -270,22 +302,121 @@ function ageDays(item: PmItem, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - time) / 86_400_000));
 }
 
-function linksFor(item: PmItem): string[] {
-  return [...asArray(item.docs), ...asArray(item.files)].slice(0, 6);
+function objectLinkPaths(value: unknown): string[] {
+  if (!value) return [];
+  if (typeof value === "string") return asArray(value);
+  if (Array.isArray(value)) return value.flatMap(objectLinkPaths);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const path = text(record.path) || text(record.url) || text(record.href) || text(record.id);
+    return path ? [path] : [];
+  }
+  return [];
 }
 
-function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date): BriefItem {
-  const dependencyIds = rels.filter((rel) => rel.from === item.id).map((rel) => rel.to);
-  const dependentIds = rels.filter((rel) => rel.to === item.id).map((rel) => rel.from);
+function linksFor(item: PmItem): string[] {
+  return uniqueStrings([...objectLinkPaths(item.docs), ...objectLinkPaths(item.files)]).slice(0, 6);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function isBlockingRelationship(rel: Relationship): boolean {
+  return rel.kind === "blocked_by" || rel.kind === "depends_on";
+}
+
+function activeItemIds(items: PmItem[]): Set<string> {
+  return new Set(items.filter((item) => !isClosed(item)).map((item) => item.id));
+}
+
+function deadlineScore(item: PmItem, now: Date): { score: number; reason?: string } {
+  if (!item.deadline) return { score: 0 };
+  const deadlineTime = Date.parse(item.deadline);
+  if (!Number.isFinite(deadlineTime)) return { score: 0 };
+  const msUntilDeadline = deadlineTime - now.getTime();
+  const daysUntilDeadline = msUntilDeadline < 0 ? Math.floor(msUntilDeadline / 86_400_000) : Math.ceil(msUntilDeadline / 86_400_000);
+  if (daysUntilDeadline < 0) {
+    return { score: 25, reason: `deadline_overdue:${Math.abs(daysUntilDeadline)}d` };
+  }
+  if (daysUntilDeadline <= 14) {
+    return { score: 20 - daysUntilDeadline, reason: `deadline_soon:${daysUntilDeadline}d` };
+  }
+  return { score: 0 };
+}
+
+function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date): RankEvidence {
+  const reasons: string[] = [];
+  let score = 0;
+  const priority = typeof item.priority === "number" ? item.priority : 5;
+  const priorityScore = Math.max(0, 100 - priority * 15);
+  score += priorityScore;
+  reasons.push(`priority:${priority}`);
+
+  const deps = activeDependencyCount(item, rels, activeIds);
+  const fanout = activeDependentCount(item, rels, activeIds);
+  const blocked = deps > 0 && rels.some((rel) => rel.from === item.id && isBlockingRelationship(rel) && activeIds.has(rel.to));
+  if (blocked) {
+    score -= 80;
+    reasons.push(`blocked_by_active_dependency:${deps}`);
+  } else {
+    score += 45;
+    reasons.push("unblocked");
+  }
+  if (deps > 0) {
+    score -= deps * 20;
+    reasons.push(`active_dependencies:${deps}`);
+  }
+  if (fanout > 0) {
+    score += fanout * 8;
+    reasons.push(`unblocks_dependents:${fanout}`);
+  }
+
+  const status = statusOf(item).toLowerCase();
+  if (status === "in_progress") {
+    score += 20;
+    reasons.push("already_in_progress");
+  }
+
   const stale = ageDays(item, now);
-  const requiredContext = [
+  if (stale > 0) {
+    score += Math.min(stale, 30) * 1.5;
+    reasons.push(`stale_days:${stale}`);
+  }
+
+  const links = linksFor(item).length;
+  if (links > 0) {
+    score += Math.min(links, 4) * 6;
+    reasons.push(`linked_evidence:${links}`);
+  }
+
+  if (text(item.release)) {
+    score += 10;
+    reasons.push(`release:${text(item.release)}`);
+  }
+  const deadline = deadlineScore(item, now);
+  if (deadline.reason) {
+    score += deadline.score;
+    reasons.push(deadline.reason);
+  }
+
+  // Baseline 35 means "some pm metadata exists"; reasons, links, and timestamps raise confidence.
+  const confidence = Math.max(15, Math.min(100, 35 + reasons.length * 8 + Math.min(links, 4) * 5 + (itemUpdatedAt(item) ? 8 : 0)));
+  return { score: Math.round(score), confidence, reasons, blocked, activeDependencies: deps, activeDependents: fanout };
+}
+
+function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
+  const dependencyIds = uniqueStrings(rels.filter((rel) => rel.from === item.id).map((rel) => rel.to));
+  const dependentIds = uniqueStrings(rels.filter((rel) => rel.to === item.id).map((rel) => rel.from));
+  const stale = ageDays(item, now);
+  const requiredContext = uniqueStrings([
     ...dependencyIds.map((id) => `dependency:${id}`),
     ...dependentIds.map((id) => `dependent:${id}`),
     ...linksFor(item),
-  ].slice(0, 8);
+  ]).slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
-  const blocked = hasVisibleDependencyBlocker(item, rels);
-  const whyNow = blocked
+  const rank = rankOverride ?? rankItem(item, rels, activeIds ?? activeItemIds(allItems), now);
+  const whyNow = rank.blocked
     ? "blocked: resolve prerequisite before implementation"
     : priority !== undefined
       ? `priority ${priority}`
@@ -310,6 +441,9 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     assignee: text(item.assignee) || undefined,
     tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
     whyNow,
+    rankingScore: rank.score,
+    confidence: rank.confidence,
+    rankingReasons: rank.reasons,
     requiredContext,
     dependencyIds,
     dependentIds,
@@ -317,27 +451,37 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
   };
 }
 
-function scoreBreakdown(item: PmItem, rels: Relationship[], now: Date): NextItemScoreBreakdown {
+function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date, rank = rankItem(item, rels, activeIds, now)): NextItemScoreBreakdown {
   const priority = typeof item.priority === "number" ? item.priority : 5;
-  const priorityScore = priority * 10;
-  const blockedPenalty = hasVisibleDependencyBlocker(item, rels) ? 100 : 0;
-  const activeBoost = statusOf(item).toLowerCase() === "in_progress" ? -10 : 0;
-  const stalePenalty = Math.min(ageDays(item, now), 30) / 10;
+  const priorityScore = Math.max(0, 100 - priority * 15);
+  const blockedScore = rank.blocked ? -80 : 45;
+  const dependencyScore = rank.activeDependencies > 0 ? rank.activeDependencies * -20 : 0;
+  const dependentScore = rank.activeDependents > 0 ? rank.activeDependents * 8 : 0;
+  const activeBoost = statusOf(item).toLowerCase() === "in_progress" ? 20 : 0;
+  const staleScore = Math.min(ageDays(item, now), 30) * 1.5;
+  const linkedEvidenceScore = Math.min(linksFor(item).length, 4) * 6;
+  const releaseScore = text(item.release) ? 10 : 0;
+  const deadline = deadlineScore(item, now).score;
   return {
-    total: priorityScore + blockedPenalty + activeBoost + stalePenalty,
+    total: rank.score,
     priority: priorityScore,
-    blocked: blockedPenalty,
+    blocked: blockedScore,
+    dependencies: dependencyScore,
+    dependents: dependentScore,
     active: activeBoost,
-    stale: stalePenalty,
+    stale: staleScore,
+    linkedEvidence: linkedEvidenceScore,
+    release: releaseScore,
+    deadline,
   };
 }
 
 function activeDependencyCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return rels.filter((rel) => rel.from === item.id && activeIds.has(rel.to)).length;
+  return uniqueStrings(rels.filter((rel) => rel.from === item.id && isBlockingRelationship(rel) && activeIds.has(rel.to)).map((rel) => rel.to)).length;
 }
 
 function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return rels.filter((rel) => rel.to === item.id && activeIds.has(rel.from)).length;
+  return uniqueStrings(rels.filter((rel) => rel.to === item.id && isBlockingRelationship(rel) && activeIds.has(rel.from)).map((rel) => rel.from)).length;
 }
 
 function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
@@ -347,41 +491,46 @@ function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
     .filter((item) => !options.statuses?.length || options.statuses.includes(statusOf(item)));
 }
 
-function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[]): RankedCandidate[] {
+function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[], activeIds = activeItemIds(items)): RankedCandidate[] {
   const candidates = filterCandidates(items, options);
-  const activeIds = new Set(candidates.map((item) => item.id));
   return candidates
-    .map((item) => ({
-      item,
-      score: scoreBreakdown(item, rels, now),
-      activeDependencies: activeDependencyCount(item, rels, activeIds),
-      activeDependents: activeDependentCount(item, rels, activeIds),
-    }))
+    .map((item) => {
+      const rank = rankItem(item, rels, activeIds, now);
+      return {
+        item,
+        rank,
+        score: scoreBreakdown(item, rels, activeIds, now, rank),
+        activeDependencies: rank.activeDependencies,
+        activeDependents: rank.activeDependents,
+      };
+    })
     .sort((a, b) => {
       if (options.dependencyOrder) {
         if (a.activeDependencies !== b.activeDependencies) return a.activeDependencies - b.activeDependencies;
         if (a.activeDependents !== b.activeDependents) return b.activeDependents - a.activeDependents;
       }
-      return a.score.total - b.score.total || itemUpdatedAt(b.item).localeCompare(itemUpdatedAt(a.item)) || a.item.id.localeCompare(b.item.id);
+      return b.score.total - a.score.total || itemUpdatedAt(b.item).localeCompare(itemUpdatedAt(a.item)) || a.item.id.localeCompare(b.item.id);
     });
 }
 
 export function selectNextItems(items: PmItem[], options: BriefOptions = {}): BriefItem[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const rels = items.flatMap(extractRelationships);
-  return rankCandidates(items, options, now, rels)
+  const activeIds = activeItemIds(items);
+  return rankCandidates(items, options, now, rels, activeIds)
     .slice(0, options.nextCount ?? 5)
-    .map(({ item }) => toBriefItem(item, rels, items, now));
+    .map((candidate) => toBriefItem(candidate.item, rels, items, now, activeIds, candidate.rank));
 }
 
 export function explainNextItems(items: PmItem[], options: BriefOptions = {}): NextItemExplanation[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const rels = items.flatMap(extractRelationships);
-  return rankCandidates(items, options, now, rels)
+  const activeIds = activeItemIds(items);
+  return rankCandidates(items, options, now, rels, activeIds)
     .slice(0, options.nextCount ?? 5)
     .map((candidate, index) => ({
       rank: index + 1,
-      item: toBriefItem(candidate.item, rels, items, now),
+      item: toBriefItem(candidate.item, rels, items, now, activeIds, candidate.rank),
       score: candidate.score,
       activeDependencies: candidate.activeDependencies,
       activeDependents: candidate.activeDependents,
@@ -535,8 +684,9 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const now = new Date(generatedAt);
   const rels = items.flatMap(extractRelationships);
+  const activeIds = activeItemIds(items);
   const focusSelection = selectedFocus(items, options);
-  const focus = focusSelection.items.map((item) => toBriefItem(item, rels, items, now));
+  const focus = focusSelection.items.map((item) => toBriefItem(item, rels, items, now, activeIds));
   const next = selectNextItems(items, options);
   const insights = buildInsights(items, options, focusSelection, next);
   const blockers = rels
@@ -548,7 +698,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   const decisionsNeeded = items
     .filter((item) => !isClosed(item) && typeOf(item).toLowerCase() === "decision")
     .slice(0, 5)
-    .map((item) => toBriefItem(item, rels, items, now));
+    .map((item) => toBriefItem(item, rels, items, now, activeIds));
   const staleContext = detectStaleContext(items, options).slice(0, 10);
   const risks = summarizeRisks(items, options).slice(0, 12);
   const recommendedPmUpdates: RecommendedPmUpdate[] = [
@@ -603,7 +753,7 @@ function formatSignedScoreValue(value: number): string {
 }
 
 function renderNextExplanationLine(entry: NextItemExplanation): string {
-  return `${entry.rank}. ${entry.item.id}: ${escapeLine(entry.item.title)} - ${entry.item.whyNow} [score ${formatScoreValue(entry.score.total)} = priority ${formatSignedScoreValue(entry.score.priority)}, blocked ${formatSignedScoreValue(entry.score.blocked)}, active ${formatSignedScoreValue(entry.score.active)}, stale ${formatSignedScoreValue(entry.score.stale)}; deps ${entry.activeDependencies}, dependents ${entry.activeDependents}]`;
+  return `${entry.rank}. ${entry.item.id}: ${escapeLine(entry.item.title)} - ${entry.item.whyNow} [score ${formatScoreValue(entry.item.rankingScore)}; confidence ${entry.item.confidence}; evidence ${entry.item.rankingReasons.join(", ")}; deps ${entry.activeDependencies}, dependents ${entry.activeDependents}]`;
 }
 
 export function renderMarkdownBrief(brief: AgentBrief): string {
@@ -625,7 +775,7 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   }
   lines.push("## Next Work", "");
   if (brief.next.length === 0) lines.push("_No open work matched the filters._");
-  for (const item of brief.next) lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) - ${item.whyNow}`);
+  for (const item of brief.next) lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) - ${item.whyNow}; score ${item.rankingScore}; confidence ${item.confidence}`);
   lines.push("", "## Focus", "");
   if (brief.focus.length === 0) lines.push("_No focus items._");
   for (const item of brief.focus) {
@@ -652,6 +802,49 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   return `${lines.join("\n")}\n`;
 }
 
+export function renderAgentPrompt(brief: AgentBrief): string {
+  const lines: string[] = [
+    "You are continuing work in a pm-managed project.",
+    "",
+    "Use pm as the source of truth. Before editing, inspect the listed item(s), keep pm history current, and update or close items with concrete evidence after verification.",
+    "",
+    "Context budget:",
+    `- requested=${brief.budget.requestedTokens} estimated=${brief.budget.estimatedTokens} truncated=${brief.budget.truncated}`,
+    `- workspace=${brief.workspace.root} pm=${brief.workspace.pmVersion} items=${brief.workspace.itemCount}`,
+    "",
+    "Next work:",
+  ];
+  if (brief.next.length === 0) lines.push("- No open work matched the filters.");
+  for (const item of brief.next) {
+    lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) because ${item.whyNow}; score=${item.rankingScore}; confidence=${item.confidence}`);
+  }
+  lines.push("", "Focus context:");
+  if (brief.focus.length === 0) lines.push("- No explicit focus item.");
+  for (const item of brief.focus.slice(0, 5)) {
+    const context = item.requiredContext.length > 0 ? ` context=${item.requiredContext.join(",")}` : "";
+    lines.push(`- ${item.id}: ${escapeLine(item.title)}${context}`);
+  }
+  lines.push("", "Blockers and risks:");
+  if (brief.blockers.length === 0 && brief.risks.length === 0) lines.push("- No visible blockers or metadata risks.");
+  for (const blocker of brief.blockers.slice(0, 5)) {
+    const label = blocker.title ? `${blocker.blockedBy} ${escapeLine(blocker.title)}` : blocker.blockedBy;
+    lines.push(`- blocker: ${blocker.itemId} ${blocker.kind} ${label}`);
+  }
+  for (const risk of brief.risks.slice(0, 5)) {
+    lines.push(`- ${risk.severity} risk: ${risk.itemId} ${risk.reason}`);
+  }
+  lines.push("", "Suggested pm commands:");
+  if (brief.recommendedPmUpdates.length === 0) lines.push("- No suggested pm updates.");
+  for (const update of brief.recommendedPmUpdates.slice(0, 5)) {
+    lines.push(`- ${update.command} # ${update.reason}`);
+  }
+  lines.push("", "Working rules:");
+  lines.push("- Do not assume context outside pm items and linked files.");
+  lines.push("- Prefer the highest-ranked unblocked prerequisite before dependent work.");
+  lines.push("- Record meaningful decisions, tests, and blockers in pm before handing off.");
+  return `${lines.join("\n")}\n`;
+}
+
 export function readPmItems(pmRoot: string): PmItem[] {
   const result = spawnSync("pm", ["--path", pmRoot, "list-all", "--json", "--include-body"], {
     encoding: "utf-8",
@@ -670,8 +863,8 @@ function pmVersion(): string {
 
 function registerCommands(api: any): void {
   const commonFlags = [
-    { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens, default: 4000)", type: "string" },
-    { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget", type: "string" },
+    { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
+    { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--focus", value_name: "id", description: "Focus item id (repeatable or comma-separated)", type: "string" },
     { long: "--status", value_name: "status", description: "Statuses to include (comma-separated)", type: "string" },
     { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
@@ -705,9 +898,40 @@ function registerCommands(api: any): void {
       });
       const output = format === "json" ? `${JSON.stringify(brief, null, 2)}\n` : renderMarkdownBrief(brief);
       const outputPath = readString(options, "output");
-      if (outputPath) writeFileSync(outputPath, output, "utf-8");
-      else console.error(output.trimEnd());
-      return format === "json" ? brief : { ok: true, format, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+      if (outputPath) {
+        writeFileSync(outputPath, output, "utf-8");
+        return { ok: true, format, output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+      }
+      return renderedCommandResult(output);
+    },
+  });
+  api.registerCommand({
+    name: "brief prompt",
+    description: "Render a compact copy-pasteable agent handoff prompt from pm state.",
+    intent: "turn pm state into executable next-turn instructions for coding agents",
+    examples: ["pm brief prompt", "pm brief prompt --focus pm-1234 --max-tokens 2000", "pm brief prompt --dependency-order --output HANDOFF.md"],
+    flags: commonFlags.filter((flag) => flag.long !== "--format"),
+    async run(ctx: any) {
+      const options = ctx.options as Record<string, unknown>;
+      const brief = buildBrief(readPmItems(ctx.pm_root), {
+        tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 2500),
+        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
+        focusIds: asArray(options.focus),
+        statuses: asArray(options.status),
+        assignee: readString(options, "assignee"),
+        includeClosed: readBool(options, "include-closed", "includeClosed"),
+        staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
+        generatedAt: new Date().toISOString(),
+        pmRoot: ctx.pm_root,
+        pmVersion: pmVersion(),
+      });
+      const output = renderAgentPrompt(brief);
+      const outputPath = readString(options, "output");
+      if (outputPath) {
+        writeFileSync(outputPath, output, "utf-8");
+        return { ok: true, format: "prompt", output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+      }
+      return renderedCommandResult(output);
     },
   });
   api.registerCommand({
@@ -718,7 +942,8 @@ function registerCommands(api: any): void {
       { long: "--count", short: "-n", value_name: "n", description: "Number of next items (default: 5)", type: "string" },
       { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
       { long: "--dependency-order", description: "Prefer prerequisite work before dependents", type: "boolean" },
-      { long: "--explain", description: "Include score and dependency signals for each ranked item", type: "boolean" },
+      { long: "--explain", description: "Include compact ranking evidence in text output", type: "boolean" },
+      { long: "--confidence", description: "Include ranking confidence in text output", type: "boolean" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
     async run(ctx: any) {
@@ -732,19 +957,22 @@ function registerCommands(api: any): void {
         generatedAt: new Date().toISOString(),
       };
       const allItems = readPmItems(ctx.pm_root);
-      const next = selectNextItems(allItems, nextOptions);
       const explain = readBool(options, "explain");
+      const confidence = readBool(options, "confidence");
       const explained = explain ? explainNextItems(allItems, nextOptions) : [];
+      const next = explain ? explained.map((entry) => entry.item) : selectNextItems(allItems, nextOptions);
       if (format === "json") {
         const payload = explain ? { next, explanations: explained } : { next };
-        console.error(JSON.stringify(payload, null, 2));
-        return { next: next.length, format };
+        return renderedCommandResult(`${JSON.stringify(payload, null, 2)}\n`);
       }
       const textOutput = explain
         ? explained.map((entry) => renderNextExplanationLine(entry)).join("\n")
-        : next.map((item) => `${item.id}: ${item.title} - ${item.whyNow}`).join("\n");
-      console.error(textOutput);
-      return { next: next.length, format };
+        : next.map((item) => {
+          const parts = [`${item.id}: ${escapeLine(item.title)} - ${item.whyNow}`, `score ${item.rankingScore}`];
+          if (confidence) parts.push(`confidence ${item.confidence}`);
+          return parts.join(" | ");
+        }).join("\n");
+      return renderedCommandResult(`${textOutput}\n`);
     },
   });
   api.registerCommand({
@@ -764,11 +992,9 @@ function registerCommands(api: any): void {
         generatedAt: new Date().toISOString(),
       });
       if (format === "json") {
-        console.error(JSON.stringify({ stale }, null, 2));
-        return { stale: stale.length, format };
+        return renderedCommandResult(`${JSON.stringify({ stale }, null, 2)}\n`);
       }
-      console.error(stale.map((item) => `${item.itemId}: ${item.title} - ${item.daysStale} day(s) stale`).join("\n"));
-      return { stale: stale.length, format };
+      return renderedCommandResult(`${stale.map((item) => `${item.itemId}: ${escapeLine(item.title)} - ${item.daysStale} day(s) stale`).join("\n")}\n`);
     },
   });
 }
@@ -779,5 +1005,9 @@ export default defineExtension({
   description: "Token-budgeted agent briefs and next-work plans for pm workspaces",
   activate(api: any) {
     registerCommands(api);
+    if (typeof api.registerRenderer === "function") {
+      api.registerRenderer("toon", renderCommandResult);
+      api.registerRenderer("json", renderCommandResult);
+    }
   },
 });

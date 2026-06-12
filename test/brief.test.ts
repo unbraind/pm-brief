@@ -6,6 +6,7 @@ import extension, {
   explainNextItems,
   extractRelationships,
   renderMarkdownBrief,
+  renderAgentPrompt,
   selectNextItems,
   summarizeRisks,
   type PmItem,
@@ -54,7 +55,10 @@ const items: PmItem[] = [
 test("extension registers brief commands", () => {
   const commands: Array<Record<string, unknown>> = [];
   extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief next", "brief stale"]);
+  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale"]);
+  const nextFlags = commands.find((command) => command.name === "brief next")?.flags as Array<Record<string, unknown>>;
+  assert.ok(nextFlags.some((flag) => flag.long === "--explain"));
+  assert.ok(nextFlags.some((flag) => flag.long === "--confidence"));
 });
 
 test("brief next command exposes explain flag", () => {
@@ -74,6 +78,41 @@ test("selectNextItems ranks unblocked priority before blocked work", () => {
   const next = selectNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
   assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-c", "pm-a"]);
   assert.equal(next[2]?.whyNow, "blocked: resolve prerequisite before implementation");
+});
+
+test("selectNextItems includes evidence-weighted ranking details", () => {
+  const next = selectNextItems([
+    ...items,
+    {
+      id: "pm-e",
+      title: "Finish release gate",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-04T00:00:00Z",
+      release: "2026.6.12",
+      deadline: "2026-06-10T00:00:00Z",
+      files: [{ path: "package.json" }, { path: "CHANGELOG.md" }],
+    },
+  ], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 5 });
+  const releaseGate = next.find((item) => item.id === "pm-e");
+  assert.ok(releaseGate);
+  assert.ok(releaseGate.rankingScore > 0);
+  assert.ok(releaseGate.confidence >= 70);
+  assert.ok(releaseGate.rankingReasons.includes("unblocked"));
+  assert.ok(releaseGate.rankingReasons.includes("release:2026.6.12"));
+  assert.ok(releaseGate.rankingReasons.includes("linked_evidence:2"));
+
+  const duplicateEvidence = selectNextItems([{
+    id: "pm-link",
+    title: "Avoid duplicate evidence",
+    type: "Task",
+    status: "open",
+    priority: 1,
+    docs: ["docs/context.md"],
+    files: [{ path: "docs/context.md" }],
+  }], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 1 });
+  assert.ok(duplicateEvidence[0]?.rankingReasons.includes("linked_evidence:1"));
 });
 
 test("selectNextItems supports dependency-first ordering for prerequisite planning", () => {
@@ -113,12 +152,95 @@ test("selectNextItems supports dependency-first ordering for prerequisite planni
   assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-a", "pm-c"]);
 });
 
+test("selectNextItems does not penalize work blocked only by closed items", () => {
+  const next = selectNextItems([
+    {
+      id: "pm-y",
+      title: "Continue implementation",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-05T00:00:00Z",
+      blocked_by: [{ id: "pm-z", kind: "blocked_by" }],
+    },
+    {
+      id: "pm-z",
+      title: "Closed prerequisite",
+      type: "Task",
+      status: "closed",
+      priority: 1,
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+  ], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 1 });
+  assert.equal(next[0]?.id, "pm-y");
+  assert.equal(next[0]?.whyNow, "priority 1");
+  assert.ok(next[0]?.rankingReasons.includes("unblocked"));
+  assert.ok(!next[0]?.rankingReasons.some((reason) => reason.startsWith("blocked_by_active_dependency")));
+});
+
+test("selectNextItems keeps overdue deadlines more urgent than due-today deadlines", () => {
+  const next = selectNextItems([
+    {
+      id: "pm-overdue",
+      title: "Overdue release gate",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-05T00:00:00Z",
+      deadline: "2026-06-05T00:00:00Z",
+    },
+    {
+      id: "pm-today",
+      title: "Due today release gate",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-05T00:00:00Z",
+      deadline: "2026-06-06T23:00:00Z",
+    },
+  ], { generatedAt: "2026-06-06T12:00:00Z", nextCount: 2 });
+  assert.deepEqual(next.map((item) => item.id), ["pm-overdue", "pm-today"]);
+  assert.ok((next[0]?.rankingScore ?? 0) > (next[1]?.rankingScore ?? 0));
+  assert.ok(next[0]?.rankingReasons.some((reason) => reason.startsWith("deadline_overdue:")));
+});
+
 test("explainNextItems provides score breakdown and dependency signals", () => {
   const explained = explainNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
   assert.deepEqual(explained.map((entry) => entry.item.id), ["pm-b", "pm-c", "pm-a"]);
   assert.equal(explained[0]?.activeDependents, 1);
-  assert.equal(explained[2]?.score.blocked, 100);
-  assert.ok((explained[2]?.score.total ?? 0) > (explained[1]?.score.total ?? 0));
+  assert.equal(explained[2]?.score.blocked, -80);
+  assert.ok((explained[2]?.score.total ?? 0) < (explained[1]?.score.total ?? 0));
+  for (const entry of explained) {
+    const { total, ...components } = entry.score;
+    const componentTotal = Object.values(components).reduce((sum, value) => sum + value, 0);
+    assert.equal(total, Math.round(componentTotal));
+  }
+});
+
+test("explainNextItems deduplicates repeated relationship signals", () => {
+  const explained = explainNextItems([
+    {
+      id: "pm-work",
+      title: "Implement duplicate relationship handling",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      deps: ["pm-dep", "pm-dep"],
+    },
+    {
+      id: "pm-dep",
+      title: "Single prerequisite",
+      type: "Task",
+      status: "open",
+      priority: 2,
+    },
+  ], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 2 });
+  const work = explained.find((entry) => entry.item.id === "pm-work");
+  assert.ok(work);
+  assert.equal(work.activeDependencies, 1);
+  assert.deepEqual(work.item.dependencyIds, ["pm-dep"]);
+  assert.deepEqual(work.item.requiredContext, ["dependency:pm-dep"]);
+  assert.equal(work.score.dependencies, -20);
 });
 
 test("detectStaleContext reports stale open work only", () => {
@@ -183,6 +305,7 @@ test("renderMarkdownBrief emits stable agent sections", () => {
   }));
   assert.match(markdown, /^# pm brief/);
   assert.match(markdown, /## Next Work/);
+  assert.match(markdown, /score \d+; confidence \d+/);
   assert.match(markdown, /pm-a blocked_by pm-b Approve changelog \(open\)/);
   assert.match(markdown, /Recommended PM Updates/);
 });
@@ -195,4 +318,36 @@ test("renderMarkdownBrief includes brief insights section when available", () =>
   assert.match(markdown, /## Brief Insights/);
   assert.match(markdown, /requested focus id\(s\) were not found/);
   assert.match(markdown, /suggestion: `pm show pm-missing`/);
+});
+
+test("renderAgentPrompt emits copy-pasteable next-turn instructions", () => {
+  const prompt = renderAgentPrompt(buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-a"],
+    pmVersion: "2026.6.12",
+    tokenBudget: 2500,
+  }));
+  assert.match(prompt, /^You are continuing work in a pm-managed project\./);
+  assert.match(prompt, /Next work:/);
+  assert.match(prompt, /pm-b: Approve changelog/);
+  assert.match(prompt, /score=\d+; confidence=\d+/);
+  assert.match(prompt, /Suggested pm commands:/);
+  assert.match(prompt, /pm append pm-c/);
+  assert.match(prompt, /Record meaningful decisions, tests, and blockers in pm before handing off\./);
+
+  const deduped = renderAgentPrompt(buildBrief([
+    {
+      id: "pm-context",
+      title: "Condense duplicate context",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      docs: ["docs/context.md"],
+      files: [{ path: "docs/context.md" }],
+    },
+  ], {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-context"],
+  }));
+  assert.equal(deduped.match(/docs\/context\.md/g)?.length, 1);
 });
