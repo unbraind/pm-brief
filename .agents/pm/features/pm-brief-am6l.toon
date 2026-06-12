@@ -6,8 +6,9 @@ status: closed
 priority: 1
 tags[3]: agent-context,context-management,handoff
 created_at: "2026-06-12T13:54:16.694Z"
-updated_at: "2026-06-12T14:54:39.782Z"
+updated_at: "2026-06-12T15:35:40.172Z"
 author: unknown
+estimated_minutes: 45
 acceptance_criteria: pm brief prompt exists; output is deterministic and token-aware; tests cover prompt rendering and command registration; README documents usage; release check passes.
 resolution: Agent handoff prompt command and renderer added.
 expected_result: Agents can generate a compact copy-pasteable handoff prompt from pm state.

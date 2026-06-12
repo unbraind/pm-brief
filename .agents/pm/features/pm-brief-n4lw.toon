@@ -6,9 +6,11 @@ status: in_progress
 priority: 1
 tags[3]: ecosystem,ecosystem-pass-2026-06-10,production
 created_at: "2026-06-09T22:37:54.700Z"
-updated_at: "2026-06-09T23:23:00.899Z"
+updated_at: "2026-06-12T15:35:39.712Z"
 assignee: codex-5-3-sweep
 author: codex-5-3-sweep
+estimated_minutes: 180
+acceptance_criteria: "pm-brief is audited against the pm ecosystem standards; agent-facing commands are production-ready; dependency, changelog, release, and validation findings are tracked in pm; release checks pass."
 files[3]{path,scope,note}:
   index.ts,project,add explainable ranking output
   README.md,project,document explain mode

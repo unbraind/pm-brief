@@ -315,7 +315,7 @@ function objectLinkPaths(value: unknown): string[] {
 }
 
 function linksFor(item: PmItem): string[] {
-  return [...objectLinkPaths(item.docs), ...objectLinkPaths(item.files)].slice(0, 6);
+  return uniqueStrings([...objectLinkPaths(item.docs), ...objectLinkPaths(item.files)]).slice(0, 6);
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -863,8 +863,8 @@ function pmVersion(): string {
 
 function registerCommands(api: any): void {
   const commonFlags = [
-    { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens, default: 4000)", type: "string" },
-    { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget", type: "string" },
+    { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
+    { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--focus", value_name: "id", description: "Focus item id (repeatable or comma-separated)", type: "string" },
     { long: "--status", value_name: "status", description: "Statuses to include (comma-separated)", type: "string" },
     { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },

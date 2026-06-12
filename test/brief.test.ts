@@ -102,6 +102,17 @@ test("selectNextItems includes evidence-weighted ranking details", () => {
   assert.ok(releaseGate.rankingReasons.includes("unblocked"));
   assert.ok(releaseGate.rankingReasons.includes("release:2026.6.12"));
   assert.ok(releaseGate.rankingReasons.includes("linked_evidence:2"));
+
+  const duplicateEvidence = selectNextItems([{
+    id: "pm-link",
+    title: "Avoid duplicate evidence",
+    type: "Task",
+    status: "open",
+    priority: 1,
+    docs: ["docs/context.md"],
+    files: [{ path: "docs/context.md" }],
+  }], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 1 });
+  assert.ok(duplicateEvidence[0]?.rankingReasons.includes("linked_evidence:1"));
 });
 
 test("selectNextItems supports dependency-first ordering for prerequisite planning", () => {

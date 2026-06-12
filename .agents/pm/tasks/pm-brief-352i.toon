@@ -6,8 +6,9 @@ status: in_progress
 priority: 1
 tags[3]: agent-context,dependency-alignment,release-readiness
 created_at: "2026-06-12T11:53:20.269Z"
-updated_at: "2026-06-12T14:01:38.051Z"
+updated_at: "2026-06-12T15:35:39.949Z"
 author: unknown
+estimated_minutes: 60
 acceptance_criteria: Latest pm CLI/SDK dependency is used; pm-changelog release scripts are present where applicable; package tests and release checks pass or blockers are recorded; no private data is introduced; results are captured in pm history.
 notes[1]{created_at,author,text}:
   "2026-06-12T14:01:38.051Z",unknown,"Verified release readiness after moving @unbrained/pm-cli to runtime dependencies: npm release:check completed for the fleet on 2026-06-12; npm audit retries for pm-beads and pm-jira returned 0 vulnerabilities after transient advisory endpoint failures."
