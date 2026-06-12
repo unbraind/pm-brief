@@ -303,14 +303,7 @@ function linksFor(item: PmItem): string[] {
 }
 
 function uniqueStrings(values: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const value of values) {
-    if (seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
-  }
-  return result;
+  return [...new Set(values)];
 }
 
 function isBlockingRelationship(rel: Relationship): boolean {
@@ -484,9 +477,8 @@ function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
     .filter((item) => !options.statuses?.length || options.statuses.includes(statusOf(item)));
 }
 
-function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[]): RankedCandidate[] {
+function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[], activeIds = activeItemIds(items)): RankedCandidate[] {
   const candidates = filterCandidates(items, options);
-  const activeIds = activeItemIds(items);
   return candidates
     .map((item) => {
       const rank = rankItem(item, rels, activeIds, now);
@@ -510,19 +502,21 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
 export function selectNextItems(items: PmItem[], options: BriefOptions = {}): BriefItem[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const rels = items.flatMap(extractRelationships);
-  return rankCandidates(items, options, now, rels)
+  const activeIds = activeItemIds(items);
+  return rankCandidates(items, options, now, rels, activeIds)
     .slice(0, options.nextCount ?? 5)
-    .map((candidate) => toBriefItem(candidate.item, rels, items, now, undefined, candidate.rank));
+    .map((candidate) => toBriefItem(candidate.item, rels, items, now, activeIds, candidate.rank));
 }
 
 export function explainNextItems(items: PmItem[], options: BriefOptions = {}): NextItemExplanation[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const rels = items.flatMap(extractRelationships);
-  return rankCandidates(items, options, now, rels)
+  const activeIds = activeItemIds(items);
+  return rankCandidates(items, options, now, rels, activeIds)
     .slice(0, options.nextCount ?? 5)
     .map((candidate, index) => ({
       rank: index + 1,
-      item: toBriefItem(candidate.item, rels, items, now, undefined, candidate.rank),
+      item: toBriefItem(candidate.item, rels, items, now, activeIds, candidate.rank),
       score: candidate.score,
       activeDependencies: candidate.activeDependencies,
       activeDependents: candidate.activeDependents,
@@ -957,7 +951,7 @@ function registerCommands(api: any): void {
       const textOutput = explain
         ? explained.map((entry) => renderNextExplanationLine(entry)).join("\n")
         : next.map((item) => {
-          const parts = [`${item.id}: ${item.title} - ${item.whyNow}`, `score ${item.rankingScore}`];
+          const parts = [`${item.id}: ${escapeLine(item.title)} - ${item.whyNow}`, `score ${item.rankingScore}`];
           if (confidence) parts.push(`confidence ${item.confidence}`);
           return parts.join(" | ");
         }).join("\n");
