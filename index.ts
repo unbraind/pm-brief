@@ -181,8 +181,22 @@ interface RankEvidence {
   activeDependents: number;
 }
 
+interface RenderedCommandResult {
+  pmBriefRendered: true;
+  output: string;
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function renderedCommandResult(output: string): RenderedCommandResult {
+  return { pmBriefRendered: true, output: output.endsWith("\n") ? output : `${output}\n` };
+}
+
+function renderCommandResult(context: { result?: unknown }): string | null {
+  const result = context.result as Partial<RenderedCommandResult> | null | undefined;
+  return result?.pmBriefRendered === true && typeof result.output === "string" ? result.output : null;
 }
 
 function asArray(value: unknown): string[] {
@@ -463,11 +477,11 @@ function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<strin
 }
 
 function activeDependencyCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return uniqueStrings(rels.filter((rel) => rel.from === item.id && activeIds.has(rel.to)).map((rel) => rel.to)).length;
+  return uniqueStrings(rels.filter((rel) => rel.from === item.id && isBlockingRelationship(rel) && activeIds.has(rel.to)).map((rel) => rel.to)).length;
 }
 
 function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return uniqueStrings(rels.filter((rel) => rel.to === item.id && activeIds.has(rel.from)).map((rel) => rel.from)).length;
+  return uniqueStrings(rels.filter((rel) => rel.to === item.id && isBlockingRelationship(rel) && activeIds.has(rel.from)).map((rel) => rel.from)).length;
 }
 
 function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
@@ -884,9 +898,11 @@ function registerCommands(api: any): void {
       });
       const output = format === "json" ? `${JSON.stringify(brief, null, 2)}\n` : renderMarkdownBrief(brief);
       const outputPath = readString(options, "output");
-      if (outputPath) writeFileSync(outputPath, output, "utf-8");
-      else console.error(output.trimEnd());
-      return format === "json" ? brief : { ok: true, format, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+      if (outputPath) {
+        writeFileSync(outputPath, output, "utf-8");
+        return { ok: true, format, output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+      }
+      return renderedCommandResult(output);
     },
   });
   api.registerCommand({
@@ -911,9 +927,11 @@ function registerCommands(api: any): void {
       });
       const output = renderAgentPrompt(brief);
       const outputPath = readString(options, "output");
-      if (outputPath) writeFileSync(outputPath, output, "utf-8");
-      else console.error(output.trimEnd());
-      return { ok: true, format: "prompt", next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+      if (outputPath) {
+        writeFileSync(outputPath, output, "utf-8");
+        return { ok: true, format: "prompt", output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+      }
+      return renderedCommandResult(output);
     },
   });
   api.registerCommand({
@@ -945,8 +963,7 @@ function registerCommands(api: any): void {
       const next = explain ? explained.map((entry) => entry.item) : selectNextItems(allItems, nextOptions);
       if (format === "json") {
         const payload = explain ? { next, explanations: explained } : { next };
-        console.error(JSON.stringify(payload, null, 2));
-        return { next: next.length, format };
+        return renderedCommandResult(`${JSON.stringify(payload, null, 2)}\n`);
       }
       const textOutput = explain
         ? explained.map((entry) => renderNextExplanationLine(entry)).join("\n")
@@ -955,8 +972,7 @@ function registerCommands(api: any): void {
           if (confidence) parts.push(`confidence ${item.confidence}`);
           return parts.join(" | ");
         }).join("\n");
-      console.error(textOutput);
-      return { next: next.length, format };
+      return renderedCommandResult(`${textOutput}\n`);
     },
   });
   api.registerCommand({
@@ -976,11 +992,9 @@ function registerCommands(api: any): void {
         generatedAt: new Date().toISOString(),
       });
       if (format === "json") {
-        console.error(JSON.stringify({ stale }, null, 2));
-        return { stale: stale.length, format };
+        return renderedCommandResult(`${JSON.stringify({ stale }, null, 2)}\n`);
       }
-      console.error(stale.map((item) => `${item.itemId}: ${item.title} - ${item.daysStale} day(s) stale`).join("\n"));
-      return { stale: stale.length, format };
+      return renderedCommandResult(`${stale.map((item) => `${item.itemId}: ${escapeLine(item.title)} - ${item.daysStale} day(s) stale`).join("\n")}\n`);
     },
   });
 }
@@ -991,5 +1005,9 @@ export default defineExtension({
   description: "Token-budgeted agent briefs and next-work plans for pm workspaces",
   activate(api: any) {
     registerCommands(api);
+    if (typeof api.registerRenderer === "function") {
+      api.registerRenderer("toon", renderCommandResult);
+      api.registerRenderer("json", renderCommandResult);
+    }
   },
 });
