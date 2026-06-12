@@ -177,6 +177,8 @@ interface RankEvidence {
   confidence: number;
   reasons: string[];
   blocked: boolean;
+  activeDependencies: number;
+  activeDependents: number;
 }
 
 function text(value: unknown): string {
@@ -386,7 +388,7 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
 
   // Baseline 35 means "some pm metadata exists"; reasons, links, and timestamps raise confidence.
   const confidence = Math.max(15, Math.min(100, 35 + reasons.length * 8 + Math.min(links, 4) * 5 + (itemUpdatedAt(item) ? 8 : 0)));
-  return { score: Math.round(score), confidence, reasons, blocked };
+  return { score: Math.round(score), confidence, reasons, blocked, activeDependencies: deps, activeDependents: fanout };
 }
 
 function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
@@ -438,11 +440,9 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
 function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date, rank = rankItem(item, rels, activeIds, now)): NextItemScoreBreakdown {
   const priority = typeof item.priority === "number" ? item.priority : 5;
   const priorityScore = Math.max(0, 100 - priority * 15);
-  const deps = activeDependencyCount(item, rels, activeIds);
-  const fanout = activeDependentCount(item, rels, activeIds);
   const blockedScore = rank.blocked ? -80 : 45;
-  const dependencyScore = deps > 0 ? deps * -20 : 0;
-  const dependentScore = fanout > 0 ? fanout * 8 : 0;
+  const dependencyScore = rank.activeDependencies > 0 ? rank.activeDependencies * -20 : 0;
+  const dependentScore = rank.activeDependents > 0 ? rank.activeDependents * 8 : 0;
   const activeBoost = statusOf(item).toLowerCase() === "in_progress" ? 20 : 0;
   const staleScore = Math.min(ageDays(item, now), 30) * 1.5;
   const linkedEvidenceScore = Math.min(linksFor(item).length, 4) * 6;
@@ -486,8 +486,8 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
         item,
         rank,
         score: scoreBreakdown(item, rels, activeIds, now, rank),
-        activeDependencies: activeDependencyCount(item, rels, activeIds),
-        activeDependents: activeDependentCount(item, rels, activeIds),
+        activeDependencies: rank.activeDependencies,
+        activeDependents: rank.activeDependents,
       };
     })
     .sort((a, b) => {
