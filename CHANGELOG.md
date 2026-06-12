@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.6.10 - 2026-06-12
+
+### Added
+
+- Add agent handoff prompt command to pm-brief ([pm-brief-am6l](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-am6l.toon))
+- Add evidence-weighted next-action ranking ([pm-brief-6xr0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-6xr0.toon))
+
 ## 2026.06.09 - 2026-06-09
 
 ### Added

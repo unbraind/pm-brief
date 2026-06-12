@@ -141,6 +141,32 @@ test("selectNextItems supports dependency-first ordering for prerequisite planni
   assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-a", "pm-c"]);
 });
 
+test("selectNextItems does not penalize work blocked only by closed items", () => {
+  const next = selectNextItems([
+    {
+      id: "pm-y",
+      title: "Continue implementation",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-05T00:00:00Z",
+      blocked_by: [{ id: "pm-z", kind: "blocked_by" }],
+    },
+    {
+      id: "pm-z",
+      title: "Closed prerequisite",
+      type: "Task",
+      status: "closed",
+      priority: 1,
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+  ], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 1 });
+  assert.equal(next[0]?.id, "pm-y");
+  assert.equal(next[0]?.whyNow, "priority 1");
+  assert.ok(next[0]?.rankingReasons.includes("unblocked"));
+  assert.ok(!next[0]?.rankingReasons.some((reason) => reason.startsWith("blocked_by_active_dependency")));
+});
+
 test("explainNextItems provides score breakdown and dependency signals", () => {
   const explained = explainNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
   assert.deepEqual(explained.map((entry) => entry.item.id), ["pm-b", "pm-c", "pm-a"]);

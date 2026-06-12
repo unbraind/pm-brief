@@ -311,10 +311,10 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
 
   const deps = activeDependencyCount(item, rels, activeIds);
   const fanout = activeDependentCount(item, rels, activeIds);
-  const blocked = rels.some((rel) => rel.from === item.id && isBlockingRelationship(rel));
+  const blocked = deps > 0 && rels.some((rel) => rel.from === item.id && isBlockingRelationship(rel) && activeIds.has(rel.to));
   if (blocked) {
     score -= 80;
-    reasons.push(`blocked_by_active_dependency:${deps || 1}`);
+    reasons.push(`blocked_by_active_dependency:${deps}`);
   } else {
     score += 45;
     reasons.push("unblocked");
@@ -364,11 +364,12 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
     }
   }
 
+  // Baseline 35 means "some pm metadata exists"; reasons, links, and timestamps raise confidence.
   const confidence = Math.max(15, Math.min(100, 35 + reasons.length * 8 + Math.min(links, 4) * 5 + (itemUpdatedAt(item) ? 8 : 0)));
   return { score: Math.round(score), confidence, reasons, blocked };
 }
 
-function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds = new Set(allItems.filter((candidate) => !isClosed(candidate)).map((candidate) => candidate.id))): BriefItem {
+function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
   const dependencyIds = rels.filter((rel) => rel.from === item.id).map((rel) => rel.to);
   const dependentIds = rels.filter((rel) => rel.to === item.id).map((rel) => rel.from);
   const stale = ageDays(item, now);
@@ -378,7 +379,7 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     ...linksFor(item),
   ].slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
-  const rank = rankItem(item, rels, activeIds, now);
+  const rank = rankOverride ?? rankItem(item, rels, activeIds ?? new Set(allItems.filter((candidate) => !isClosed(candidate)).map((candidate) => candidate.id)), now);
   const whyNow = rank.blocked
     ? "blocked: resolve prerequisite before implementation"
     : priority !== undefined
@@ -447,7 +448,7 @@ function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
 
 function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[]): RankedCandidate[] {
   const candidates = filterCandidates(items, options);
-  const activeIds = new Set(candidates.map((item) => item.id));
+  const activeIds = new Set(items.filter((item) => !isClosed(item)).map((item) => item.id));
   return candidates
     .map((item) => ({
       item,
@@ -470,7 +471,7 @@ export function selectNextItems(items: PmItem[], options: BriefOptions = {}): Br
   const rels = items.flatMap(extractRelationships);
   return rankCandidates(items, options, now, rels)
     .slice(0, options.nextCount ?? 5)
-    .map(({ item }) => toBriefItem(item, rels, items, now));
+    .map((candidate) => toBriefItem(candidate.item, rels, items, now, undefined, candidate.rank));
 }
 
 export function explainNextItems(items: PmItem[], options: BriefOptions = {}): NextItemExplanation[] {
@@ -480,7 +481,7 @@ export function explainNextItems(items: PmItem[], options: BriefOptions = {}): N
     .slice(0, options.nextCount ?? 5)
     .map((candidate, index) => ({
       rank: index + 1,
-      item: toBriefItem(candidate.item, rels, items, now),
+      item: toBriefItem(candidate.item, rels, items, now, undefined, candidate.rank),
       score: candidate.score,
       activeDependencies: candidate.activeDependencies,
       activeDependents: candidate.activeDependents,
@@ -764,7 +765,7 @@ export function renderAgentPrompt(brief: AgentBrief): string {
     "Next work:",
   ];
   if (brief.next.length === 0) lines.push("- No open work matched the filters.");
-  for (const item of brief.next.slice(0, 5)) {
+  for (const item of brief.next) {
     lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) because ${item.whyNow}; score=${item.rankingScore}; confidence=${item.confidence}`);
   }
   lines.push("", "Focus context:");
