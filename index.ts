@@ -66,6 +66,9 @@ export interface BriefItem {
   assignee?: string;
   tags: string[];
   whyNow: string;
+  rankingScore: number;
+  confidence: number;
+  rankingReasons: string[];
   requiredContext: string[];
   dependencyIds: string[];
   dependentIds: string[];
@@ -152,6 +155,7 @@ interface Relationship {
 
 interface RankedCandidate {
   item: PmItem;
+  rank: RankEvidence;
   score: NextItemScoreBreakdown;
   activeDependencies: number;
   activeDependents: number;
@@ -161,6 +165,13 @@ interface FocusSelection {
   items: PmItem[];
   missingIds: string[];
   closedExcludedIds: string[];
+}
+
+interface RankEvidence {
+  score: number;
+  confidence: number;
+  reasons: string[];
+  blocked: boolean;
 }
 
 function text(value: unknown): string {
@@ -270,11 +281,94 @@ function ageDays(item: PmItem, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - time) / 86_400_000));
 }
 
-function linksFor(item: PmItem): string[] {
-  return [...asArray(item.docs), ...asArray(item.files)].slice(0, 6);
+function objectLinkPaths(value: unknown): string[] {
+  if (!value) return [];
+  if (typeof value === "string") return asArray(value);
+  if (Array.isArray(value)) return value.flatMap(objectLinkPaths);
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const path = text(record.path) || text(record.url) || text(record.href) || text(record.id);
+    return path ? [path] : [];
+  }
+  return [];
 }
 
-function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date): BriefItem {
+function linksFor(item: PmItem): string[] {
+  return [...objectLinkPaths(item.docs), ...objectLinkPaths(item.files)].slice(0, 6);
+}
+
+function isBlockingRelationship(rel: Relationship): boolean {
+  return rel.kind === "blocked_by" || rel.kind === "depends_on";
+}
+
+function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date): RankEvidence {
+  const reasons: string[] = [];
+  let score = 0;
+  const priority = typeof item.priority === "number" ? item.priority : 5;
+  const priorityScore = Math.max(0, 100 - priority * 15);
+  score += priorityScore;
+  reasons.push(`priority:${priority}`);
+
+  const deps = activeDependencyCount(item, rels, activeIds);
+  const fanout = activeDependentCount(item, rels, activeIds);
+  const blocked = rels.some((rel) => rel.from === item.id && isBlockingRelationship(rel));
+  if (blocked) {
+    score -= 80;
+    reasons.push(`blocked_by_active_dependency:${deps || 1}`);
+  } else {
+    score += 45;
+    reasons.push("unblocked");
+  }
+  if (deps > 0) {
+    score -= deps * 20;
+    reasons.push(`active_dependencies:${deps}`);
+  }
+  if (fanout > 0) {
+    score += fanout * 8;
+    reasons.push(`unblocks_dependents:${fanout}`);
+  }
+
+  const status = statusOf(item).toLowerCase();
+  if (status === "in_progress") {
+    score += 20;
+    reasons.push("already_in_progress");
+  }
+
+  const stale = ageDays(item, now);
+  if (stale > 0) {
+    score += Math.min(stale, 30) * 1.5;
+    reasons.push(`stale_days:${stale}`);
+  }
+
+  const links = linksFor(item).length;
+  if (links > 0) {
+    score += Math.min(links, 4) * 6;
+    reasons.push(`linked_evidence:${links}`);
+  }
+
+  if (text(item.release)) {
+    score += 10;
+    reasons.push(`release:${text(item.release)}`);
+  }
+  if (item.deadline) {
+    const deadlineTime = Date.parse(item.deadline);
+    if (Number.isFinite(deadlineTime)) {
+      const daysUntilDeadline = Math.ceil((deadlineTime - now.getTime()) / 86_400_000);
+      if (daysUntilDeadline < 0) {
+        score += 12;
+        reasons.push(`deadline_overdue:${Math.abs(daysUntilDeadline)}d`);
+      } else if (daysUntilDeadline <= 14) {
+        score += 20 - daysUntilDeadline;
+        reasons.push(`deadline_soon:${daysUntilDeadline}d`);
+      }
+    }
+  }
+
+  const confidence = Math.max(15, Math.min(100, 35 + reasons.length * 8 + Math.min(links, 4) * 5 + (itemUpdatedAt(item) ? 8 : 0)));
+  return { score: Math.round(score), confidence, reasons, blocked };
+}
+
+function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds = new Set(allItems.filter((candidate) => !isClosed(candidate)).map((candidate) => candidate.id))): BriefItem {
   const dependencyIds = rels.filter((rel) => rel.from === item.id).map((rel) => rel.to);
   const dependentIds = rels.filter((rel) => rel.to === item.id).map((rel) => rel.from);
   const stale = ageDays(item, now);
@@ -284,8 +378,8 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     ...linksFor(item),
   ].slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
-  const blocked = hasVisibleDependencyBlocker(item, rels);
-  const whyNow = blocked
+  const rank = rankItem(item, rels, activeIds, now);
+  const whyNow = rank.blocked
     ? "blocked: resolve prerequisite before implementation"
     : priority !== undefined
       ? `priority ${priority}`
@@ -310,6 +404,9 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     assignee: text(item.assignee) || undefined,
     tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
     whyNow,
+    rankingScore: rank.score,
+    confidence: rank.confidence,
+    rankingReasons: rank.reasons,
     requiredContext,
     dependencyIds,
     dependentIds,
@@ -317,18 +414,19 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
   };
 }
 
-function scoreBreakdown(item: PmItem, rels: Relationship[], now: Date): NextItemScoreBreakdown {
+function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date): NextItemScoreBreakdown {
+  const rank = rankItem(item, rels, activeIds, now);
   const priority = typeof item.priority === "number" ? item.priority : 5;
-  const priorityScore = priority * 10;
-  const blockedPenalty = hasVisibleDependencyBlocker(item, rels) ? 100 : 0;
-  const activeBoost = statusOf(item).toLowerCase() === "in_progress" ? -10 : 0;
-  const stalePenalty = Math.min(ageDays(item, now), 30) / 10;
+  const priorityScore = Math.max(0, 100 - priority * 15);
+  const blockedScore = rank.blocked ? -80 : 45;
+  const activeBoost = statusOf(item).toLowerCase() === "in_progress" ? 20 : 0;
+  const staleScore = Math.min(ageDays(item, now), 30) * 1.5;
   return {
-    total: priorityScore + blockedPenalty + activeBoost + stalePenalty,
+    total: rank.score,
     priority: priorityScore,
-    blocked: blockedPenalty,
+    blocked: blockedScore,
     active: activeBoost,
-    stale: stalePenalty,
+    stale: staleScore,
   };
 }
 
@@ -353,7 +451,8 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
   return candidates
     .map((item) => ({
       item,
-      score: scoreBreakdown(item, rels, now),
+      rank: rankItem(item, rels, activeIds, now),
+      score: scoreBreakdown(item, rels, activeIds, now),
       activeDependencies: activeDependencyCount(item, rels, activeIds),
       activeDependents: activeDependentCount(item, rels, activeIds),
     }))
@@ -362,7 +461,7 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
         if (a.activeDependencies !== b.activeDependencies) return a.activeDependencies - b.activeDependencies;
         if (a.activeDependents !== b.activeDependents) return b.activeDependents - a.activeDependents;
       }
-      return a.score.total - b.score.total || itemUpdatedAt(b.item).localeCompare(itemUpdatedAt(a.item)) || a.item.id.localeCompare(b.item.id);
+      return b.score.total - a.score.total || itemUpdatedAt(b.item).localeCompare(itemUpdatedAt(a.item)) || a.item.id.localeCompare(b.item.id);
     });
 }
 
@@ -603,7 +702,7 @@ function formatSignedScoreValue(value: number): string {
 }
 
 function renderNextExplanationLine(entry: NextItemExplanation): string {
-  return `${entry.rank}. ${entry.item.id}: ${escapeLine(entry.item.title)} - ${entry.item.whyNow} [score ${formatScoreValue(entry.score.total)} = priority ${formatSignedScoreValue(entry.score.priority)}, blocked ${formatSignedScoreValue(entry.score.blocked)}, active ${formatSignedScoreValue(entry.score.active)}, stale ${formatSignedScoreValue(entry.score.stale)}; deps ${entry.activeDependencies}, dependents ${entry.activeDependents}]`;
+  return `${entry.rank}. ${entry.item.id}: ${escapeLine(entry.item.title)} - ${entry.item.whyNow} [score ${formatScoreValue(entry.item.rankingScore)}; confidence ${entry.item.confidence}; evidence ${entry.item.rankingReasons.join(", ")}; deps ${entry.activeDependencies}, dependents ${entry.activeDependents}]`;
 }
 
 export function renderMarkdownBrief(brief: AgentBrief): string {
@@ -625,7 +724,7 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   }
   lines.push("## Next Work", "");
   if (brief.next.length === 0) lines.push("_No open work matched the filters._");
-  for (const item of brief.next) lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) - ${item.whyNow}`);
+  for (const item of brief.next) lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) - ${item.whyNow}; score ${item.rankingScore}; confidence ${item.confidence}`);
   lines.push("", "## Focus", "");
   if (brief.focus.length === 0) lines.push("_No focus items._");
   for (const item of brief.focus) {
@@ -649,6 +748,49 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`- ${update.itemId}: \`${update.command}\` - ${update.reason}`);
   lines.push("");
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderAgentPrompt(brief: AgentBrief): string {
+  const lines: string[] = [
+    "You are continuing work in a pm-managed project.",
+    "",
+    "Use pm as the source of truth. Before editing, inspect the listed item(s), keep pm history current, and update or close items with concrete evidence after verification.",
+    "",
+    "Context budget:",
+    `- requested=${brief.budget.requestedTokens} estimated=${brief.budget.estimatedTokens} truncated=${brief.budget.truncated}`,
+    `- workspace=${brief.workspace.root} pm=${brief.workspace.pmVersion} items=${brief.workspace.itemCount}`,
+    "",
+    "Next work:",
+  ];
+  if (brief.next.length === 0) lines.push("- No open work matched the filters.");
+  for (const item of brief.next.slice(0, 5)) {
+    lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) because ${item.whyNow}; score=${item.rankingScore}; confidence=${item.confidence}`);
+  }
+  lines.push("", "Focus context:");
+  if (brief.focus.length === 0) lines.push("- No explicit focus item.");
+  for (const item of brief.focus.slice(0, 5)) {
+    const context = item.requiredContext.length > 0 ? ` context=${item.requiredContext.join(",")}` : "";
+    lines.push(`- ${item.id}: ${escapeLine(item.title)}${context}`);
+  }
+  lines.push("", "Blockers and risks:");
+  if (brief.blockers.length === 0 && brief.risks.length === 0) lines.push("- No visible blockers or metadata risks.");
+  for (const blocker of brief.blockers.slice(0, 5)) {
+    const label = blocker.title ? `${blocker.blockedBy} ${escapeLine(blocker.title)}` : blocker.blockedBy;
+    lines.push(`- blocker: ${blocker.itemId} ${blocker.kind} ${label}`);
+  }
+  for (const risk of brief.risks.slice(0, 5)) {
+    lines.push(`- ${risk.severity} risk: ${risk.itemId} ${risk.reason}`);
+  }
+  lines.push("", "Suggested pm commands:");
+  if (brief.recommendedPmUpdates.length === 0) lines.push("- No suggested pm updates.");
+  for (const update of brief.recommendedPmUpdates.slice(0, 5)) {
+    lines.push(`- ${update.command} # ${update.reason}`);
+  }
+  lines.push("", "Working rules:");
+  lines.push("- Do not assume context outside pm items and linked files.");
+  lines.push("- Prefer the highest-ranked unblocked prerequisite before dependent work.");
+  lines.push("- Record meaningful decisions, tests, and blockers in pm before handing off.");
   return `${lines.join("\n")}\n`;
 }
 
@@ -711,6 +853,33 @@ function registerCommands(api: any): void {
     },
   });
   api.registerCommand({
+    name: "brief prompt",
+    description: "Render a compact copy-pasteable agent handoff prompt from pm state.",
+    intent: "turn pm state into executable next-turn instructions for coding agents",
+    examples: ["pm brief prompt", "pm brief prompt --focus pm-1234 --max-tokens 2000", "pm brief prompt --dependency-order --output HANDOFF.md"],
+    flags: commonFlags.filter((flag) => flag.long !== "--format"),
+    async run(ctx: any) {
+      const options = ctx.options as Record<string, unknown>;
+      const brief = buildBrief(readPmItems(ctx.pm_root), {
+        tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 2500),
+        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
+        focusIds: asArray(options.focus),
+        statuses: asArray(options.status),
+        assignee: readString(options, "assignee"),
+        includeClosed: readBool(options, "include-closed", "includeClosed"),
+        staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
+        generatedAt: new Date().toISOString(),
+        pmRoot: ctx.pm_root,
+        pmVersion: pmVersion(),
+      });
+      const output = renderAgentPrompt(brief);
+      const outputPath = readString(options, "output");
+      if (outputPath) writeFileSync(outputPath, output, "utf-8");
+      else console.error(output.trimEnd());
+      return { ok: true, format: "prompt", next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+    },
+  });
+  api.registerCommand({
     name: "brief next",
     description: "Return ranked next work items from pm state.",
     examples: ["pm brief next --count 5", "pm brief next --dependency-order --format json"],
@@ -718,7 +887,8 @@ function registerCommands(api: any): void {
       { long: "--count", short: "-n", value_name: "n", description: "Number of next items (default: 5)", type: "string" },
       { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
       { long: "--dependency-order", description: "Prefer prerequisite work before dependents", type: "boolean" },
-      { long: "--explain", description: "Include score and dependency signals for each ranked item", type: "boolean" },
+      { long: "--explain", description: "Include compact ranking evidence in text output", type: "boolean" },
+      { long: "--confidence", description: "Include ranking confidence in text output", type: "boolean" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
     async run(ctx: any) {
@@ -734,6 +904,7 @@ function registerCommands(api: any): void {
       const allItems = readPmItems(ctx.pm_root);
       const next = selectNextItems(allItems, nextOptions);
       const explain = readBool(options, "explain");
+      const confidence = readBool(options, "confidence");
       const explained = explain ? explainNextItems(allItems, nextOptions) : [];
       if (format === "json") {
         const payload = explain ? { next, explanations: explained } : { next };
@@ -742,7 +913,11 @@ function registerCommands(api: any): void {
       }
       const textOutput = explain
         ? explained.map((entry) => renderNextExplanationLine(entry)).join("\n")
-        : next.map((item) => `${item.id}: ${item.title} - ${item.whyNow}`).join("\n");
+        : next.map((item) => {
+          const parts = [`${item.id}: ${item.title} - ${item.whyNow}`, `score ${item.rankingScore}`];
+          if (confidence) parts.push(`confidence ${item.confidence}`);
+          return parts.join(" | ");
+        }).join("\n");
       console.error(textOutput);
       return { next: next.length, format };
     },

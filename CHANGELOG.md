@@ -1,12 +1,6 @@
 # Changelog
 
-## 2026.6.9 - 2026-06-09
-
-### Added
-
-- Add max-tokens alias and dependency-aware ordering ([pm-brief-nu7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nu7u.toon))
-
-## Unreleased
+## 2026.06.09 - 2026-06-09
 
 ### Added
 

@@ -6,6 +6,7 @@ import extension, {
   explainNextItems,
   extractRelationships,
   renderMarkdownBrief,
+  renderAgentPrompt,
   selectNextItems,
   summarizeRisks,
   type PmItem,
@@ -54,7 +55,10 @@ const items: PmItem[] = [
 test("extension registers brief commands", () => {
   const commands: Array<Record<string, unknown>> = [];
   extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief next", "brief stale"]);
+  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale"]);
+  const nextFlags = commands.find((command) => command.name === "brief next")?.flags as Array<Record<string, unknown>>;
+  assert.ok(nextFlags.some((flag) => flag.long === "--explain"));
+  assert.ok(nextFlags.some((flag) => flag.long === "--confidence"));
 });
 
 test("brief next command exposes explain flag", () => {
@@ -74,6 +78,30 @@ test("selectNextItems ranks unblocked priority before blocked work", () => {
   const next = selectNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
   assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-c", "pm-a"]);
   assert.equal(next[2]?.whyNow, "blocked: resolve prerequisite before implementation");
+});
+
+test("selectNextItems includes evidence-weighted ranking details", () => {
+  const next = selectNextItems([
+    ...items,
+    {
+      id: "pm-e",
+      title: "Finish release gate",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-04T00:00:00Z",
+      release: "2026.6.12",
+      deadline: "2026-06-10T00:00:00Z",
+      files: [{ path: "package.json" }, { path: "CHANGELOG.md" }],
+    },
+  ], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 5 });
+  const releaseGate = next.find((item) => item.id === "pm-e");
+  assert.ok(releaseGate);
+  assert.ok(releaseGate.rankingScore > 0);
+  assert.ok(releaseGate.confidence >= 70);
+  assert.ok(releaseGate.rankingReasons.includes("unblocked"));
+  assert.ok(releaseGate.rankingReasons.includes("release:2026.6.12"));
+  assert.ok(releaseGate.rankingReasons.includes("linked_evidence:2"));
 });
 
 test("selectNextItems supports dependency-first ordering for prerequisite planning", () => {
@@ -117,8 +145,8 @@ test("explainNextItems provides score breakdown and dependency signals", () => {
   const explained = explainNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
   assert.deepEqual(explained.map((entry) => entry.item.id), ["pm-b", "pm-c", "pm-a"]);
   assert.equal(explained[0]?.activeDependents, 1);
-  assert.equal(explained[2]?.score.blocked, 100);
-  assert.ok((explained[2]?.score.total ?? 0) > (explained[1]?.score.total ?? 0));
+  assert.equal(explained[2]?.score.blocked, -80);
+  assert.ok((explained[2]?.score.total ?? 0) < (explained[1]?.score.total ?? 0));
 });
 
 test("detectStaleContext reports stale open work only", () => {
@@ -183,6 +211,7 @@ test("renderMarkdownBrief emits stable agent sections", () => {
   }));
   assert.match(markdown, /^# pm brief/);
   assert.match(markdown, /## Next Work/);
+  assert.match(markdown, /score \d+; confidence \d+/);
   assert.match(markdown, /pm-a blocked_by pm-b Approve changelog \(open\)/);
   assert.match(markdown, /Recommended PM Updates/);
 });
@@ -195,4 +224,20 @@ test("renderMarkdownBrief includes brief insights section when available", () =>
   assert.match(markdown, /## Brief Insights/);
   assert.match(markdown, /requested focus id\(s\) were not found/);
   assert.match(markdown, /suggestion: `pm show pm-missing`/);
+});
+
+test("renderAgentPrompt emits copy-pasteable next-turn instructions", () => {
+  const prompt = renderAgentPrompt(buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-a"],
+    pmVersion: "2026.6.12",
+    tokenBudget: 2500,
+  }));
+  assert.match(prompt, /^You are continuing work in a pm-managed project\./);
+  assert.match(prompt, /Next work:/);
+  assert.match(prompt, /pm-b: Approve changelog/);
+  assert.match(prompt, /score=\d+; confidence=\d+/);
+  assert.match(prompt, /Suggested pm commands:/);
+  assert.match(prompt, /pm append pm-c/);
+  assert.match(prompt, /Record meaningful decisions, tests, and blockers in pm before handing off\./);
 });

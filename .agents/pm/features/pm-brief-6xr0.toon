@@ -1,0 +1,21 @@
+id: pm-brief-6xr0
+title: Add evidence-weighted next-action ranking
+description: ""
+type: Feature
+status: in_progress
+priority: 1
+tags[3]: agent-context,next-work,ranking
+created_at: "2026-06-12T14:42:39.636Z"
+updated_at: "2026-06-12T14:47:30.475Z"
+author: codex
+estimated_minutes: 90
+acceptance_criteria: "pm brief next supports --explain and --confidence; ranked items expose evidence-weighted score/confidence/reasons in JSON and concise text; ranking considers unblockability, active dependency fanout, stale age, linked docs/files evidence, and release/deadline proximity; tests and README cover the behavior; release check passes."
+risk: medium
+confidence: high
+files[3]{path,scope,note}:
+  index.ts,project,Ranking and command implementation
+  test/brief.test.ts,project,Ranking behavior and renderer tests
+  README.md,project,Command documentation
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
+  "npm run release:check",null,project,1200,tracker,null,null,null,null,null,null,null,null,null,null,null
+body: "Agents need an intuitive way to choose the next actionable pm item without reading every item body. Enhance pm-brief next with evidence-weighted explanations and confidence so project management stays context management while reducing token waste.\n\nImplemented evidence-weighted next-action ranking on 2026-06-12. Ranking now emits score, confidence, and compact evidence reasons covering priority, unblockability, active dependencies, fanout, stale age, linked docs/files, release, and deadline proximity. Added --explain and --confidence to pm brief next text output; JSON output includes structured ranking metadata. Verification: npm run release:check passed, and real CLI smoke test passed with pm install . --project followed by pm brief next --count 5 --explain --confidence --format json against this repo's pm data."

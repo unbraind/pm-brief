@@ -17,10 +17,12 @@ pm install github.com/unbraind/pm-brief --project
 
 ```bash
 pm brief
+pm brief prompt --focus pm-1234 --max-tokens 2500
 pm brief --max-tokens 4000 --format markdown
 pm brief --dependency-order --format markdown
 pm brief --focus pm-1234 --include-closed --format json
-pm brief next --count 5 --dependency-order --format json
+pm brief next --count 5 --dependency-order --explain --confidence
+pm brief next --count 5 --format json
 pm brief next --count 5 --explain --format text
 pm brief stale --days 7
 ```
@@ -28,6 +30,7 @@ pm brief stale --days 7
 ## Commands
 
 - `pm brief` renders a markdown or JSON project brief.
+- `pm brief prompt` renders a compact copy-pasteable agent handoff prompt.
 - `pm brief next` returns the ranked next items only.
 - `pm brief stale` returns stale open or in-progress items.
 
@@ -37,17 +40,27 @@ pm brief stale --days 7
 - `--dependency-order` prefers prerequisite items before dependent work in next-work ranking.
 - `pm brief next --explain` adds transparent score and dependency signals for each ranked item.
 - `pm brief` emits a `Brief Insights` section when focus ids are missing, closed focus items are excluded, or active filters hide all open work.
+- `--explain` on `pm brief next` includes compact ranking evidence such as unblockability, stale age, dependency fanout, release/deadline proximity, and linked docs/files.
+- `--confidence` on `pm brief next` includes the confidence score behind each recommendation.
 
 ## Agent Brief Contents
 
 - workspace and item counts
 - top next items with `whyNow` reasons
+- evidence-weighted next-work score, confidence, and ranking reasons
 - blocker relationships and dependency context
 - stale context findings
 - decision items that need human or agent follow-up
 - brief insights with actionable command hints when filters or focus ids need attention
 - safe suggested pm commands, never auto-applied
 - deterministic token-budget trimming
+
+## Agent Handoff Prompt
+
+`pm brief prompt` turns the same structured brief into direct next-turn
+instructions for coding agents: ranked work, focus context, blockers, risks,
+safe pm commands, and working rules. It is designed for handoffs where the next
+agent needs executable context rather than a full project dump.
 
 ## TypeScript API
 

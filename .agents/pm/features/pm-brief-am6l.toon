@@ -1,0 +1,14 @@
+id: pm-brief-am6l
+title: Add agent handoff prompt command to pm-brief
+description: Add a production-ready pm brief prompt command that turns the existing structured brief into a copy-pasteable agent handoff prompt.
+type: Feature
+status: in_progress
+priority: 1
+tags[3]: agent-context,context-management,handoff
+created_at: "2026-06-12T13:54:16.694Z"
+updated_at: "2026-06-12T13:56:07.127Z"
+author: unknown
+acceptance_criteria: pm brief prompt exists; output is deterministic and token-aware; tests cover prompt rendering and command registration; README documents usage; release check passes.
+notes[1]{created_at,author,text}:
+  "2026-06-12T13:56:07.127Z",unknown,"Implemented pm brief prompt with deterministic copy-pasteable agent handoff output. Updated tests to cover command registration and prompt rendering, updated README usage, and ran npm run release:check successfully: 11 node:test tests passed, npm audit --omit=dev found 0 vulnerabilities, npm pack --dry-run succeeded, changelog check passed."
+body: Implement a deterministic prompt renderer and command for pm-brief so agents can get compact next-turn instructions without manually translating markdown brief output. This supports project management = context management by reducing token waste and improving handoff quality.
