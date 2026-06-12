@@ -167,6 +167,32 @@ test("selectNextItems does not penalize work blocked only by closed items", () =
   assert.ok(!next[0]?.rankingReasons.some((reason) => reason.startsWith("blocked_by_active_dependency")));
 });
 
+test("selectNextItems keeps overdue deadlines more urgent than due-today deadlines", () => {
+  const next = selectNextItems([
+    {
+      id: "pm-overdue",
+      title: "Overdue release gate",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-05T00:00:00Z",
+      deadline: "2026-06-05T00:00:00Z",
+    },
+    {
+      id: "pm-today",
+      title: "Due today release gate",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      updated_at: "2026-06-05T00:00:00Z",
+      deadline: "2026-06-06T23:00:00Z",
+    },
+  ], { generatedAt: "2026-06-06T12:00:00Z", nextCount: 2 });
+  assert.deepEqual(next.map((item) => item.id), ["pm-overdue", "pm-today"]);
+  assert.ok((next[0]?.rankingScore ?? 0) > (next[1]?.rankingScore ?? 0));
+  assert.ok(next[0]?.rankingReasons.some((reason) => reason.startsWith("deadline_overdue:")));
+});
+
 test("explainNextItems provides score breakdown and dependency signals", () => {
   const explained = explainNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
   assert.deepEqual(explained.map((entry) => entry.item.id), ["pm-b", "pm-c", "pm-a"]);

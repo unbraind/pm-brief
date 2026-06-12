@@ -353,9 +353,10 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
   if (item.deadline) {
     const deadlineTime = Date.parse(item.deadline);
     if (Number.isFinite(deadlineTime)) {
-      const daysUntilDeadline = Math.ceil((deadlineTime - now.getTime()) / 86_400_000);
+      const msUntilDeadline = deadlineTime - now.getTime();
+      const daysUntilDeadline = msUntilDeadline < 0 ? Math.floor(msUntilDeadline / 86_400_000) : Math.ceil(msUntilDeadline / 86_400_000);
       if (daysUntilDeadline < 0) {
-        score += 12;
+        score += 25;
         reasons.push(`deadline_overdue:${Math.abs(daysUntilDeadline)}d`);
       } else if (daysUntilDeadline <= 14) {
         score += 20 - daysUntilDeadline;
@@ -415,8 +416,7 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
   };
 }
 
-function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date): NextItemScoreBreakdown {
-  const rank = rankItem(item, rels, activeIds, now);
+function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date, rank = rankItem(item, rels, activeIds, now)): NextItemScoreBreakdown {
   const priority = typeof item.priority === "number" ? item.priority : 5;
   const priorityScore = Math.max(0, 100 - priority * 15);
   const blockedScore = rank.blocked ? -80 : 45;
@@ -450,13 +450,16 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
   const candidates = filterCandidates(items, options);
   const activeIds = new Set(items.filter((item) => !isClosed(item)).map((item) => item.id));
   return candidates
-    .map((item) => ({
-      item,
-      rank: rankItem(item, rels, activeIds, now),
-      score: scoreBreakdown(item, rels, activeIds, now),
-      activeDependencies: activeDependencyCount(item, rels, activeIds),
-      activeDependents: activeDependentCount(item, rels, activeIds),
-    }))
+    .map((item) => {
+      const rank = rankItem(item, rels, activeIds, now);
+      return {
+        item,
+        rank,
+        score: scoreBreakdown(item, rels, activeIds, now, rank),
+        activeDependencies: activeDependencyCount(item, rels, activeIds),
+        activeDependents: activeDependentCount(item, rels, activeIds),
+      };
+    })
     .sort((a, b) => {
       if (options.dependencyOrder) {
         if (a.activeDependencies !== b.activeDependencies) return a.activeDependencies - b.activeDependencies;
