@@ -79,8 +79,13 @@ export interface NextItemScoreBreakdown {
   total: number;
   priority: number;
   blocked: number;
+  dependencies: number;
+  dependents: number;
   active: number;
   stale: number;
+  linkedEvidence: number;
+  release: number;
+  deadline: number;
 }
 
 export interface NextItemExplanation {
@@ -301,6 +306,25 @@ function isBlockingRelationship(rel: Relationship): boolean {
   return rel.kind === "blocked_by" || rel.kind === "depends_on";
 }
 
+function activeItemIds(items: PmItem[]): Set<string> {
+  return new Set(items.filter((item) => !isClosed(item)).map((item) => item.id));
+}
+
+function deadlineScore(item: PmItem, now: Date): { score: number; reason?: string } {
+  if (!item.deadline) return { score: 0 };
+  const deadlineTime = Date.parse(item.deadline);
+  if (!Number.isFinite(deadlineTime)) return { score: 0 };
+  const msUntilDeadline = deadlineTime - now.getTime();
+  const daysUntilDeadline = msUntilDeadline < 0 ? Math.floor(msUntilDeadline / 86_400_000) : Math.ceil(msUntilDeadline / 86_400_000);
+  if (daysUntilDeadline < 0) {
+    return { score: 25, reason: `deadline_overdue:${Math.abs(daysUntilDeadline)}d` };
+  }
+  if (daysUntilDeadline <= 14) {
+    return { score: 20 - daysUntilDeadline, reason: `deadline_soon:${daysUntilDeadline}d` };
+  }
+  return { score: 0 };
+}
+
 function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date): RankEvidence {
   const reasons: string[] = [];
   let score = 0;
@@ -350,19 +374,10 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
     score += 10;
     reasons.push(`release:${text(item.release)}`);
   }
-  if (item.deadline) {
-    const deadlineTime = Date.parse(item.deadline);
-    if (Number.isFinite(deadlineTime)) {
-      const msUntilDeadline = deadlineTime - now.getTime();
-      const daysUntilDeadline = msUntilDeadline < 0 ? Math.floor(msUntilDeadline / 86_400_000) : Math.ceil(msUntilDeadline / 86_400_000);
-      if (daysUntilDeadline < 0) {
-        score += 25;
-        reasons.push(`deadline_overdue:${Math.abs(daysUntilDeadline)}d`);
-      } else if (daysUntilDeadline <= 14) {
-        score += 20 - daysUntilDeadline;
-        reasons.push(`deadline_soon:${daysUntilDeadline}d`);
-      }
-    }
+  const deadline = deadlineScore(item, now);
+  if (deadline.reason) {
+    score += deadline.score;
+    reasons.push(deadline.reason);
   }
 
   // Baseline 35 means "some pm metadata exists"; reasons, links, and timestamps raise confidence.
@@ -380,7 +395,7 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     ...linksFor(item),
   ].slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
-  const rank = rankOverride ?? rankItem(item, rels, activeIds ?? new Set(allItems.filter((candidate) => !isClosed(candidate)).map((candidate) => candidate.id)), now);
+  const rank = rankOverride ?? rankItem(item, rels, activeIds ?? activeItemIds(allItems), now);
   const whyNow = rank.blocked
     ? "blocked: resolve prerequisite before implementation"
     : priority !== undefined
@@ -419,15 +434,27 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
 function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date, rank = rankItem(item, rels, activeIds, now)): NextItemScoreBreakdown {
   const priority = typeof item.priority === "number" ? item.priority : 5;
   const priorityScore = Math.max(0, 100 - priority * 15);
+  const deps = activeDependencyCount(item, rels, activeIds);
+  const fanout = activeDependentCount(item, rels, activeIds);
   const blockedScore = rank.blocked ? -80 : 45;
+  const dependencyScore = deps > 0 ? deps * -20 : 0;
+  const dependentScore = fanout > 0 ? fanout * 8 : 0;
   const activeBoost = statusOf(item).toLowerCase() === "in_progress" ? 20 : 0;
   const staleScore = Math.min(ageDays(item, now), 30) * 1.5;
+  const linkedEvidenceScore = Math.min(linksFor(item).length, 4) * 6;
+  const releaseScore = text(item.release) ? 10 : 0;
+  const deadline = deadlineScore(item, now).score;
   return {
     total: rank.score,
     priority: priorityScore,
     blocked: blockedScore,
+    dependencies: dependencyScore,
+    dependents: dependentScore,
     active: activeBoost,
     stale: staleScore,
+    linkedEvidence: linkedEvidenceScore,
+    release: releaseScore,
+    deadline,
   };
 }
 
@@ -448,7 +475,7 @@ function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
 
 function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[]): RankedCandidate[] {
   const candidates = filterCandidates(items, options);
-  const activeIds = new Set(items.filter((item) => !isClosed(item)).map((item) => item.id));
+  const activeIds = activeItemIds(items);
   return candidates
     .map((item) => {
       const rank = rankItem(item, rels, activeIds, now);
@@ -638,8 +665,9 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const now = new Date(generatedAt);
   const rels = items.flatMap(extractRelationships);
+  const activeIds = activeItemIds(items);
   const focusSelection = selectedFocus(items, options);
-  const focus = focusSelection.items.map((item) => toBriefItem(item, rels, items, now));
+  const focus = focusSelection.items.map((item) => toBriefItem(item, rels, items, now, activeIds));
   const next = selectNextItems(items, options);
   const insights = buildInsights(items, options, focusSelection, next);
   const blockers = rels
@@ -651,7 +679,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   const decisionsNeeded = items
     .filter((item) => !isClosed(item) && typeOf(item).toLowerCase() === "decision")
     .slice(0, 5)
-    .map((item) => toBriefItem(item, rels, items, now));
+    .map((item) => toBriefItem(item, rels, items, now, activeIds));
   const staleContext = detectStaleContext(items, options).slice(0, 10);
   const risks = summarizeRisks(items, options).slice(0, 12);
   const recommendedPmUpdates: RecommendedPmUpdate[] = [

@@ -199,6 +199,11 @@ test("explainNextItems provides score breakdown and dependency signals", () => {
   assert.equal(explained[0]?.activeDependents, 1);
   assert.equal(explained[2]?.score.blocked, -80);
   assert.ok((explained[2]?.score.total ?? 0) < (explained[1]?.score.total ?? 0));
+  for (const entry of explained) {
+    const { total, ...components } = entry.score;
+    const componentTotal = Object.values(components).reduce((sum, value) => sum + value, 0);
+    assert.equal(total, Math.round(componentTotal));
+  }
 });
 
 test("detectStaleContext reports stale open work only", () => {
