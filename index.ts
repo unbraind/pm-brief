@@ -939,10 +939,10 @@ function registerCommands(api: any): void {
         generatedAt: new Date().toISOString(),
       };
       const allItems = readPmItems(ctx.pm_root);
-      const next = selectNextItems(allItems, nextOptions);
       const explain = readBool(options, "explain");
       const confidence = readBool(options, "confidence");
       const explained = explain ? explainNextItems(allItems, nextOptions) : [];
+      const next = explain ? explained.map((entry) => entry.item) : selectNextItems(allItems, nextOptions);
       if (format === "json") {
         const payload = explain ? { next, explanations: explained } : { next };
         console.error(JSON.stringify(payload, null, 2));
