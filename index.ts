@@ -302,6 +302,17 @@ function linksFor(item: PmItem): string[] {
   return [...objectLinkPaths(item.docs), ...objectLinkPaths(item.files)].slice(0, 6);
 }
 
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
 function isBlockingRelationship(rel: Relationship): boolean {
   return rel.kind === "blocked_by" || rel.kind === "depends_on";
 }
@@ -389,11 +400,11 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
   const dependencyIds = rels.filter((rel) => rel.from === item.id).map((rel) => rel.to);
   const dependentIds = rels.filter((rel) => rel.to === item.id).map((rel) => rel.from);
   const stale = ageDays(item, now);
-  const requiredContext = [
+  const requiredContext = uniqueStrings([
     ...dependencyIds.map((id) => `dependency:${id}`),
     ...dependentIds.map((id) => `dependent:${id}`),
     ...linksFor(item),
-  ].slice(0, 8);
+  ]).slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
   const rank = rankOverride ?? rankItem(item, rels, activeIds ?? activeItemIds(allItems), now);
   const whyNow = rank.blocked

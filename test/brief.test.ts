@@ -297,4 +297,20 @@ test("renderAgentPrompt emits copy-pasteable next-turn instructions", () => {
   assert.match(prompt, /Suggested pm commands:/);
   assert.match(prompt, /pm append pm-c/);
   assert.match(prompt, /Record meaningful decisions, tests, and blockers in pm before handing off\./);
+
+  const deduped = renderAgentPrompt(buildBrief([
+    {
+      id: "pm-context",
+      title: "Condense duplicate context",
+      type: "Task",
+      status: "open",
+      priority: 1,
+      docs: ["docs/context.md"],
+      files: [{ path: "docs/context.md" }],
+    },
+  ], {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-context"],
+  }));
+  assert.equal(deduped.match(/docs\/context\.md/g)?.length, 1);
 });
