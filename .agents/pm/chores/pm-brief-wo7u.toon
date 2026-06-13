@@ -1,0 +1,15 @@
+id: pm-brief-wo7u
+title: Regenerate CHANGELOG to drop the duplicate Unreleased section (pm-changelog #47)
+description: "The committed CHANGELOG carried a stale '## Unreleased' section mirroring the released ## 2026.6.13 entry — a known pm-changelog prepend-merge defect (GH #47, fixed in pm-changelog 2026.6.13-1). Regenerated canonically via changelog:full (replace mode) to remove the duplicate. Forward prevention propagates when pm-changelog's next base version (>=2026.6.14) is picked up by the caret range."
+type: Chore
+status: closed
+priority: 3
+tags: []
+created_at: "2026-06-13T20:39:04.813Z"
+updated_at: "2026-06-13T20:39:49.578Z"
+author: claude
+resolution: "Ran changelog:full (replace mode) to drop the duplicate '## Unreleased' that mirrored ## 2026.6.13 (pm-changelog #47 prepend-merge defect)."
+expected_result: No duplicate Unreleased section in CHANGELOG
+actual_result: "Duplicate removed (16 lines); changelog:check green"
+close_reason: CHANGELOG regenerated; duplicate removed
+body: ""
