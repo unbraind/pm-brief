@@ -1,22 +1,12 @@
 # Changelog
 
-## 2026.6.13 - 2026-06-13
-
-### Added
-
-- Add max-tokens alias and dependency-aware ordering ([pm-brief-nu7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nu7u.toon))
-- Add agent handoff prompt command to pm-brief ([pm-brief-am6l](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-am6l.toon))
-- Add evidence-weighted next-action ranking ([pm-brief-6xr0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-6xr0.toon))
-
-### Fixed
-
-- Fix release workflow staging when dist is gitignored ([pm-brief-bald](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-bald.toon))
+## Unreleased
 
 ### Other
 
-- Daily Release publish step runs prepublishOnly post-tag: align npm publish with --ignore-scripts ([pm-brief-k5em](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-k5em.toon))
+- Regenerate CHANGELOG to drop the duplicate Unreleased section from pm-changelog issue 47 ([pm-brief-wo7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-wo7u.toon))
 
-## Unreleased
+## 2026.6.13 - 2026-06-13
 
 ### Added
 
