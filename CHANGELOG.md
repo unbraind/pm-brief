@@ -12,6 +12,10 @@
 
 - Fix release workflow staging when dist is gitignored ([pm-brief-bald](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-bald.toon))
 
+### Other
+
+- Daily Release publish step runs prepublishOnly post-tag: align npm publish with --ignore-scripts ([pm-brief-k5em](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-k5em.toon))
+
 ## 2026.06.07 - 2026-06-06
 
 ### Added
