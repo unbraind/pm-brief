@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.6.14 - 2026-06-14
+
+### Other
+
+- Regenerate CHANGELOG to drop the duplicate Unreleased section from pm-changelog issue 47 ([pm-brief-wo7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-wo7u.toon))
+
 ## Unreleased
 
 ### Other
