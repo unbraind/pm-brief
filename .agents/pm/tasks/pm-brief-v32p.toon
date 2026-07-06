@@ -1,0 +1,15 @@
+id: pm-brief-v32p
+title: Align pm-brief changelog check with full changelog output
+description: ""
+type: Task
+status: closed
+priority: 1
+tags: []
+created_at: "2026-07-06T00:21:19.009Z"
+updated_at: "2026-07-06T00:21:31.822Z"
+author: unknown
+resolution: "Changed changelog:check from the prepend-window helper to the full replace/all-release-tags pm-changelog invocation."
+expected_result: "Running npm run changelog:full followed by npm run changelog:check passes."
+actual_result: Script updated; validation rerun follows in release checks.
+close_reason: "changelog:check now validates the same full all-release-tags changelog that changelog:full writes."
+body: "Validation found changelog:full writes a full all-release-tags changelog, but changelog:check validated only the since-previous-tag prepend window. This made the generated full changelog fail its own release gate. Update changelog:check to use the same full replace/all-release-tags contract."
