@@ -1,12 +1,18 @@
 # Changelog
 
-## 2026.6.14 - 2026-06-14
+## 2026.7.6 - 2026-07-06
+
+### Fixed
+
+- Fix release CI ordering (publish-before-tag) ([pm-brief-5a57](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-5a57.toon))
 
 ### Other
 
-- Regenerate CHANGELOG to drop the duplicate Unreleased section from pm-changelog issue 47 ([pm-brief-wo7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-wo7u.toon))
+- Align Node engine with pm CLI runtime ([pm-brief-7z60](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-7z60.toon))
+- Align pm-brief changelog check with full changelog output ([pm-brief-v32p](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-v32p.toon))
+- Refresh pm-brief to latest pm CLI and changelog toolchain ([pm-brief-93zx](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-93zx.toon))
 
-## Unreleased
+## 2026.6.14 - 2026-06-14
 
 ### Other
 
