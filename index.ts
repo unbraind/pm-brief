@@ -47,9 +47,12 @@ export interface BriefOptions {
   tokenBudget?: number;
   dependencyOrder?: boolean;
   focusIds?: string[];
+  focusTypes?: string[];
   statuses?: string[];
   assignee?: string;
   includeClosed?: boolean;
+  includeHistory?: boolean;
+  historyLimit?: number;
   staleDays?: number;
   nextCount?: number;
   generatedAt?: string;
@@ -117,6 +120,14 @@ export interface StaleContextFinding {
   daysStale: number;
 }
 
+export interface BriefActivity {
+  timestamp: string;
+  author?: string;
+  operation: string;
+  itemId?: string;
+  message?: string;
+}
+
 export interface RecommendedPmUpdate {
   itemId: string;
   command: string;
@@ -147,6 +158,7 @@ export interface AgentBrief {
   blockers: BriefBlocker[];
   risks: BriefRisk[];
   staleContext: StaleContextFinding[];
+  recentActivity?: BriefActivity[];
   decisionsNeeded: BriefItem[];
   recommendedPmUpdates: RecommendedPmUpdate[];
   insights?: BriefInsight[];
@@ -203,6 +215,20 @@ function asArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(asArray);
   if (typeof value !== "string") return [];
   return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+}
+
+function parseFocus(values: string[]): { focusIds: string[]; focusTypes: string[] } {
+  const focusIds: string[] = [];
+  const focusTypes: string[] = [];
+  for (const value of values) {
+    const match = /^type\s*:\s*(.+)$/i.exec(value);
+    if (match) {
+      focusTypes.push(match[1].trim());
+    } else {
+      focusIds.push(value);
+    }
+  }
+  return { focusIds, focusTypes };
 }
 
 function readBool(options: Record<string, unknown>, ...keys: string[]): boolean {
@@ -569,7 +595,8 @@ export function summarizeRisks(items: PmItem[], options: BriefOptions = {}): Bri
 
 function selectedFocus(items: PmItem[], options: BriefOptions): FocusSelection {
   const requestedIds = Array.from(new Set(options.focusIds ?? []));
-  if (requestedIds.length === 0) {
+  const requestedTypes = Array.from(new Set((options.focusTypes ?? []).map((entry) => entry.toLowerCase())));
+  if (requestedIds.length === 0 && requestedTypes.length === 0) {
     const derived = selectNextItems(items, { ...options, nextCount: 3 })
       .map((next) => items.find((item) => item.id === next.id))
       .filter((item): item is PmItem => Boolean(item));
@@ -582,14 +609,26 @@ function selectedFocus(items: PmItem[], options: BriefOptions): FocusSelection {
   const byId = new Map(items.map((item) => [item.id, item]));
   const missingIds = requestedIds.filter((id) => !byId.has(id));
   const closedExcludedIds: string[] = [];
-  const selected = requestedIds
-    .map((id) => byId.get(id))
-    .filter((item): item is PmItem => Boolean(item))
-    .filter((item) => {
-      if (options.includeClosed || !isClosed(item)) return true;
+  const seenIds = new Set<string>();
+  const selected: PmItem[] = [];
+  const keep = (item: PmItem): void => {
+    if (seenIds.has(item.id)) return;
+    if (options.includeClosed || !isClosed(item)) {
+      seenIds.add(item.id);
+      selected.push(item);
+    } else {
       closedExcludedIds.push(item.id);
-      return false;
-    });
+    }
+  };
+  for (const id of requestedIds) {
+    const item = byId.get(id);
+    if (item) keep(item);
+  }
+  if (requestedTypes.length > 0) {
+    for (const item of items) {
+      if (requestedTypes.includes(typeOf(item).toLowerCase())) keep(item);
+    }
+  }
   return {
     items: selected,
     missingIds,
@@ -665,6 +704,7 @@ function compactToBudget(brief: AgentBrief): AgentBrief {
     recommendedPmUpdates: brief.recommendedPmUpdates.slice(0, 5),
     staleContext: brief.staleContext.slice(0, 5),
     risks: brief.risks.slice(0, 8),
+    recentActivity: brief.recentActivity?.slice(0, 8),
   };
   estimated = estimateTokens(next);
   if (estimated <= budget) return { ...next, budget: { ...next.budget, estimatedTokens: estimated, truncated: true } };
@@ -675,6 +715,7 @@ function compactToBudget(brief: AgentBrief): AgentBrief {
     blockers: next.blockers.slice(0, 6),
     focus: next.focus.slice(0, 3),
     decisionsNeeded: next.decisionsNeeded.slice(0, 3),
+    recentActivity: next.recentActivity?.slice(0, 5),
   };
   estimated = estimateTokens(tighter);
   return { ...tighter, budget: { ...tighter.budget, estimatedTokens: estimated, truncated: true } };
@@ -701,6 +742,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     .map((item) => toBriefItem(item, rels, items, now, activeIds));
   const staleContext = detectStaleContext(items, options).slice(0, 10);
   const risks = summarizeRisks(items, options).slice(0, 12);
+  const recentActivity = options.includeHistory ? readRecentActivity(options.pmRoot ?? ".agents/pm", options.historyLimit ?? 10) : undefined;
   const recommendedPmUpdates: RecommendedPmUpdate[] = [
     ...staleContext.slice(0, 5).map((finding) => ({
       itemId: finding.itemId,
@@ -732,6 +774,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     blockers,
     risks,
     staleContext,
+    recentActivity,
     decisionsNeeded,
     recommendedPmUpdates,
     insights,
@@ -795,9 +838,65 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   lines.push("", "## Stale Context", "");
   if (brief.staleContext.length === 0) lines.push("_No stale open items detected._");
   for (const stale of brief.staleContext) lines.push(`- ${stale.itemId}: ${escapeLine(stale.title)} - ${stale.daysStale} day(s) stale`);
+  if (brief.recentActivity?.length) {
+    lines.push("", "## Recent Activity", "");
+    for (const entry of brief.recentActivity) {
+      const who = entry.author ? ` by ${entry.author}` : "";
+      const itemPart = entry.itemId ? ` ${entry.itemId}` : "";
+      const msg = entry.message ? ` - ${escapeLine(entry.message)}` : "";
+      lines.push(`- ${entry.timestamp}${who} ${entry.operation}${itemPart}${msg}`);
+    }
+  }
   lines.push("", "## Recommended PM Updates", "");
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`- ${update.itemId}: \`${update.command}\` - ${update.reason}`);
+  lines.push("");
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderSlackBrief(brief: AgentBrief): string {
+  const header = `*pm brief* — ${brief.generatedAt}`;
+  const meta = `_${brief.workspace.root} | pm ${brief.workspace.pmVersion} | items ${brief.workspace.itemCount}_ (budget ${brief.budget.requestedTokens} ≈ ${brief.budget.estimatedTokens}${brief.budget.truncated ? ", trimmed" : ""})`;
+  const lines: string[] = [header, meta, ""];
+  if (brief.insights?.length) {
+    lines.push("*Brief Insights*");
+    for (const insight of brief.insights) {
+      const suggestion = insight.suggestion ? ` — \`${insight.suggestion}\`` : "";
+      lines.push(`• ${insight.level}: ${escapeLine(insight.message)}${suggestion}`);
+    }
+    lines.push("");
+  }
+  lines.push("*Next Work*");
+  if (brief.next.length === 0) lines.push("_No open work matched the filters._");
+  for (const item of brief.next) lines.push(`• \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status}) — ${item.whyNow}; score ${item.rankingScore}; confidence ${item.confidence}`);
+  lines.push("", "*Focus*");
+  if (brief.focus.length === 0) lines.push("_No focus items._");
+  for (const item of brief.focus) {
+    const context = item.requiredContext.length > 0 ? ` — context: ${item.requiredContext.join(", ")}` : "";
+    lines.push(`• \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status})${context}`);
+  }
+  lines.push("", "*Blockers*");
+  if (brief.blockers.length === 0) lines.push("_No visible blockers._");
+  for (const blocker of brief.blockers) {
+    const label = blocker.title ? `${blocker.blockedBy} ${escapeLine(blocker.title)}` : blocker.blockedBy;
+    const status = blocker.status ? ` (${blocker.status})` : "";
+    lines.push(`• \`${blocker.itemId}\` ${blocker.kind} \`${blocker.blockedBy}\` ${escapeLine(label)}${status}`);
+  }
+  lines.push("", "*Risks*");
+  if (brief.risks.length === 0) lines.push("_No risks detected from visible pm metadata._");
+  for (const risk of brief.risks) lines.push(`• ${risk.severity}: \`${risk.itemId}\` — ${risk.reason}`);
+  if (brief.recentActivity?.length) {
+    lines.push("", "*Recent Activity*");
+    for (const entry of brief.recentActivity) {
+      const who = entry.author ? ` by ${entry.author}` : "";
+      const itemPart = entry.itemId ? ` \`${entry.itemId}\`` : "";
+      const msg = entry.message ? ` — ${escapeLine(entry.message)}` : "";
+      lines.push(`• ${entry.timestamp}${who} ${entry.operation}${itemPart}${msg}`);
+    }
+  }
+  lines.push("", "*Recommended PM Updates*");
+  if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
+  for (const update of brief.recommendedPmUpdates) lines.push(`• \`${update.itemId}\` \`${update.command}\` — ${update.reason}`);
   lines.push("");
   return `${lines.join("\n")}\n`;
 }
@@ -838,6 +937,15 @@ export function renderAgentPrompt(brief: AgentBrief): string {
   for (const update of brief.recommendedPmUpdates.slice(0, 5)) {
     lines.push(`- ${update.command} # ${update.reason}`);
   }
+  if (brief.recentActivity?.length) {
+    lines.push("", "Recent activity:");
+    for (const entry of brief.recentActivity.slice(0, 5)) {
+      const who = entry.author ? ` by ${entry.author}` : "";
+      const itemPart = entry.itemId ? ` ${entry.itemId}` : "";
+      const msg = entry.message ? ` - ${escapeLine(entry.message)}` : "";
+      lines.push(`- ${entry.timestamp}${who} ${entry.operation}${itemPart}${msg}`);
+    }
+  }
   lines.push("", "Working rules:");
   lines.push("- Do not assume context outside pm items and linked files.");
   lines.push("- Prefer the highest-ranked unblocked prerequisite before dependent work.");
@@ -861,18 +969,53 @@ function pmVersion(): string {
   return result.status === 0 ? result.stdout.trim() : "unknown";
 }
 
+export function readRecentActivity(pmRoot: string, limit = 10): BriefActivity[] {
+  const safeLimit = Math.max(1, Math.min(limit, 100));
+  const result = spawnSync("pm", ["--path", pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)], {
+    encoding: "utf-8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    return [];
+  }
+  const entries = (parsed as { compact_activity?: unknown[] })?.compact_activity ?? (parsed as { activity?: unknown[] })?.activity ?? [];
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const record = entry as Record<string, unknown>;
+      const timestamp = text(record.ts) || text(record.timestamp);
+      if (!timestamp) return null;
+      return {
+        timestamp,
+        author: text(record.author) || undefined,
+        operation: text(record.op) || text(record.operation) || "activity",
+        itemId: text(record.id) || text(record.item_id) || undefined,
+        message: text(record.msg) || text(record.message) || undefined,
+      } as BriefActivity;
+    })
+    .filter((entry): entry is BriefActivity => Boolean(entry))
+    .slice(0, safeLimit);
+}
+
 function registerCommands(api: any): void {
   const commonFlags = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },
-    { long: "--focus", value_name: "id", description: "Focus item id (repeatable or comma-separated)", type: "string" },
+    { long: "--focus", value_name: "id|type:Type", description: "Focus item id or 'type:Type' to highlight all items of a type (repeatable or comma-separated)", type: "string" },
     { long: "--status", value_name: "status", description: "Statuses to include (comma-separated)", type: "string" },
     { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
     { long: "--stale-days", value_name: "n", description: "Days before an open item is stale (default: 7)", type: "string" },
     { long: "--dependency-order", description: "Prefer prerequisite work before dependents in next-work ranking", type: "boolean" },
-    { long: "--format", value_name: "format", description: "Output format: markdown or json", type: "string" },
+    { long: "--format", value_name: "format", description: "Output format: markdown, json, or slack", type: "string" },
     { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     { long: "--include-closed", description: "Allow closed focus items in the brief", type: "boolean" },
+    { long: "--include-history", description: "Include recent pm activity in the brief", type: "boolean" },
+    { long: "--history-limit", value_name: "n", description: "Number of recent activity entries to include (default: 10)", type: "string" },
   ];
   api.registerCommand({
     name: "brief",
@@ -883,20 +1026,26 @@ function registerCommands(api: any): void {
     async run(ctx: any) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
-      if (format !== "markdown" && format !== "json") throw new CommandError("--format must be markdown or json", EXIT_CODE.USAGE);
+      if (format !== "markdown" && format !== "json" && format !== "slack") throw new CommandError("--format must be markdown, json, or slack", EXIT_CODE.USAGE);
+      const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
+      const includeHistory = readBool(options, "include-history", "includeHistory");
+      const historyLimit = readInt(options, ["history-limit", "historyLimit"], 10);
       const brief = buildBrief(readPmItems(ctx.pm_root), {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
         dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
-        focusIds: asArray(options.focus),
+        focusIds,
+        focusTypes,
         statuses: asArray(options.status),
         assignee: readString(options, "assignee"),
         includeClosed: readBool(options, "include-closed", "includeClosed"),
+        includeHistory,
+        historyLimit,
         staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
         generatedAt: new Date().toISOString(),
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
       });
-      const output = format === "json" ? `${JSON.stringify(brief, null, 2)}\n` : renderMarkdownBrief(brief);
+      const output = format === "json" ? `${JSON.stringify(brief, null, 2)}\n` : format === "slack" ? renderSlackBrief(brief) : renderMarkdownBrief(brief);
       const outputPath = readString(options, "output");
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
@@ -913,13 +1062,19 @@ function registerCommands(api: any): void {
     flags: commonFlags.filter((flag) => flag.long !== "--format"),
     async run(ctx: any) {
       const options = ctx.options as Record<string, unknown>;
+      const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
+      const includeHistory = readBool(options, "include-history", "includeHistory");
+      const historyLimit = readInt(options, ["history-limit", "historyLimit"], 10);
       const brief = buildBrief(readPmItems(ctx.pm_root), {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 2500),
         dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
-        focusIds: asArray(options.focus),
+        focusIds,
+        focusTypes,
         statuses: asArray(options.status),
         assignee: readString(options, "assignee"),
         includeClosed: readBool(options, "include-closed", "includeClosed"),
+        includeHistory,
+        historyLimit,
         staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
         generatedAt: new Date().toISOString(),
         pmRoot: ctx.pm_root,
