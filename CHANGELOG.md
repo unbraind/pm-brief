@@ -8,6 +8,7 @@
 
 ### Other
 
+- Align Node engine with pm CLI runtime ([pm-brief-7z60](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-7z60.toon))
 - Align pm-brief changelog check with full changelog output ([pm-brief-v32p](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-v32p.toon))
 - Refresh pm-brief to latest pm CLI and changelog toolchain ([pm-brief-93zx](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-93zx.toon))
 
