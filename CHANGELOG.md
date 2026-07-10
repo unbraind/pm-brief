@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Full pm ecosystem production pass for pm-brief ([pm-brief-n4lw](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-n4lw.toon))
+
+### Other
+
+- Adversarial review pass 2026-07-10 ([pm-brief-kk7m](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-kk7m.toon))
+- Full-cycle hardening wave: pm-brief ([pm-brief-0dru](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-0dru.toon))
+- Align pm-brief with pm CLI 2026.6.12 release readiness ([pm-brief-352i](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-352i.toon))
+- Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-brief-93z7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-93z7.toon))
+
 ## 2026.7.6 - 2026-07-06
 
 ### Fixed

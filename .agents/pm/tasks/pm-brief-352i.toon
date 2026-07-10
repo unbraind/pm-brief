@@ -2,14 +2,16 @@ id: pm-brief-352i
 title: Align pm-brief with pm CLI 2026.6.12 release readiness
 description: ""
 type: Task
-status: in_progress
+status: closed
 priority: 1
 tags[3]: agent-context,dependency-alignment,release-readiness
 created_at: "2026-06-12T11:53:20.269Z"
-updated_at: "2026-06-12T15:35:39.949Z"
+updated_at: "2026-07-10T18:59:04.612Z"
+closed_at: "2026-07-10T18:59:04.611Z"
 author: unknown
 estimated_minutes: 60
 acceptance_criteria: Latest pm CLI/SDK dependency is used; pm-changelog release scripts are present where applicable; package tests and release checks pass or blockers are recorded; no private data is introduced; results are captured in pm history.
 notes[1]{created_at,author,text}:
   "2026-06-12T14:01:38.051Z",unknown,"Verified release readiness after moving @unbrained/pm-cli to runtime dependencies: npm release:check completed for the fleet on 2026-06-12; npm audit retries for pm-beads and pm-jira returned 0 vulnerabilities after transient advisory endpoint failures."
+close_reason: "Superseded by pm-brief-blz3 (2026-07-06 readiness pass). pm CLI is now at 2026.7.10, not 2026.6.12. Alignment complete."
 body: "Track the June 12 2026 package-readiness pass for pm-brief: align to latest published @unbrained/pm-cli, align pm-changelog where applicable, verify changelog/release commands, run tests with real package data, and record any upstream pm CLI/SDK UX issues separately in unbraind/pm-cli."

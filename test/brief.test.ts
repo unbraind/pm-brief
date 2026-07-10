@@ -403,6 +403,18 @@ test("buildBrief highlights focus types alongside focus ids", () => {
   assert.ok(brief.focus.some((item) => item.type === "Decision"));
 });
 
+test("type focus silently excludes closed matches without claiming explicit focus ids were omitted", () => {
+  const brief = buildBrief([
+    ...items,
+    { id: "pm-closed-decision", title: "Archived decision", type: "Decision", status: "closed", priority: 2 },
+  ], {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusTypes: ["decision"],
+  });
+  assert.ok(!brief.focus.some((item) => item.id === "pm-closed-decision"));
+  assert.ok(!(brief.insights ?? []).some((insight) => insight.message.includes("pm-closed-decision")));
+});
+
 test("buildBrief focus types combine with explicit focus ids", () => {
   const brief = buildBrief(items, {
     generatedAt: "2026-06-06T00:00:00Z",
@@ -410,14 +422,6 @@ test("buildBrief focus types combine with explicit focus ids", () => {
     focusTypes: ["decision"],
   });
   assert.deepEqual(brief.focus.map((item) => item.id), ["pm-a", "pm-b"]);
-});
-
-test("buildBrief does not report closed type matches as explicitly omitted focus ids", () => {
-  const brief = buildBrief(items, {
-    generatedAt: "2026-06-06T00:00:00Z",
-    focusTypes: ["task"],
-  });
-  assert.ok(!brief.insights?.some((insight) => insight.message.includes("pm-d")));
 });
 
 test("renderSlackBrief emits Slack-formatted bold headers and bullet items", () => {
@@ -435,9 +439,10 @@ test("renderSlackBrief emits Slack-formatted bold headers and bullet items", () 
   assert.match(slack, /\*Focus\*/);
   assert.match(slack, /\*Blockers\*/);
   assert.match(slack, /\*Risks\*/);
+  assert.match(slack, /\*Stale Context\*/);
   assert.match(slack, /• `pm-b` Approve changelog/);
   assert.match(slack, /`pm-a` blocked_by `pm-b` Approve changelog/);
-  assert.ok(!slack.includes("`pm-b` pm-b Approve changelog"));
+  assert.doesNotMatch(slack, /`pm-b` pm-b Approve changelog/);
   assert.match(slack, /\*Recent Activity\*/);
   assert.ok(!slack.includes("# pm brief"));
   assert.ok(!slack.includes("## "));
