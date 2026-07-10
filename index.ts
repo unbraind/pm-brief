@@ -611,18 +611,18 @@ function selectedFocus(items: PmItem[], options: BriefOptions): FocusSelection {
   const closedExcludedIds: string[] = [];
   const seenIds = new Set<string>();
   const selected: PmItem[] = [];
-  const keep = (item: PmItem): void => {
+  const keep = (item: PmItem, explicitId = false): void => {
     if (seenIds.has(item.id)) return;
     if (options.includeClosed || !isClosed(item)) {
       seenIds.add(item.id);
       selected.push(item);
-    } else {
+    } else if (explicitId) {
       closedExcludedIds.push(item.id);
     }
   };
   for (const id of requestedIds) {
     const item = byId.get(id);
-    if (item) keep(item);
+    if (item) keep(item, true);
   }
   if (requestedTypes.length > 0) {
     for (const item of items) {
@@ -878,9 +878,9 @@ export function renderSlackBrief(brief: AgentBrief): string {
   lines.push("", "*Blockers*");
   if (brief.blockers.length === 0) lines.push("_No visible blockers._");
   for (const blocker of brief.blockers) {
-    const label = blocker.title ? `${blocker.blockedBy} ${escapeLine(blocker.title)}` : blocker.blockedBy;
+    const label = blocker.title ? ` ${escapeLine(blocker.title)}` : "";
     const status = blocker.status ? ` (${blocker.status})` : "";
-    lines.push(`• \`${blocker.itemId}\` ${blocker.kind} \`${blocker.blockedBy}\` ${escapeLine(label)}${status}`);
+    lines.push(`• \`${blocker.itemId}\` ${blocker.kind} \`${blocker.blockedBy}\`${label}${status}`);
   }
   lines.push("", "*Risks*");
   if (brief.risks.length === 0) lines.push("_No risks detected from visible pm metadata._");

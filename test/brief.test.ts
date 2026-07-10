@@ -379,11 +379,10 @@ test("buildBrief includes recent activity when includeHistory is set", () => {
     pmRoot: ".agents/pm",
   });
   assert.ok(Array.isArray(brief.recentActivity));
-  assert.ok((brief.recentActivity?.length ?? 0) >= 1);
-  const first = brief.recentActivity?.[0];
-  assert.ok(first);
-  assert.ok(typeof first.timestamp === "string" && first.timestamp.length > 0);
-  assert.ok(typeof first.operation === "string" && first.operation.length > 0);
+  for (const entry of brief.recentActivity ?? []) {
+    assert.ok(typeof entry.timestamp === "string" && entry.timestamp.length > 0);
+    assert.ok(typeof entry.operation === "string" && entry.operation.length > 0);
+  }
 });
 
 test("readRecentActivity returns an array without throwing", () => {
@@ -413,6 +412,14 @@ test("buildBrief focus types combine with explicit focus ids", () => {
   assert.deepEqual(brief.focus.map((item) => item.id), ["pm-a", "pm-b"]);
 });
 
+test("buildBrief does not report closed type matches as explicitly omitted focus ids", () => {
+  const brief = buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusTypes: ["task"],
+  });
+  assert.ok(!brief.insights?.some((insight) => insight.message.includes("pm-d")));
+});
+
 test("renderSlackBrief emits Slack-formatted bold headers and bullet items", () => {
   const brief = buildBrief(items, {
     generatedAt: "2026-06-06T00:00:00Z",
@@ -421,6 +428,7 @@ test("renderSlackBrief emits Slack-formatted bold headers and bullet items", () 
     pmRoot: ".agents/pm",
     pmVersion: "2026.6.13",
   });
+  brief.recentActivity = [{ timestamp: "2026-06-05T12:00:00Z", operation: "comment", itemId: "pm-a" }];
   const slack = renderSlackBrief(brief);
   assert.match(slack, /^\*pm brief\*/);
   assert.match(slack, /\*Next Work\*/);
@@ -428,6 +436,8 @@ test("renderSlackBrief emits Slack-formatted bold headers and bullet items", () 
   assert.match(slack, /\*Blockers\*/);
   assert.match(slack, /\*Risks\*/);
   assert.match(slack, /• `pm-b` Approve changelog/);
+  assert.match(slack, /`pm-a` blocked_by `pm-b` Approve changelog/);
+  assert.ok(!slack.includes("`pm-b` pm-b Approve changelog"));
   assert.match(slack, /\*Recent Activity\*/);
   assert.ok(!slack.includes("# pm brief"));
   assert.ok(!slack.includes("## "));
@@ -445,16 +455,19 @@ test("renderMarkdownBrief includes Recent Activity section when history is prese
     includeHistory: true,
     pmRoot: ".agents/pm",
   });
+  brief.recentActivity = [{ timestamp: "2026-06-05T12:00:00Z", operation: "comment", itemId: "pm-a" }];
   const markdown = renderMarkdownBrief(brief);
   assert.match(markdown, /## Recent Activity/);
 });
 
 test("renderAgentPrompt includes recent activity when history is present", () => {
-  const prompt = renderAgentPrompt(buildBrief(items, {
+  const brief = buildBrief(items, {
     generatedAt: "2026-06-06T00:00:00Z",
     focusIds: ["pm-a"],
     includeHistory: true,
     pmRoot: ".agents/pm",
-  }));
+  });
+  brief.recentActivity = [{ timestamp: "2026-06-05T12:00:00Z", operation: "comment", itemId: "pm-a" }];
+  const prompt = renderAgentPrompt(brief);
   assert.match(prompt, /Recent activity:/);
 });

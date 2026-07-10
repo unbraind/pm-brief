@@ -6,8 +6,10 @@ status: in_progress
 priority: 1
 tags[4]: agent-audit,context-management,ecosystem,release-readiness
 created_at: "2026-07-06T15:33:20.276Z"
-updated_at: "2026-07-06T15:33:20.276Z"
+updated_at: "2026-07-10T10:41:57.879Z"
 assignee: codex
 author: unknown
 acceptance_criteria: Package uses current pm CLI/SDK and pm-changelog; release/check scripts pass; pm items capture decisions; no tracked secrets/private data are introduced; GitHub PR/release state is reviewed.
+comments[1]{created_at,author,text}:
+  "2026-07-10T10:41:57.876Z",codex,"Finished PR #20 review hardening. Fixed three legitimate bot findings: type-based focus no longer records closed type matches as explicitly omitted IDs; Slack blocker lines no longer duplicate blockedBy IDs; history tests no longer require live pm activity data and renderer tests now inject deterministic activity fixtures. Added regressions for closed type focus and exact Slack blocker id/title output. Verified npm build and 30/30 node tests. Functional workspace /tmp/fx-pm-brief: local extension activated with 4 command paths; timeout 20 pm --help returned; created 2 Tasks and 1 Decision; --format slack with --focus type:Task and --include-history rendered only the two Tasks in Focus and three real activity entries; type:Decision selected only the Decision; malformed --format bogus and --history-limit nope each exited 2 with clean Invalid argument value recovery bundles and no stack traces. Compared normalized default pm brief output with a locally built origin/main installation on copied tracker data: diff was empty, so defaults are unchanged. pm-changelog full regeneration and changelog:check passed. Bot decisions: all five inline findings are valid (three duplicate reports share one root cause), to be +1 voted and replied after commit."
 body: "Track the July 6, 2026 fleet pass: align package metadata with latest pm CLI/SDK and pm-changelog, verify daily release automation, run build/test/audit/package checks with real workspace data where practical, inspect GitHub state, and record privacy/history findings without changing pm-cli itself."
