@@ -19,8 +19,11 @@ pm install github.com/unbraind/pm-brief --project
 pm brief
 pm brief prompt --focus pm-1234 --max-tokens 2500
 pm brief --max-tokens 4000 --format markdown
-pm brief --dependency-order --format markdown
+pm brief --dependency-order --format slack
 pm brief --focus pm-1234 --include-closed --format json
+pm brief --include-history --format slack
+pm brief --focus type:Decision --format json
+pm brief prompt --include-history --history-limit 20
 pm brief next --count 5 --dependency-order --explain --confidence
 pm brief next --count 5 --format json
 pm brief next --count 5 --explain --format text
@@ -38,6 +41,9 @@ pm brief stale --days 7
 
 - `--max-tokens` is an alias for `--token-budget`.
 - `--dependency-order` prefers prerequisite items before dependent work in next-work ranking.
+- `--focus` highlights specific item ids, or `type:Type` to highlight every item of a type (repeatable or comma-separated).
+- `--include-history` adds a Recent Activity section sourced from `pm activity` to briefs and prompts; `--history-limit` controls the entry count (default 10).
+- `--format` renders `markdown` (default), `json` for machine-readable briefs, or `slack` for Slack-formatted briefs.
 - `pm brief next --explain` adds transparent score and dependency signals for each ranked item.
 - `pm brief` emits a `Brief Insights` section when focus ids are missing, closed focus items are excluded, or active filters hide all open work.
 - `--explain` on `pm brief next` includes compact ranking evidence such as unblockability, stale age, dependency fanout, release/deadline proximity, and linked docs/files.
@@ -50,6 +56,7 @@ pm brief stale --days 7
 - evidence-weighted next-work score, confidence, and ranking reasons
 - blocker relationships and dependency context
 - stale context findings
+- recent activity from `pm activity` (when `--include-history` is set)
 - decision items that need human or agent follow-up
 - brief insights with actionable command hints when filters or focus ids need attention
 - safe suggested pm commands, never auto-applied
