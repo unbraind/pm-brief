@@ -4,6 +4,7 @@
 
 ### Added
 
+- Add stale context section to Slack brief and refresh toolchain deps ([pm-brief-tuj7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-tuj7.toon))
 - Full pm ecosystem production pass for pm-brief ([pm-brief-n4lw](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-n4lw.toon))
 
 ### Other
