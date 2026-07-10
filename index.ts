@@ -885,6 +885,11 @@ export function renderSlackBrief(brief: AgentBrief): string {
   lines.push("", "*Risks*");
   if (brief.risks.length === 0) lines.push("_No risks detected from visible pm metadata._");
   for (const risk of brief.risks) lines.push(`• ${risk.severity}: \`${risk.itemId}\` — ${risk.reason}`);
+  lines.push("", "*Stale Context*");
+  if (brief.staleContext.length === 0) lines.push("_No stale open items detected._");
+  for (const stale of brief.staleContext) {
+    lines.push(`• \`${stale.itemId}\` ${escapeLine(stale.title)} — ${stale.daysStale} day(s) stale`);
+  }
   if (brief.recentActivity?.length) {
     lines.push("", "*Recent Activity*");
     for (const entry of brief.recentActivity) {

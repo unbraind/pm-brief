@@ -2,12 +2,12 @@ id: pm-brief-n4lw
 title: Full pm ecosystem production pass for pm-brief
 description: ""
 type: Feature
-status: in_progress
+status: closed
 priority: 1
 tags[3]: ecosystem,ecosystem-pass-2026-06-10,production
 created_at: "2026-06-09T22:37:54.700Z"
-updated_at: "2026-06-12T15:35:39.712Z"
-assignee: codex-5-3-sweep
+updated_at: "2026-07-10T18:59:05.079Z"
+closed_at: "2026-07-10T18:59:05.078Z"
 author: codex-5-3-sweep
 estimated_minutes: 180
 acceptance_criteria: "pm-brief is audited against the pm ecosystem standards; agent-facing commands are production-ready; dependency, changelog, release, and validation findings are tracked in pm; release checks pass."
@@ -15,8 +15,9 @@ files[3]{path,scope,note}:
   index.ts,project,add explainable ranking output
   README.md,project,document explain mode
   test/brief.test.ts,project,cover explain flag and score details
-tests[3]{command,path,scope,timeout_seconds,pm_context_mode,env_set,env_clear,shared_host_safe,assert_stdout_contains,assert_stdout_regex,assert_stderr_contains,assert_stderr_regex,assert_stdout_min_lines,assert_json_field_equals,assert_json_field_gte,note}:
-  "npm run release:check",null,project,3600,null,null,null,null,null,null,null,null,null,null,null,null
-  PM_PATH=.agents/pm PM_GLOBAL_PATH=.agents/pm npm run typecheck,null,project,1200,null,null,null,null,null,null,null,null,null,null,null,null
-  PM_PATH=.agents/pm PM_GLOBAL_PATH=.agents/pm npm test,null,project,2400,null,null,null,null,null,null,null,null,null,null,null,null
+tests[3]{command,scope,timeout_seconds}:
+  "npm run release:check",project,3600
+  PM_PATH=.agents/pm PM_GLOBAL_PATH=.agents/pm npm run typecheck,project,1200
+  PM_PATH=.agents/pm PM_GLOBAL_PATH=.agents/pm npm test,project,2400
+close_reason: "Ecosystem production pass complete: production-ready with green CI, npm published at 2026.7.10."
 body: "Implemented pm brief next --explain with deterministic score/dependency breakdown output, updated docs, and added tests for explain mode and ranking details. Validation passed via npm test and npm run typecheck.\n\nAdded brief insights UX layer: missing focus IDs, closed-focus omission notices, and filter mismatch guidance with remediation commands. Updated index.ts, README.md, and tests; validated with npm run typecheck and npm test."
