@@ -289,6 +289,13 @@ test("buildBrief adds insights for missing focus and empty filtered results", ()
   assert.ok(suggestions.includes("pm brief --format markdown"));
 });
 
+test("buildBrief does not emit executable guidance for an unsafe focus id", () => {
+  const brief = buildBrief(items, { focusIds: ["pm-missing;echo-pwned"] });
+  const missingFocus = brief.insights?.find((insight) => insight.message.includes("requested focus id(s) were not found"));
+  assert.ok(missingFocus);
+  assert.equal(missingFocus.suggestion, undefined);
+});
+
 test("buildBrief compacts when token budget is small", () => {
   const brief = buildBrief(items, { generatedAt: "2026-06-06T00:00:00Z", tokenBudget: 50 });
   assert.equal(brief.budget.truncated, true);

@@ -6,7 +6,7 @@ status: in_progress
 priority: 1
 tags[4]: agent-audit,context-management,ecosystem,release-readiness
 created_at: "2026-07-06T15:33:20.276Z"
-updated_at: "2026-07-11T18:23:46.197Z"
+updated_at: "2026-07-11T18:33:29.887Z"
 assignee: codex
 author: unknown
 estimated_minutes: 240
@@ -15,10 +15,11 @@ outcome: "Current SDK/changelog dependencies, production-grade command UX, exhau
 why_now: "This package produces agent-facing project context; correctness, compactness, privacy, and release integrity are required before public distribution."
 risk: high
 confidence: medium
-comments[3]{created_at,author,text}:
+comments[4]{created_at,author,text}:
   "2026-07-09T21:36:10.122Z",codex-reporting,2026-07-09 codex-reporting resumed the existing nonduplicate readiness item. Unrelated local work is preserved; external Slack delivery will use only a local mock webhook.
   "2026-07-10T18:58:20.641Z",context-specialist,"2026-07-10 context-specialist: Fixed TS18048 build failure (brief.insights optional null-safety in test). typecheck+build+test(30 pass)+pack(23.2KB)+changelog all green. npm@2026.7.10 published, GitHub release v2026.07.10 exists, CI+Daily Release workflows green. No secrets in tracked files or full git history. .gitignore already correct (dist/ excluded, .env excluded)."
   "2026-07-11T18:21:50.626Z",codex,"Found agent UX defect: missing-focus guidance emits nonexistent `pm show`; current CLI 2026.7.11 uses `pm get`. Internal subprocesses also use legacy `--path` instead of preferred `--pm-path`."
+  "2026-07-11T18:33:29.817Z",codex,"Review follow-up: sanitize agent-executable focus guidance, add Windows pm.cmd support, preserve spawn errors, and centralize current CLI command constants. Added malicious-focus regression coverage."
 notes[3]{created_at,author,text}:
   "2026-07-09T21:36:10.122Z",codex-reporting,"Evidence will be appended as each dependency, command, artifact, security/history, Greptile, CI, review, and merge gate completes."
   "2026-07-10T18:58:20.927Z",context-specialist,"Decision: No code changes needed beyond TS18048 test fix. Previous agent's work (focus-type closed-exclusion, Slack stale-context section, blocker label dedup) is production-ready. Extension version 2026.7.6 matches package.json."
