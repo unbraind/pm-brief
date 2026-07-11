@@ -630,15 +630,20 @@ function round1(value: number): number {
 
 export function summarizeMomentum(items: PmItem[], options: BriefOptions = {}): MomentumSummary {
   const now = new Date(options.generatedAt ?? Date.now());
-  const windowDays = options.completedDays ?? 7;
+  const windowDays = Math.max(0, options.completedDays ?? 7);
   const cutoff = now.getTime() - windowDays * 86_400_000;
   const closed = items
     .filter((item) => isClosed(item))
-    .map((item) => ({ item, closedRaw: itemClosedAt(item), closedTime: Date.parse(itemClosedAt(item)) }))
+    .map((item) => {
+      const closedRaw = itemClosedAt(item);
+      return { item, closedRaw, closedTime: Date.parse(closedRaw) };
+    })
     .filter(({ closedTime }) => Number.isFinite(closedTime) && closedTime >= cutoff && closedTime <= now.getTime())
     .sort((a, b) => b.closedTime - a.closedTime || a.item.id.localeCompare(b.item.id));
 
-  const byType: Record<string, number> = {};
+  // Object.create(null): item types are user-controlled, so a type literally
+  // named "toString"/"hasOwnProperty" must not collide with Object.prototype.
+  const byType: Record<string, number> = Object.create(null);
   const cycleDaysList: number[] = [];
   const recent: MomentumClose[] = [];
   for (const { item, closedRaw, closedTime } of closed) {

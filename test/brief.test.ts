@@ -490,7 +490,7 @@ test("summarizeMomentum counts closes within the window with cycle-time stats", 
   const momentum = summarizeMomentum(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
   assert.equal(momentum.windowDays, 7);
   assert.equal(momentum.closedCount, 3);
-  assert.deepEqual(momentum.byType, { Task: 2, Issue: 1 });
+  assert.deepEqual({ ...momentum.byType }, { Task: 2, Issue: 1 });
   assert.equal(momentum.throughputPerDay, 0.43);
   assert.ok(momentum.cycleTime);
   assert.equal(momentum.cycleTime?.sampleSize, 2);
@@ -523,10 +523,30 @@ test("summarizeMomentum excludes closed items lacking a real close timestamp", (
   assert.equal(momentum.cycleTime?.medianDays, 2);
 });
 
+test("summarizeMomentum tallies reserved-name item types without prototype collisions", () => {
+  const reservedTypeItems: PmItem[] = [
+    { id: "pm-r1", title: "Weird type A", type: "toString", status: "closed", created_at: "2026-06-08T00:00:00Z", closed_at: "2026-06-09T00:00:00Z" },
+    { id: "pm-r2", title: "Weird type B", type: "toString", status: "closed", created_at: "2026-06-07T00:00:00Z", closed_at: "2026-06-09T00:00:00Z" },
+    { id: "pm-r3", title: "Normal", type: "Task", status: "closed", created_at: "2026-06-06T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
+  ];
+  const momentum = summarizeMomentum(reservedTypeItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
+  assert.equal(momentum.byType["toString"], 2);
+  assert.equal(momentum.byType["Task"], 1);
+  assert.equal(momentum.closedCount, 3);
+  // JSON output (used by --format json) must serialize the null-proto map cleanly.
+  assert.deepEqual(JSON.parse(JSON.stringify(momentum.byType)), { toString: 2, Task: 1 });
+});
+
+test("summarizeMomentum clamps a negative window to zero", () => {
+  const momentum = summarizeMomentum(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: -5 });
+  assert.equal(momentum.windowDays, 0);
+  assert.equal(momentum.throughputPerDay, 0);
+});
+
 test("summarizeMomentum reports an empty window cleanly", () => {
   const momentum = summarizeMomentum(momentumItems, { generatedAt: "2027-01-01T00:00:00Z", completedDays: 7 });
   assert.equal(momentum.closedCount, 0);
-  assert.deepEqual(momentum.byType, {});
+  assert.deepEqual({ ...momentum.byType }, {});
   assert.equal(momentum.cycleTime, undefined);
   assert.deepEqual(momentum.recent, []);
 });
