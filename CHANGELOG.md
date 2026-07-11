@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- brief momentum: velocity + cycle-time context from closed_at ([pm-brief-gza2](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-gza2.toon))
+
 ## 2026.7.10-1 - 2026-07-10
 
 ### Added
