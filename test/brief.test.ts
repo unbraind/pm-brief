@@ -5,6 +5,7 @@ import extension, {
   detectStaleContext,
   explainNextItems,
   extractRelationships,
+  parsePmItemsOutput,
   readRecentActivity,
   renderAgentPrompt,
   renderMarkdownBrief,
@@ -75,6 +76,13 @@ test("brief next command exposes explain flag", () => {
 
 test("extractRelationships normalizes dependency fields", () => {
   assert.deepEqual(extractRelationships(items[0]!), [{ from: "pm-a", to: "pm-b", kind: "blocked_by" }]);
+});
+
+test("parsePmItemsOutput reports malformed CLI output as a command error", () => {
+  assert.throws(
+    () => parsePmItemsOutput("not-json"),
+    (error: unknown) => error instanceof Error && error.name === "CommandError" && error.message.startsWith("Unable to parse pm item JSON:"),
+  );
 });
 
 test("selectNextItems ranks unblocked priority before blocked work", () => {

@@ -1104,8 +1104,21 @@ export function readPmItems(pmRoot: string): PmItem[] {
   if (result.status !== 0) {
     throw new CommandError(result.stderr?.trim() || result.error?.message || "`pm list-all --json --include-body` failed");
   }
-  const parsed = JSON.parse(result.stdout);
-  const items = Array.isArray(parsed) ? parsed : parsed.items ?? parsed.results ?? [];
+  return parsePmItemsOutput(result.stdout);
+}
+
+export function parsePmItemsOutput(output: string): PmItem[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new CommandError(`Unable to parse pm item JSON: ${detail}`);
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const record = parsed as Record<string, unknown>;
+  const items = Array.isArray(parsed) ? parsed : record.items ?? record.results ?? [];
+  if (!Array.isArray(items)) return [];
   return items.filter((item: unknown): item is PmItem => Boolean(item) && typeof item === "object" && typeof (item as PmItem).id === "string");
 }
 
