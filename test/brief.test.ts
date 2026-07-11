@@ -10,6 +10,7 @@ import extension, {
   renderMarkdownBrief,
   renderSlackBrief,
   selectNextItems,
+  summarizeMomentum,
   summarizeRisks,
   type PmItem,
 } from "../dist/index.js";
@@ -57,7 +58,7 @@ const items: PmItem[] = [
 test("extension registers brief commands", () => {
   const commands: Array<Record<string, unknown>> = [];
   extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale"]);
+  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum"]);
   const nextFlags = commands.find((command) => command.name === "brief next")?.flags as Array<Record<string, unknown>>;
   assert.ok(nextFlags.some((flag) => flag.long === "--explain"));
   assert.ok(nextFlags.some((flag) => flag.long === "--confidence"));
@@ -475,4 +476,118 @@ test("renderAgentPrompt includes recent activity when history is present", () =>
   brief.recentActivity = [{ timestamp: "2026-06-05T12:00:00Z", operation: "comment", itemId: "pm-a" }];
   const prompt = renderAgentPrompt(brief);
   assert.match(prompt, /Recent activity:/);
+});
+
+const momentumItems: PmItem[] = [
+  { id: "pm-m1", title: "Fast task", type: "Task", status: "closed", created_at: "2026-06-06T00:00:00Z", closed_at: "2026-06-09T00:00:00Z" },
+  { id: "pm-m2", title: "Slow issue", type: "Issue", status: "done", created_at: "2026-06-01T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
+  { id: "pm-m3", title: "Stale close (no closed_at)", type: "Task", status: "closed", updated_at: "2026-06-09T00:00:00Z" },
+  { id: "pm-m4", title: "Old close outside window", type: "Task", status: "closed", created_at: "2026-04-01T00:00:00Z", closed_at: "2026-05-01T00:00:00Z" },
+  { id: "pm-m5", title: "Still open", type: "Task", status: "open", created_at: "2026-06-05T00:00:00Z" },
+];
+
+test("summarizeMomentum counts closes within the window with cycle-time stats", () => {
+  const momentum = summarizeMomentum(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
+  assert.equal(momentum.windowDays, 7);
+  assert.equal(momentum.closedCount, 3);
+  assert.deepEqual({ ...momentum.byType }, { Task: 2, Issue: 1 });
+  assert.equal(momentum.throughputPerDay, 0.43);
+  assert.ok(momentum.cycleTime);
+  assert.equal(momentum.cycleTime?.sampleSize, 2);
+  assert.equal(momentum.cycleTime?.medianDays, 5);
+  assert.equal(momentum.cycleTime?.p90Days, 7);
+  assert.deepEqual(momentum.recent.map((entry) => entry.id), ["pm-m1", "pm-m3", "pm-m2"]);
+  assert.equal(momentum.recent.find((entry) => entry.id === "pm-m1")?.cycleDays, 3);
+  assert.equal(momentum.recent.find((entry) => entry.id === "pm-m3")?.cycleDays, undefined);
+});
+
+test("summarizeMomentum excludes closes older than the window and open items", () => {
+  const momentum = summarizeMomentum(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
+  assert.ok(!momentum.recent.some((entry) => entry.id === "pm-m4"));
+  assert.ok(!momentum.recent.some((entry) => entry.id === "pm-m5"));
+  const wide = summarizeMomentum(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 90 });
+  assert.equal(wide.closedCount, 4);
+});
+
+test("summarizeMomentum excludes closed items lacking a real close timestamp", () => {
+  // A closed item with only created_at has no closed_at/updated_at signal, so
+  // it must not be placed in the window nor inject a spurious 0-day cycle time.
+  const noCloseSignal: PmItem[] = [
+    { id: "pm-only-created", title: "Imported, no close stamp", type: "Task", status: "closed", created_at: "2026-06-09T00:00:00Z" },
+    { id: "pm-real", title: "Properly closed", type: "Task", status: "closed", created_at: "2026-06-06T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
+  ];
+  const momentum = summarizeMomentum(noCloseSignal, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
+  assert.equal(momentum.closedCount, 1);
+  assert.deepEqual(momentum.recent.map((entry) => entry.id), ["pm-real"]);
+  assert.equal(momentum.cycleTime?.sampleSize, 1);
+  assert.equal(momentum.cycleTime?.medianDays, 2);
+});
+
+test("summarizeMomentum tallies reserved-name item types without prototype collisions", () => {
+  const reservedTypeItems: PmItem[] = [
+    { id: "pm-r1", title: "Weird type A", type: "toString", status: "closed", created_at: "2026-06-08T00:00:00Z", closed_at: "2026-06-09T00:00:00Z" },
+    { id: "pm-r2", title: "Weird type B", type: "toString", status: "closed", created_at: "2026-06-07T00:00:00Z", closed_at: "2026-06-09T00:00:00Z" },
+    { id: "pm-r3", title: "Normal", type: "Task", status: "closed", created_at: "2026-06-06T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
+  ];
+  const momentum = summarizeMomentum(reservedTypeItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
+  assert.equal(momentum.byType["toString"], 2);
+  assert.equal(momentum.byType["Task"], 1);
+  assert.equal(momentum.closedCount, 3);
+  // JSON output (used by --format json) must serialize the null-proto map cleanly.
+  assert.deepEqual(JSON.parse(JSON.stringify(momentum.byType)), { toString: 2, Task: 1 });
+});
+
+test("summarizeMomentum clamps a negative window to zero", () => {
+  const momentum = summarizeMomentum(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: -5 });
+  assert.equal(momentum.windowDays, 0);
+  assert.equal(momentum.throughputPerDay, 0);
+});
+
+test("summarizeMomentum reports an empty window cleanly", () => {
+  const momentum = summarizeMomentum(momentumItems, { generatedAt: "2027-01-01T00:00:00Z", completedDays: 7 });
+  assert.equal(momentum.closedCount, 0);
+  assert.deepEqual({ ...momentum.byType }, {});
+  assert.equal(momentum.cycleTime, undefined);
+  assert.deepEqual(momentum.recent, []);
+});
+
+test("buildBrief always includes a momentum summary", () => {
+  const brief = buildBrief(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
+  assert.equal(brief.momentum.closedCount, 3);
+});
+
+test("renderMarkdownBrief includes a Momentum section with velocity metrics", () => {
+  const markdown = renderMarkdownBrief(buildBrief(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 }));
+  assert.match(markdown, /## Momentum/);
+  assert.match(markdown, /Closed 3 item\(s\) in the last 7 day\(s\)/);
+  assert.match(markdown, /Cycle time: median 5d, p90 7d \(n=2\)/);
+});
+
+test("renderMarkdownBrief renders an empty Momentum section when nothing closed recently", () => {
+  const markdown = renderMarkdownBrief(buildBrief(momentumItems, { generatedAt: "2027-01-01T00:00:00Z", completedDays: 7 }));
+  assert.match(markdown, /## Momentum\n\n_No items closed in the last 7 day\(s\)\._/);
+});
+
+test("renderSlackBrief includes a Momentum section", () => {
+  const slack = renderSlackBrief(buildBrief(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 }));
+  assert.match(slack, /\*Momentum\*/);
+  assert.match(slack, /Closed 3 item\(s\)/);
+});
+
+test("renderAgentPrompt surfaces momentum when items closed recently", () => {
+  const prompt = renderAgentPrompt(buildBrief(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 }));
+  assert.match(prompt, /Recent momentum:/);
+  assert.match(prompt, /Closed 3 item\(s\) in the last 7 day\(s\); throughput 0.43\/day, median cycle 5d/);
+});
+
+test("brief command registers a --completed-days flag and brief momentum exposes --days", () => {
+  const commands: Array<Record<string, unknown>> = [];
+  extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
+  const briefFlags = (commands.find((command) => command.name === "brief")?.flags as Array<{ long?: string }>).map((flag) => flag.long);
+  assert.ok(briefFlags.includes("--completed-days"));
+  const momentumCommand = commands.find((command) => command.name === "brief momentum");
+  assert.ok(momentumCommand, "brief momentum command should be registered");
+  const momentumFlags = (momentumCommand.flags as Array<{ long?: string }>).map((flag) => flag.long);
+  assert.ok(momentumFlags.includes("--days"));
+  assert.ok(momentumFlags.includes("--format"));
 });
