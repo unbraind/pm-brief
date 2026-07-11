@@ -577,7 +577,7 @@ test("renderSlackBrief includes a Momentum section", () => {
 test("renderAgentPrompt surfaces momentum when items closed recently", () => {
   const prompt = renderAgentPrompt(buildBrief(momentumItems, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 }));
   assert.match(prompt, /Recent momentum:/);
-  assert.match(prompt, /Closed 3 item\(s\) in the last 7 day\(s\); throughput 0.4\/day, median cycle 5d/);
+  assert.match(prompt, /Closed 3 item\(s\) in the last 7 day\(s\); throughput 0.43\/day, median cycle 5d/);
 });
 
 test("brief command registers a --completed-days flag and brief momentum exposes --days", () => {

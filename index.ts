@@ -941,7 +941,7 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   } else {
     const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
     lines.push(`- Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
-    lines.push(`- Throughput: ${formatScoreValue(momentum.throughputPerDay)} item(s)/day`);
+    lines.push(`- Throughput: ${String(momentum.throughputPerDay)} item(s)/day`);
     if (momentum.cycleTime) {
       lines.push(`- Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
     }
@@ -1009,7 +1009,7 @@ export function renderSlackBrief(brief: AgentBrief): string {
   } else {
     const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
     lines.push(`• Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
-    lines.push(`• Throughput: ${formatScoreValue(momentum.throughputPerDay)} item(s)/day`);
+    lines.push(`• Throughput: ${String(momentum.throughputPerDay)} item(s)/day`);
     if (momentum.cycleTime) {
       lines.push(`• Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
     }
@@ -1083,7 +1083,7 @@ export function renderAgentPrompt(brief: AgentBrief): string {
     const m = brief.momentum;
     const cycle = m.cycleTime ? `, median cycle ${formatScoreValue(m.cycleTime.medianDays)}d (p90 ${formatScoreValue(m.cycleTime.p90Days)}d)` : "";
     lines.push("", "Recent momentum:");
-    lines.push(`- Closed ${m.closedCount} item(s) in the last ${m.windowDays} day(s); throughput ${formatScoreValue(m.throughputPerDay)}/day${cycle}.`);
+    lines.push(`- Closed ${m.closedCount} item(s) in the last ${m.windowDays} day(s); throughput ${String(m.throughputPerDay)}/day${cycle}.`);
   }
   lines.push("", "Working rules:");
   lines.push("- Do not assume context outside pm items and linked files.");
@@ -1320,7 +1320,7 @@ function registerCommands(api: any): void {
       } else {
         const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
         lines.push(`Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
-        lines.push(`Throughput: ${formatScoreValue(momentum.throughputPerDay)} item(s)/day`);
+        lines.push(`Throughput: ${String(momentum.throughputPerDay)} item(s)/day`);
         if (momentum.cycleTime) {
           lines.push(`Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
         }
