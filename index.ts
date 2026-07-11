@@ -34,6 +34,7 @@ export interface PmItem {
   deadline?: string;
   created_at?: string;
   updated_at?: string;
+  closed_at?: string;
   deps?: unknown;
   dependencies?: unknown;
   blocked_by?: unknown;
@@ -54,6 +55,7 @@ export interface BriefOptions {
   includeHistory?: boolean;
   historyLimit?: number;
   staleDays?: number;
+  completedDays?: number;
   nextCount?: number;
   generatedAt?: string;
   pmRoot?: string;
@@ -128,6 +130,29 @@ export interface BriefActivity {
   message?: string;
 }
 
+export interface MomentumClose {
+  id: string;
+  title: string;
+  type: string;
+  closedAt: string;
+  cycleDays?: number;
+}
+
+export interface MomentumCycleTime {
+  sampleSize: number;
+  medianDays: number;
+  p90Days: number;
+}
+
+export interface MomentumSummary {
+  windowDays: number;
+  closedCount: number;
+  byType: Record<string, number>;
+  throughputPerDay: number;
+  cycleTime?: MomentumCycleTime;
+  recent: MomentumClose[];
+}
+
 export interface RecommendedPmUpdate {
   itemId: string;
   command: string;
@@ -158,6 +183,7 @@ export interface AgentBrief {
   blockers: BriefBlocker[];
   risks: BriefRisk[];
   staleContext: StaleContextFinding[];
+  momentum: MomentumSummary;
   recentActivity?: BriefActivity[];
   decisionsNeeded: BriefItem[];
   recommendedPmUpdates: RecommendedPmUpdate[];
@@ -574,6 +600,64 @@ export function detectStaleContext(items: PmItem[], options: BriefOptions = {}):
     .map(({ item, days }) => ({ itemId: item.id, title: titleOf(item), updatedAt: itemUpdatedAt(item) || undefined, daysStale: days }));
 }
 
+function itemClosedAt(item: PmItem): string {
+  // pm-cli 2026.7.11+ stamps closed_at when an item is closed. Older builds
+  // never recorded a dedicated close timestamp, so fall back to updated_at
+  // (typically the close operation was the last write for a closed item).
+  return text(item.closed_at) || itemUpdatedAt(item);
+}
+
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.ceil((p / 100) * sorted.length);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, rank - 1))]!;
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+export function summarizeMomentum(items: PmItem[], options: BriefOptions = {}): MomentumSummary {
+  const now = new Date(options.generatedAt ?? Date.now());
+  const windowDays = options.completedDays ?? 7;
+  const cutoff = now.getTime() - windowDays * 86_400_000;
+  const closed = items
+    .filter((item) => isClosed(item))
+    .map((item) => ({ item, closedRaw: itemClosedAt(item), closedTime: Date.parse(itemClosedAt(item)) }))
+    .filter(({ closedTime }) => Number.isFinite(closedTime) && closedTime >= cutoff && closedTime <= now.getTime())
+    .sort((a, b) => b.closedTime - a.closedTime || a.item.id.localeCompare(b.item.id));
+
+  const byType: Record<string, number> = {};
+  const cycleDaysList: number[] = [];
+  const recent: MomentumClose[] = [];
+  for (const { item, closedRaw, closedTime } of closed) {
+    const type = typeOf(item);
+    byType[type] = (byType[type] ?? 0) + 1;
+    const createdTime = Date.parse(text(item.created_at));
+    let cycleDays: number | undefined;
+    if (Number.isFinite(createdTime) && closedTime >= createdTime) {
+      cycleDays = round1((closedTime - createdTime) / 86_400_000);
+      cycleDaysList.push(cycleDays);
+    }
+    if (recent.length < 5) {
+      recent.push({ id: item.id, title: titleOf(item), type, closedAt: closedRaw, cycleDays });
+    }
+  }
+  const throughputPerDay = windowDays > 0 ? Math.round((closed.length / windowDays) * 100) / 100 : 0;
+  const cycleTime: MomentumCycleTime | undefined = cycleDaysList.length > 0
+    ? { sampleSize: cycleDaysList.length, medianDays: round1(median(cycleDaysList)), p90Days: round1(percentile(cycleDaysList, 90)) }
+    : undefined;
+  return { windowDays, closedCount: closed.length, byType, throughputPerDay, cycleTime, recent };
+}
+
 export function summarizeRisks(items: PmItem[], options: BriefOptions = {}): BriefRisk[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const risks: BriefRisk[] = [];
@@ -704,6 +788,7 @@ function compactToBudget(brief: AgentBrief): AgentBrief {
     recommendedPmUpdates: brief.recommendedPmUpdates.slice(0, 5),
     staleContext: brief.staleContext.slice(0, 5),
     risks: brief.risks.slice(0, 8),
+    momentum: { ...brief.momentum, recent: brief.momentum.recent.slice(0, 3) },
     recentActivity: brief.recentActivity?.slice(0, 8),
   };
   estimated = estimateTokens(next);
@@ -715,6 +800,7 @@ function compactToBudget(brief: AgentBrief): AgentBrief {
     blockers: next.blockers.slice(0, 6),
     focus: next.focus.slice(0, 3),
     decisionsNeeded: next.decisionsNeeded.slice(0, 3),
+    momentum: { ...next.momentum, recent: next.momentum.recent.slice(0, 2) },
     recentActivity: next.recentActivity?.slice(0, 5),
   };
   estimated = estimateTokens(tighter);
@@ -741,6 +827,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     .slice(0, 5)
     .map((item) => toBriefItem(item, rels, items, now, activeIds));
   const staleContext = detectStaleContext(items, options).slice(0, 10);
+  const momentum = summarizeMomentum(items, options);
   const risks = summarizeRisks(items, options).slice(0, 12);
   const recentActivity = options.includeHistory ? readRecentActivity(options.pmRoot ?? ".agents/pm", options.historyLimit ?? 10) : undefined;
   const recommendedPmUpdates: RecommendedPmUpdate[] = [
@@ -774,6 +861,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     blockers,
     risks,
     staleContext,
+    momentum,
     recentActivity,
     decisionsNeeded,
     recommendedPmUpdates,
@@ -838,6 +926,22 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   lines.push("", "## Stale Context", "");
   if (brief.staleContext.length === 0) lines.push("_No stale open items detected._");
   for (const stale of brief.staleContext) lines.push(`- ${stale.itemId}: ${escapeLine(stale.title)} - ${stale.daysStale} day(s) stale`);
+  lines.push("", "## Momentum", "");
+  const momentum = brief.momentum;
+  if (momentum.closedCount === 0) {
+    lines.push(`_No items closed in the last ${momentum.windowDays} day(s)._`);
+  } else {
+    const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
+    lines.push(`- Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
+    lines.push(`- Throughput: ${formatScoreValue(momentum.throughputPerDay)} item(s)/day`);
+    if (momentum.cycleTime) {
+      lines.push(`- Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
+    }
+    for (const close of momentum.recent) {
+      const cycle = close.cycleDays !== undefined ? ` - ${formatScoreValue(close.cycleDays)}d cycle` : "";
+      lines.push(`  - ${close.id}: ${escapeLine(close.title)} (${close.type})${cycle}`);
+    }
+  }
   if (brief.recentActivity?.length) {
     lines.push("", "## Recent Activity", "");
     for (const entry of brief.recentActivity) {
@@ -889,6 +993,22 @@ export function renderSlackBrief(brief: AgentBrief): string {
   if (brief.staleContext.length === 0) lines.push("_No stale open items detected._");
   for (const stale of brief.staleContext) {
     lines.push(`• \`${stale.itemId}\` ${escapeLine(stale.title)} — ${stale.daysStale} day(s) stale`);
+  }
+  lines.push("", "*Momentum*");
+  const momentum = brief.momentum;
+  if (momentum.closedCount === 0) {
+    lines.push(`_No items closed in the last ${momentum.windowDays} day(s)._`);
+  } else {
+    const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
+    lines.push(`• Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
+    lines.push(`• Throughput: ${formatScoreValue(momentum.throughputPerDay)} item(s)/day`);
+    if (momentum.cycleTime) {
+      lines.push(`• Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
+    }
+    for (const close of momentum.recent) {
+      const cycle = close.cycleDays !== undefined ? ` — ${formatScoreValue(close.cycleDays)}d cycle` : "";
+      lines.push(`• \`${close.id}\` ${escapeLine(close.title)} (${close.type})${cycle}`);
+    }
   }
   if (brief.recentActivity?.length) {
     lines.push("", "*Recent Activity*");
@@ -950,6 +1070,12 @@ export function renderAgentPrompt(brief: AgentBrief): string {
       const msg = entry.message ? ` - ${escapeLine(entry.message)}` : "";
       lines.push(`- ${entry.timestamp}${who} ${entry.operation}${itemPart}${msg}`);
     }
+  }
+  if (brief.momentum.closedCount > 0) {
+    const m = brief.momentum;
+    const cycle = m.cycleTime ? `, median cycle ${formatScoreValue(m.cycleTime.medianDays)}d (p90 ${formatScoreValue(m.cycleTime.p90Days)}d)` : "";
+    lines.push("", "Recent momentum:");
+    lines.push(`- Closed ${m.closedCount} item(s) in the last ${m.windowDays} day(s); throughput ${formatScoreValue(m.throughputPerDay)}/day${cycle}.`);
   }
   lines.push("", "Working rules:");
   lines.push("- Do not assume context outside pm items and linked files.");
@@ -1015,6 +1141,7 @@ function registerCommands(api: any): void {
     { long: "--status", value_name: "status", description: "Statuses to include (comma-separated)", type: "string" },
     { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
     { long: "--stale-days", value_name: "n", description: "Days before an open item is stale (default: 7)", type: "string" },
+    { long: "--completed-days", value_name: "n", description: "Window in days for the momentum/velocity summary (default: 7)", type: "string" },
     { long: "--dependency-order", description: "Prefer prerequisite work before dependents in next-work ranking", type: "boolean" },
     { long: "--format", value_name: "format", description: "Output format: markdown, json, or slack", type: "string" },
     { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
@@ -1046,6 +1173,7 @@ function registerCommands(api: any): void {
         includeHistory,
         historyLimit,
         staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
+        completedDays: readInt(options, ["completed-days", "completedDays"], 7),
         generatedAt: new Date().toISOString(),
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
@@ -1081,6 +1209,7 @@ function registerCommands(api: any): void {
         includeHistory,
         historyLimit,
         staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
+        completedDays: readInt(options, ["completed-days", "completedDays"], 7),
         generatedAt: new Date().toISOString(),
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
@@ -1155,6 +1284,44 @@ function registerCommands(api: any): void {
         return renderedCommandResult(`${JSON.stringify({ stale }, null, 2)}\n`);
       }
       return renderedCommandResult(`${stale.map((item) => `${item.itemId}: ${escapeLine(item.title)} - ${item.daysStale} day(s) stale`).join("\n")}\n`);
+    },
+  });
+  api.registerCommand({
+    name: "brief momentum",
+    description: "Summarize recently closed pm items with throughput and cycle time.",
+    intent: "give agents velocity context (what shipped, how fast) for planning decisions",
+    examples: ["pm brief momentum", "pm brief momentum --days 14", "pm brief momentum --format json"],
+    flags: [
+      { long: "--days", value_name: "n", description: "Window in days for closed-item lookback (default: 7)", type: "string" },
+      { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
+    ],
+    async run(ctx: any) {
+      const options = ctx.options as Record<string, unknown>;
+      const format = (readString(options, "format") ?? "text").toLowerCase();
+      if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
+      const momentum = summarizeMomentum(readPmItems(ctx.pm_root), {
+        completedDays: readInt(options, ["days"], 7),
+        generatedAt: new Date().toISOString(),
+      });
+      if (format === "json") {
+        return renderedCommandResult(`${JSON.stringify({ momentum }, null, 2)}\n`);
+      }
+      const lines: string[] = [];
+      if (momentum.closedCount === 0) {
+        lines.push(`No items closed in the last ${momentum.windowDays} day(s).`);
+      } else {
+        const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
+        lines.push(`Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
+        lines.push(`Throughput: ${formatScoreValue(momentum.throughputPerDay)} item(s)/day`);
+        if (momentum.cycleTime) {
+          lines.push(`Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
+        }
+        for (const close of momentum.recent) {
+          const cycle = close.cycleDays !== undefined ? ` - ${formatScoreValue(close.cycleDays)}d cycle` : "";
+          lines.push(`  ${close.id}: ${escapeLine(close.title)} (${close.type})${cycle}`);
+        }
+      }
+      return renderedCommandResult(`${lines.join("\n")}\n`);
     },
   });
 }
