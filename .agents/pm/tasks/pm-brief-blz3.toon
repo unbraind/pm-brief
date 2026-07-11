@@ -6,25 +6,32 @@ status: in_progress
 priority: 1
 tags[4]: agent-audit,context-management,ecosystem,release-readiness
 created_at: "2026-07-06T15:33:20.276Z"
-updated_at: "2026-07-10T19:00:18.021Z"
-assignee: codex-reporting
+updated_at: "2026-07-11T18:39:21.063Z"
+assignee: codex
 author: unknown
+estimated_minutes: 240
 acceptance_criteria: Inventory GitHub reports and existing PR; validate all commands and documented output modes with real PM data; build/typecheck/test/pack/install/activate; inspect tarball; audit tracked files and full history; verify daily change-gated npm+Bun+GitHub release using pm-changelog; run Greptile; close all bot feedback and checks; merge and return main.
 outcome: "Current SDK/changelog dependencies, production-grade command UX, exhaustive real-workspace evidence, privacy-safe package/history, and a fully reviewed green merged PR."
 why_now: "This package produces agent-facing project context; correctness, compactness, privacy, and release integrity are required before public distribution."
 risk: high
 confidence: medium
-comments[2]{created_at,author,text}:
+comments[5]{created_at,author,text}:
   "2026-07-09T21:36:10.122Z",codex-reporting,2026-07-09 codex-reporting resumed the existing nonduplicate readiness item. Unrelated local work is preserved; external Slack delivery will use only a local mock webhook.
   "2026-07-10T18:58:20.641Z",context-specialist,"2026-07-10 context-specialist: Fixed TS18048 build failure (brief.insights optional null-safety in test). typecheck+build+test(30 pass)+pack(23.2KB)+changelog all green. npm@2026.7.10 published, GitHub release v2026.07.10 exists, CI+Daily Release workflows green. No secrets in tracked files or full git history. .gitignore already correct (dist/ excluded, .env excluded)."
-notes[2]{created_at,author,text}:
+  "2026-07-11T18:21:50.626Z",codex,"Found agent UX defect: missing-focus guidance emits nonexistent `pm show`; current CLI 2026.7.11 uses `pm get`. Internal subprocesses also use legacy `--path` instead of preferred `--pm-path`."
+  "2026-07-11T18:33:29.817Z",codex,"Review follow-up: sanitize agent-executable focus guidance, add Windows pm.cmd support, preserve spawn errors, and centralize current CLI command constants. Added malicious-focus regression coverage."
+  "2026-07-11T18:39:21.022Z",codex,"Second review follow-up: convert malformed pm list JSON into CommandError and add parser regression coverage."
+notes[3]{created_at,author,text}:
   "2026-07-09T21:36:10.122Z",codex-reporting,"Evidence will be appended as each dependency, command, artifact, security/history, Greptile, CI, review, and merge gate completes."
   "2026-07-10T18:58:20.927Z",context-specialist,"Decision: No code changes needed beyond TS18048 test fix. Previous agent's work (focus-type closed-exclusion, Slack stale-context section, blocker label dedup) is production-ready. Extension version 2026.7.6 matches package.json."
+  "2026-07-11T18:23:46.180Z",codex,"author=codex,text=Validated current local package install/activation with pm 2026.7.11. Real tracker commands brief, prompt, next --explain, stale, momentum, include-history, JSON/Markdown all succeeded. release:check passes with isolated npm config: 42 tests, zero vulnerabilities, clean nine-file tarball, changelog current. GitHub open PR/issues/Dependabot/secret alerts: zero. Full-history credential-pattern scan: zero."
 learnings[1]{created_at,author,text}:
   "2026-07-10T18:58:21.251Z",context-specialist,"Upstream pm CLI UX bug: repeated --section/--id flags do not accumulate into arrays; only the last value is kept. Workaround: use comma-separated values (--section focus,blockers). Affects all pm extensions with repeatable string flags."
-files[2]{path,scope,note}:
+files[3]{path,scope,note}:
   manifest.json,project,compatibility bumped to >=2026.7.10
   test/brief.test.ts,project,TS18048 null-safety fix
-tests[1]{command,path,scope,timeout_seconds}:
+  index.ts,project,Fix agent command guidance and preferred pm CLI tracker path
+tests[2]{command,path,scope,timeout_seconds}:
   "npm run release:check",package.json,project,120
+  npm test,package.json,project,120
 body: "Track the July 6, 2026 fleet pass: align package metadata with latest pm CLI/SDK and pm-changelog, verify daily release automation, run build/test/audit/package checks with real workspace data where practical, inspect GitHub state, and record privacy/history findings without changing pm-cli itself."

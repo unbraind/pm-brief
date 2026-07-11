@@ -52,7 +52,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "pm-changelog": "^2026.7.10",
+    "pm-changelog": "2026.7.11",
     "typescript": "^7.0.2"
   },
   "pm": {
@@ -94,6 +94,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@unbrained/pm-cli": "^2026.7.10"
+    "@unbrained/pm-cli": "^2026.7.11"
   }
 }

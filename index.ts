@@ -4,6 +4,10 @@ import type { defineExtension as defineExtensionType } from "@unbrained/pm-cli/s
 
 const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
 
+const PM_EXECUTABLE = process.platform === "win32" ? "pm.cmd" : "pm";
+const PM_PATH_OPTION = "--pm-path";
+const SAFE_PM_ID = /^[a-zA-Z0-9._-]+$/;
+
 export const EXIT_CODE = {
   GENERIC_FAILURE: 1,
   USAGE: 2,
@@ -747,7 +751,7 @@ function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: F
     insights.push({
       level: "warning",
       message: `requested focus id(s) were not found: ${summarizeIds(focusSelection.missingIds)}`,
-      suggestion: `pm show ${focusSelection.missingIds[0]}`,
+      suggestion: SAFE_PM_ID.test(focusSelection.missingIds[0]!) ? `pm get ${focusSelection.missingIds[0]}` : undefined,
     });
   }
   if (focusSelection.closedExcludedIds.length > 0) {
@@ -1093,24 +1097,39 @@ export function renderAgentPrompt(brief: AgentBrief): string {
 }
 
 export function readPmItems(pmRoot: string): PmItem[] {
-  const result = spawnSync("pm", ["--path", pmRoot, "list-all", "--json", "--include-body"], {
+  const result = spawnSync(PM_EXECUTABLE, [PM_PATH_OPTION, pmRoot, "list-all", "--json", "--include-body"], {
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.status !== 0) throw new CommandError(result.stderr.trim() || "`pm list-all --json --include-body` failed");
-  const parsed = JSON.parse(result.stdout);
-  const items = Array.isArray(parsed) ? parsed : parsed.items ?? parsed.results ?? [];
+  if (result.status !== 0) {
+    throw new CommandError(result.stderr?.trim() || result.error?.message || "`pm list-all --json --include-body` failed");
+  }
+  return parsePmItemsOutput(result.stdout);
+}
+
+export function parsePmItemsOutput(output: string): PmItem[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new CommandError(`Unable to parse pm item JSON: ${detail}`);
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const record = parsed as Record<string, unknown>;
+  const items = Array.isArray(parsed) ? parsed : record.items ?? record.results ?? [];
+  if (!Array.isArray(items)) return [];
   return items.filter((item: unknown): item is PmItem => Boolean(item) && typeof item === "object" && typeof (item as PmItem).id === "string");
 }
 
 function pmVersion(): string {
-  const result = spawnSync("pm", ["--version"], { encoding: "utf-8" });
+  const result = spawnSync(PM_EXECUTABLE, ["--version"], { encoding: "utf-8" });
   return result.status === 0 ? result.stdout.trim() : "unknown";
 }
 
 export function readRecentActivity(pmRoot: string, limit = 10): BriefActivity[] {
   const safeLimit = Math.max(1, Math.min(limit, 100));
-  const result = spawnSync("pm", ["--path", pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)], {
+  const result = spawnSync(PM_EXECUTABLE, [PM_PATH_OPTION, pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)], {
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
   });

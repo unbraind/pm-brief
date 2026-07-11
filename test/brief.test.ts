@@ -5,6 +5,7 @@ import extension, {
   detectStaleContext,
   explainNextItems,
   extractRelationships,
+  parsePmItemsOutput,
   readRecentActivity,
   renderAgentPrompt,
   renderMarkdownBrief,
@@ -75,6 +76,13 @@ test("brief next command exposes explain flag", () => {
 
 test("extractRelationships normalizes dependency fields", () => {
   assert.deepEqual(extractRelationships(items[0]!), [{ from: "pm-a", to: "pm-b", kind: "blocked_by" }]);
+});
+
+test("parsePmItemsOutput reports malformed CLI output as a command error", () => {
+  assert.throws(
+    () => parsePmItemsOutput("not-json"),
+    (error: unknown) => error instanceof Error && error.name === "CommandError" && error.message.startsWith("Unable to parse pm item JSON:"),
+  );
 });
 
 test("selectNextItems ranks unblocked priority before blocked work", () => {
@@ -285,8 +293,15 @@ test("buildBrief adds insights for missing focus and empty filtered results", ()
   assert.ok(messages.some((message) => message.includes("closed focus item(s) were omitted")));
   assert.ok(messages.some((message) => message.includes("no open work matched filters")));
   const suggestions = brief.insights?.flatMap((insight) => insight.suggestion ? [insight.suggestion] : []) ?? [];
-  assert.ok(suggestions.includes("pm show pm-missing"));
+  assert.ok(suggestions.includes("pm get pm-missing"));
   assert.ok(suggestions.includes("pm brief --format markdown"));
+});
+
+test("buildBrief does not emit executable guidance for an unsafe focus id", () => {
+  const brief = buildBrief(items, { focusIds: ["pm-missing;echo-pwned"] });
+  const missingFocus = brief.insights?.find((insight) => insight.message.includes("requested focus id(s) were not found"));
+  assert.ok(missingFocus);
+  assert.equal(missingFocus.suggestion, undefined);
 });
 
 test("buildBrief compacts when token budget is small", () => {
@@ -320,7 +335,7 @@ test("renderMarkdownBrief includes brief insights section when available", () =>
   }));
   assert.match(markdown, /## Brief Insights/);
   assert.match(markdown, /requested focus id\(s\) were not found/);
-  assert.match(markdown, /suggestion: `pm show pm-missing`/);
+  assert.match(markdown, /suggestion: `pm get pm-missing`/);
 });
 
 test("renderAgentPrompt emits copy-pasteable next-turn instructions", () => {
