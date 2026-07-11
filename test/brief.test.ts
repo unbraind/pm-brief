@@ -509,6 +509,20 @@ test("summarizeMomentum excludes closes older than the window and open items", (
   assert.equal(wide.closedCount, 4);
 });
 
+test("summarizeMomentum excludes closed items lacking a real close timestamp", () => {
+  // A closed item with only created_at has no closed_at/updated_at signal, so
+  // it must not be placed in the window nor inject a spurious 0-day cycle time.
+  const noCloseSignal: PmItem[] = [
+    { id: "pm-only-created", title: "Imported, no close stamp", type: "Task", status: "closed", created_at: "2026-06-09T00:00:00Z" },
+    { id: "pm-real", title: "Properly closed", type: "Task", status: "closed", created_at: "2026-06-06T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
+  ];
+  const momentum = summarizeMomentum(noCloseSignal, { generatedAt: "2026-06-10T00:00:00Z", completedDays: 7 });
+  assert.equal(momentum.closedCount, 1);
+  assert.deepEqual(momentum.recent.map((entry) => entry.id), ["pm-real"]);
+  assert.equal(momentum.cycleTime?.sampleSize, 1);
+  assert.equal(momentum.cycleTime?.medianDays, 2);
+});
+
 test("summarizeMomentum reports an empty window cleanly", () => {
   const momentum = summarizeMomentum(momentumItems, { generatedAt: "2027-01-01T00:00:00Z", completedDays: 7 });
   assert.equal(momentum.closedCount, 0);

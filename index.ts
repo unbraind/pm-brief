@@ -604,7 +604,10 @@ function itemClosedAt(item: PmItem): string {
   // pm-cli 2026.7.11+ stamps closed_at when an item is closed. Older builds
   // never recorded a dedicated close timestamp, so fall back to updated_at
   // (typically the close operation was the last write for a closed item).
-  return text(item.closed_at) || itemUpdatedAt(item);
+  // Deliberately do NOT fall back to created_at: without a real close signal
+  // we cannot place the item in the momentum window, and using created_at
+  // would inject a spurious 0-day cycle time. Such items are excluded instead.
+  return text(item.closed_at) || text(item.updated_at);
 }
 
 function median(values: number[]): number {
