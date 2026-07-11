@@ -747,7 +747,7 @@ function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: F
     insights.push({
       level: "warning",
       message: `requested focus id(s) were not found: ${summarizeIds(focusSelection.missingIds)}`,
-      suggestion: `pm show ${focusSelection.missingIds[0]}`,
+      suggestion: `pm get ${focusSelection.missingIds[0]}`,
     });
   }
   if (focusSelection.closedExcludedIds.length > 0) {
@@ -1093,7 +1093,7 @@ export function renderAgentPrompt(brief: AgentBrief): string {
 }
 
 export function readPmItems(pmRoot: string): PmItem[] {
-  const result = spawnSync("pm", ["--path", pmRoot, "list-all", "--json", "--include-body"], {
+  const result = spawnSync("pm", ["--pm-path", pmRoot, "list-all", "--json", "--include-body"], {
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -1110,7 +1110,7 @@ function pmVersion(): string {
 
 export function readRecentActivity(pmRoot: string, limit = 10): BriefActivity[] {
   const safeLimit = Math.max(1, Math.min(limit, 100));
-  const result = spawnSync("pm", ["--path", pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)], {
+  const result = spawnSync("pm", ["--pm-path", pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)], {
     encoding: "utf-8",
     maxBuffer: 64 * 1024 * 1024,
   });

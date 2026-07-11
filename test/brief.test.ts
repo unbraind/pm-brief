@@ -285,7 +285,7 @@ test("buildBrief adds insights for missing focus and empty filtered results", ()
   assert.ok(messages.some((message) => message.includes("closed focus item(s) were omitted")));
   assert.ok(messages.some((message) => message.includes("no open work matched filters")));
   const suggestions = brief.insights?.flatMap((insight) => insight.suggestion ? [insight.suggestion] : []) ?? [];
-  assert.ok(suggestions.includes("pm show pm-missing"));
+  assert.ok(suggestions.includes("pm get pm-missing"));
   assert.ok(suggestions.includes("pm brief --format markdown"));
 });
 
@@ -320,7 +320,7 @@ test("renderMarkdownBrief includes brief insights section when available", () =>
   }));
   assert.match(markdown, /## Brief Insights/);
   assert.match(markdown, /requested focus id\(s\) were not found/);
-  assert.match(markdown, /suggestion: `pm show pm-missing`/);
+  assert.match(markdown, /suggestion: `pm get pm-missing`/);
 });
 
 test("renderAgentPrompt emits copy-pasteable next-turn instructions", () => {
