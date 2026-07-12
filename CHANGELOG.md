@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.7.12 - 2026-07-12
+
+### Other
+
+- Ecosystem release readiness pass 2026-07-06 ([pm-brief-blz3](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-blz3.toon))
+
 ## 2026.7.11-1 - 2026-07-11
 
 ### Added
