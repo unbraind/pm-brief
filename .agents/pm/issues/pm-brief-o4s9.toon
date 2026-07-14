@@ -1,0 +1,16 @@
+id: pm-brief-o4s9
+title: "brief: blocked_by edges doubled in blockers/risks (dependencies + blocked_by both parsed)"
+description: "extractRelationships parsed a blocked_by edge from BOTH item.dependencies (a blocked_by-kind object) AND item.blocked_by (the denormalized string pm's 'update --blocked-by' writes), emitting the same (from,to,blocked_by) edge twice. Doubled edges inflated blockers[], risks counts, and recommendedPmUpdates. Fix: dedup extractRelationships output by (from,to,kind); no-op for singly-sourced depends_on edges. Regression test added."
+type: Issue
+status: closed
+priority: 2
+tags[2]: agent-readiness,bug
+created_at: "2026-07-14T08:04:59.499Z"
+updated_at: "2026-07-14T08:05:12.167Z"
+closed_at: "2026-07-14T08:05:12.166Z"
+author: claude-opus
+acceptance_criteria: brief blockers shows each blocked_by edge once; depends_on edges preserved; unit test covers the denormalized dup case; default output otherwise unchanged.
+comments[1]{created_at,author,text}:
+  "2026-07-14T08:05:12.058Z",claude-opus,"Fixed: extractRelationships now dedups by (from,to,kind). Verified: brief blockers shows single blocked_by edge (was doubled on 2026.7.12); 45/45 unit tests incl. new dedup regression test."
+close_reason: Closed via pm update
+body: ""
