@@ -330,12 +330,24 @@ function parseRelationshipValue(value: unknown, fallbackKind: string): Array<{ t
 }
 
 export function extractRelationships(item: PmItem): Relationship[] {
-  return [
+  const rels = [
     ...parseRelationshipValue(item.deps, "depends_on"),
     ...parseRelationshipValue(item.dependencies, "depends_on"),
     ...parseRelationshipValue(item.blocked_by, "blocked_by"),
     ...parseRelationshipValue(item.blockedBy, "blocked_by"),
   ].filter((rel) => rel.to && rel.to !== item.id).map((rel) => ({ from: item.id, to: rel.to, kind: rel.kind }));
+  // pm's `update --blocked-by <id>` denormalizes the edge into BOTH item.dependencies
+  // (a blocked_by-kind object) AND item.blocked_by (a string), so the same edge is
+  // parsed twice. Dedup by (from,to,kind): a relationship is uniquely identified by
+  // that triple, so this drops only redundant duplicates and is a no-op for
+  // singly-sourced edges (e.g. depends_on, which has no denormalized string field).
+  const seen = new Set<string>();
+  return rels.filter((rel) => {
+    const key = JSON.stringify([rel.from, rel.to, rel.kind]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function estimateTokens(value: unknown): number {

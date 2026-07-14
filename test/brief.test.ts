@@ -78,6 +78,21 @@ test("extractRelationships normalizes dependency fields", () => {
   assert.deepEqual(extractRelationships(items[0]!), [{ from: "pm-a", to: "pm-b", kind: "blocked_by" }]);
 });
 
+test("extractRelationships dedups blocked_by edges denormalized into dependencies + blocked_by", () => {
+  // pm's `update --blocked-by <id>` writes the edge into BOTH item.dependencies
+  // (a blocked_by-kind object) AND item.blocked_by (a string), so a naive parse
+  // emits the same edge twice. The result must be a single deduped edge.
+  const item = {
+    id: "pm-x",
+    title: "Doubled blocker",
+    type: "Task",
+    status: "open",
+    dependencies: [{ id: "pm-y", kind: "blocked_by" }],
+    blocked_by: "pm-y",
+  } as (typeof items)[number];
+  assert.deepEqual(extractRelationships(item), [{ from: "pm-x", to: "pm-y", kind: "blocked_by" }]);
+});
+
 test("parsePmItemsOutput reports malformed CLI output as a command error", () => {
   assert.throws(
     () => parsePmItemsOutput("not-json"),
