@@ -106,6 +106,47 @@ test("selectNextItems ranks unblocked priority before blocked work", () => {
   assert.equal(next[2]?.whyNow, "blocked: resolve prerequisite before implementation");
 });
 
+test("selectNextItems honors the canonical pm next order over the local scorer", () => {
+  // `pm next` supplies the authoritative ranking so `brief next` agrees with it.
+  // Here the canonical order deliberately contradicts the local score ordering
+  // (which would be pm-b, pm-c, pm-a) to prove delegation wins.
+  const next = selectNextItems(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    nextCount: 3,
+    nextOrder: ["pm-c", "pm-a", "pm-b"],
+  });
+  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-a", "pm-b"]);
+});
+
+test("selectNextItems keeps candidates absent from pm next order after ranked ones", () => {
+  // A partial canonical order (only pm-c) must place pm-c first; the rest keep
+  // the deterministic local tiebreak so no candidate is dropped.
+  const next = selectNextItems(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    nextCount: 5,
+    nextOrder: ["pm-c"],
+  });
+  // pm-c is canonically ranked first; pm-a and pm-b are both unranked and must
+  // fall back to the deterministic local tiebreak (pm-b before the blocked pm-a),
+  // never NaN-driven insertion order.
+  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-b", "pm-a"]);
+});
+
+test("explicit dependency-order overrides the canonical pm next order", () => {
+  // `--dependency-order` is a deliberate override of the default ranking, so a
+  // supplied nextOrder must not win: prerequisite-first sorting is preserved and
+  // the blocked pm-a is never surfaced ahead of its prerequisites.
+  const next = selectNextItems(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    nextCount: 3,
+    dependencyOrder: true,
+    nextOrder: ["pm-a", "pm-b", "pm-c"],
+  });
+  assert.equal(next[0]?.id !== "pm-a", true, "blocked pm-a must not lead under dependency-order");
+  // Matches the dedicated dependency-order behavior (prerequisites before dependents).
+  assert.equal(next.at(-1)?.id, "pm-a");
+});
+
 test("selectNextItems includes evidence-weighted ranking details", () => {
   const next = selectNextItems([
     ...items,

@@ -64,6 +64,14 @@ export interface BriefOptions {
   generatedAt?: string;
   pmRoot?: string;
   pmVersion?: string;
+  /**
+   * Canonical ranked item ids from `pm next` (recommended → ready → blocked).
+   * When present, `next`/`brief next` order candidates by this list so both
+   * commands agree with `pm next` on the top-ranked item; the local evidence
+   * scorer is still computed for `--explain` breakdowns and is used as the
+   * deterministic tiebreak for any candidate `pm next` did not rank.
+   */
+  nextOrder?: string[];
 }
 
 export interface BriefItem {
@@ -561,6 +569,15 @@ function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
 
 function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[], activeIds = activeItemIds(items)): RankedCandidate[] {
   const candidates = filterCandidates(items, options);
+  // When `pm next` supplied a canonical order, it is the authoritative ranking
+  // so `brief next` agrees with `pm next`. Unranked candidates fall after ranked
+  // ones and keep the deterministic local-score tiebreak. An explicit
+  // `--dependency-order` request is a deliberate override of the default ranking,
+  // so it takes precedence over canonical order and prerequisite-first sorting wins.
+  const nextOrderRank = !options.dependencyOrder && options.nextOrder?.length
+    ? new Map(options.nextOrder.map((id, index) => [id, index]))
+    : undefined;
+  const canonicalRank = (id: string): number => nextOrderRank?.get(id) ?? Number.POSITIVE_INFINITY;
   return candidates
     .map((item) => {
       const rank = rankItem(item, rels, activeIds, now);
@@ -573,6 +590,14 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
       };
     })
     .sort((a, b) => {
+      if (nextOrderRank) {
+        // Compare ranks directly: subtracting two POSITIVE_INFINITY sentinels
+        // (both candidates absent from pm next) would yield NaN — an invalid
+        // comparator result. Only diverge when the ranks actually differ.
+        const ar = canonicalRank(a.item.id);
+        const br = canonicalRank(b.item.id);
+        if (ar !== br) return ar - br;
+      }
       if (options.dependencyOrder) {
         if (a.activeDependencies !== b.activeDependencies) return a.activeDependencies - b.activeDependencies;
         if (a.activeDependents !== b.activeDependents) return b.activeDependents - a.activeDependents;
@@ -1139,6 +1164,45 @@ function pmVersion(): string {
   return result.status === 0 ? result.stdout.trim() : "unknown";
 }
 
+/**
+ * Ask the CLI's canonical `pm next` scorer for its ranked order so `brief`/`brief
+ * next` agree with `pm next` on the top-ranked item (companion gyi1). Returns the
+ * recommended item first, then ready work, then blocked work, deduplicated. On any
+ * failure it returns an empty list so callers transparently fall back to the local
+ * evidence scorer rather than hard-failing.
+ */
+export function readNextOrderedIds(pmRoot: string, options: { limit?: number; assignee?: string } = {}): string[] {
+  const args = [PM_PATH_OPTION, pmRoot, "next", "--json"];
+  if (options.limit && Number.isFinite(options.limit)) args.push("--limit", String(Math.max(1, Math.floor(options.limit))));
+  if (options.assignee) args.push("--assignee", options.assignee);
+  const result = spawnSync(PM_EXECUTABLE, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+  if (result.status !== 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const record = parsed as { recommended?: { id?: unknown } | null; ready?: unknown; blocked?: unknown };
+  const idOf = (entry: unknown): string | undefined => {
+    if (!entry || typeof entry !== "object") return undefined;
+    const id = (entry as { id?: unknown }).id;
+    return typeof id === "string" && id.length > 0 ? id : undefined;
+  };
+  const ordered: string[] = [];
+  const recommendedId = idOf(record.recommended);
+  if (recommendedId) ordered.push(recommendedId);
+  for (const bucket of [record.ready, record.blocked]) {
+    if (!Array.isArray(bucket)) continue;
+    for (const entry of bucket) {
+      const id = idOf(entry);
+      if (id) ordered.push(id);
+    }
+  }
+  return uniqueStrings(ordered);
+}
+
 export function readRecentActivity(pmRoot: string, limit = 10): BriefActivity[] {
   const safeLimit = Math.max(1, Math.min(limit, 100));
   const result = spawnSync(PM_EXECUTABLE, [PM_PATH_OPTION, pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)], {
@@ -1201,9 +1265,10 @@ function registerCommands(api: any): void {
       const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
       const includeHistory = readBool(options, "include-history", "includeHistory");
       const historyLimit = readInt(options, ["history-limit", "historyLimit"], 10);
+      const briefDependencyOrder = readBool(options, "dependency-order", "dependencyOrder");
       const brief = buildBrief(readPmItems(ctx.pm_root), {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
-        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
+        dependencyOrder: briefDependencyOrder,
         focusIds,
         focusTypes,
         statuses: asArray(options.status),
@@ -1216,6 +1281,9 @@ function registerCommands(api: any): void {
         generatedAt: new Date().toISOString(),
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
+        // Keep the brief's next-work section aligned with `pm next` (companion gyi1).
+        // Skipped under `--dependency-order` so the explicit prerequisite-first sort wins.
+        nextOrder: briefDependencyOrder ? undefined : readNextOrderedIds(ctx.pm_root, { limit: 200, assignee: readString(options, "assignee") }),
       });
       const output = format === "json" ? `${JSON.stringify(brief, null, 2)}\n` : format === "slack" ? renderSlackBrief(brief) : renderMarkdownBrief(brief);
       const outputPath = readString(options, "output");
@@ -1278,11 +1346,21 @@ function registerCommands(api: any): void {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
+      const nextCount = readInt(options, ["count"], 5);
+      const assignee = readString(options, "assignee");
+      const dependencyOrder = readBool(options, "dependency-order", "dependencyOrder");
       const nextOptions: BriefOptions = {
-        nextCount: readInt(options, ["count"], 5),
-        assignee: readString(options, "assignee"),
-        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
+        nextCount,
+        assignee,
+        dependencyOrder,
         generatedAt: new Date().toISOString(),
+        // Delegate ranking to the canonical `pm next` scorer so `brief next`
+        // agrees with `pm next` on the top item (companion gyi1). Request a
+        // generous window so the shown top-N is ordered from the full ready set.
+        // Skipped when `--dependency-order` is requested: that flag deliberately
+        // overrides the default ranking, so we avoid both the override and the
+        // extra `pm next` subprocess.
+        nextOrder: dependencyOrder ? undefined : readNextOrderedIds(ctx.pm_root, { limit: Math.max(nextCount, 200), assignee }),
       };
       const allItems = readPmItems(ctx.pm_root);
       const explain = readBool(options, "explain");
