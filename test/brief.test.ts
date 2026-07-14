@@ -126,8 +126,10 @@ test("selectNextItems keeps candidates absent from pm next order after ranked on
     nextCount: 5,
     nextOrder: ["pm-c"],
   });
-  assert.equal(next[0]?.id, "pm-c");
-  assert.deepEqual([...next.map((item) => item.id)].sort(), ["pm-a", "pm-b", "pm-c"]);
+  // pm-c is canonically ranked first; pm-a and pm-b are both unranked and must
+  // fall back to the deterministic local tiebreak (pm-b before the blocked pm-a),
+  // never NaN-driven insertion order.
+  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-b", "pm-a"]);
 });
 
 test("selectNextItems includes evidence-weighted ranking details", () => {

@@ -589,8 +589,12 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
     })
     .sort((a, b) => {
       if (nextOrderRank) {
-        const canonical = canonicalRank(a.item.id) - canonicalRank(b.item.id);
-        if (canonical !== 0) return canonical;
+        // Compare ranks directly: subtracting two POSITIVE_INFINITY sentinels
+        // (both candidates absent from pm next) would yield NaN — an invalid
+        // comparator result. Only diverge when the ranks actually differ.
+        const ar = canonicalRank(a.item.id);
+        const br = canonicalRank(b.item.id);
+        if (ar !== br) return ar - br;
       }
       if (options.dependencyOrder) {
         if (a.activeDependencies !== b.activeDependencies) return a.activeDependencies - b.activeDependencies;
