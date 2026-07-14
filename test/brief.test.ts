@@ -132,6 +132,21 @@ test("selectNextItems keeps candidates absent from pm next order after ranked on
   assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-b", "pm-a"]);
 });
 
+test("explicit dependency-order overrides the canonical pm next order", () => {
+  // `--dependency-order` is a deliberate override of the default ranking, so a
+  // supplied nextOrder must not win: prerequisite-first sorting is preserved and
+  // the blocked pm-a is never surfaced ahead of its prerequisites.
+  const next = selectNextItems(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    nextCount: 3,
+    dependencyOrder: true,
+    nextOrder: ["pm-a", "pm-b", "pm-c"],
+  });
+  assert.equal(next[0]?.id !== "pm-a", true, "blocked pm-a must not lead under dependency-order");
+  // Matches the dedicated dependency-order behavior (prerequisites before dependents).
+  assert.equal(next.at(-1)?.id, "pm-a");
+});
+
 test("selectNextItems includes evidence-weighted ranking details", () => {
   const next = selectNextItems([
     ...items,

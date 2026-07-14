@@ -571,8 +571,10 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
   const candidates = filterCandidates(items, options);
   // When `pm next` supplied a canonical order, it is the authoritative ranking
   // so `brief next` agrees with `pm next`. Unranked candidates fall after ranked
-  // ones and keep the deterministic local-score tiebreak.
-  const nextOrderRank = options.nextOrder?.length
+  // ones and keep the deterministic local-score tiebreak. An explicit
+  // `--dependency-order` request is a deliberate override of the default ranking,
+  // so it takes precedence over canonical order and prerequisite-first sorting wins.
+  const nextOrderRank = !options.dependencyOrder && options.nextOrder?.length
     ? new Map(options.nextOrder.map((id, index) => [id, index]))
     : undefined;
   const canonicalRank = (id: string): number => nextOrderRank?.get(id) ?? Number.POSITIVE_INFINITY;
@@ -1263,9 +1265,10 @@ function registerCommands(api: any): void {
       const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
       const includeHistory = readBool(options, "include-history", "includeHistory");
       const historyLimit = readInt(options, ["history-limit", "historyLimit"], 10);
+      const briefDependencyOrder = readBool(options, "dependency-order", "dependencyOrder");
       const brief = buildBrief(readPmItems(ctx.pm_root), {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
-        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
+        dependencyOrder: briefDependencyOrder,
         focusIds,
         focusTypes,
         statuses: asArray(options.status),
@@ -1279,7 +1282,8 @@ function registerCommands(api: any): void {
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
         // Keep the brief's next-work section aligned with `pm next` (companion gyi1).
-        nextOrder: readNextOrderedIds(ctx.pm_root, { limit: 200, assignee: readString(options, "assignee") }),
+        // Skipped under `--dependency-order` so the explicit prerequisite-first sort wins.
+        nextOrder: briefDependencyOrder ? undefined : readNextOrderedIds(ctx.pm_root, { limit: 200, assignee: readString(options, "assignee") }),
       });
       const output = format === "json" ? `${JSON.stringify(brief, null, 2)}\n` : format === "slack" ? renderSlackBrief(brief) : renderMarkdownBrief(brief);
       const outputPath = readString(options, "output");
@@ -1344,15 +1348,19 @@ function registerCommands(api: any): void {
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
       const nextCount = readInt(options, ["count"], 5);
       const assignee = readString(options, "assignee");
+      const dependencyOrder = readBool(options, "dependency-order", "dependencyOrder");
       const nextOptions: BriefOptions = {
         nextCount,
         assignee,
-        dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
+        dependencyOrder,
         generatedAt: new Date().toISOString(),
         // Delegate ranking to the canonical `pm next` scorer so `brief next`
         // agrees with `pm next` on the top item (companion gyi1). Request a
         // generous window so the shown top-N is ordered from the full ready set.
-        nextOrder: readNextOrderedIds(ctx.pm_root, { limit: Math.max(nextCount, 200), assignee }),
+        // Skipped when `--dependency-order` is requested: that flag deliberately
+        // overrides the default ranking, so we avoid both the override and the
+        // extra `pm next` subprocess.
+        nextOrder: dependencyOrder ? undefined : readNextOrderedIds(ctx.pm_root, { limit: Math.max(nextCount, 200), assignee }),
       };
       const allItems = readPmItems(ctx.pm_root);
       const explain = readBool(options, "explain");
