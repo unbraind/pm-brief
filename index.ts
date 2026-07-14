@@ -343,7 +343,7 @@ export function extractRelationships(item: PmItem): Relationship[] {
   // singly-sourced edges (e.g. depends_on, which has no denormalized string field).
   const seen = new Set<string>();
   return rels.filter((rel) => {
-    const key = `${rel.from} ${rel.to} ${rel.kind}`;
+    const key = JSON.stringify([rel.from, rel.to, rel.kind]);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
