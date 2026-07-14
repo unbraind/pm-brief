@@ -1,0 +1,17 @@
+id: pm-brief-wxzm
+title: "brief next: delegate ranking to SDK next() so it agrees with pm next"
+description: ""
+type: Task
+status: closed
+priority: 2
+tags[4]: agent-ux,convergence,pm-brief,sdk
+created_at: "2026-07-14T11:39:54.274Z"
+updated_at: "2026-07-14T11:48:53.157Z"
+closed_at: "2026-07-14T11:48:53.154Z"
+author: claude-opus
+acceptance_criteria: "pm brief next top-ranked item matches pm next top-ranked item on the same workspace; ranking delegates to SDK next() action (canonical scorer), not pm-brief's local rankItem"
+comments[2]{created_at,author,text}:
+  "2026-07-14T11:40:22.488Z",claude-opus,"Implements companion pm-cli-website-gyi1 (fleet audit MED finding). Fix: brief next handler delegates ranking to SDK next() action (canonical scorer used by pm next) instead of local rankItem/selectNextItems, so both 'next' commands agree on the top item. Note: SDK's item->ContextRelevanceCandidate signal builder (buildItemContextRelevanceCandidates) is CLI-internal, not public -> filing separate pm-cli issue."
+  "2026-07-14T11:48:52.685Z",claude-opus,"VERIFIED in clean isolated workspace: pm next TOP=wg-easy-ty7r, ready=[pm-graph-qy8h, n5yh, 16be, ion2]; pm brief next=[ty7r, pm-graph-qy8h, n5yh, 16be, ion2] = [recommended,...ready] EXACT MATCH. Non-monotonic local scores (ty7r score 150 ranks above pm-graph-qy8h score 196) prove order comes from pm next, not local scorer. Impl: readNextOrderedIds() shells 'pm next --json'; nextOrder threaded through BriefOptions into rankCandidates as authoritative primary sort; local evidence scorer retained for --explain + tiebreak of unranked. Both 'brief' and 'brief next' converge. 47/47 unit tests pass (added 2 nextOrder tests)."
+close_reason: Closed via pm update
+body: ""

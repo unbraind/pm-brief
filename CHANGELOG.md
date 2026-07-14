@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- brief next: delegate ranking to SDK next() so it agrees with pm next ([pm-brief-wxzm](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-wxzm.toon))
+
 ## 2026.7.14 - 2026-07-14
 
 ### Fixed

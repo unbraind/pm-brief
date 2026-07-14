@@ -106,6 +106,30 @@ test("selectNextItems ranks unblocked priority before blocked work", () => {
   assert.equal(next[2]?.whyNow, "blocked: resolve prerequisite before implementation");
 });
 
+test("selectNextItems honors the canonical pm next order over the local scorer", () => {
+  // `pm next` supplies the authoritative ranking so `brief next` agrees with it.
+  // Here the canonical order deliberately contradicts the local score ordering
+  // (which would be pm-b, pm-c, pm-a) to prove delegation wins.
+  const next = selectNextItems(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    nextCount: 3,
+    nextOrder: ["pm-c", "pm-a", "pm-b"],
+  });
+  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-a", "pm-b"]);
+});
+
+test("selectNextItems keeps candidates absent from pm next order after ranked ones", () => {
+  // A partial canonical order (only pm-c) must place pm-c first; the rest keep
+  // the deterministic local tiebreak so no candidate is dropped.
+  const next = selectNextItems(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    nextCount: 5,
+    nextOrder: ["pm-c"],
+  });
+  assert.equal(next[0]?.id, "pm-c");
+  assert.deepEqual([...next.map((item) => item.id)].sort(), ["pm-a", "pm-b", "pm-c"]);
+});
+
 test("selectNextItems includes evidence-weighted ranking details", () => {
   const next = selectNextItems([
     ...items,
