@@ -26,7 +26,9 @@
     "changelog:check": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm --check",
     "release:notes": "pm-changelog --pm-root .agents/pm --stdout --since-previous-tag --until-release-tag --release-version-from-package --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm --pm-bin ./node_modules/.bin/pm --github-step-summary",
     "release:check": "npm run typecheck && npm run build && npm test && npm run audit:prod && npm run pack:dry-run && npm run changelog:check",
-    "prepublishOnly": "npm run release:check"
+    "prepublishOnly": "npm run release:check",
+    "prepare": "pm merge install",
+    "merge:install": "pm merge install"
   },
   "keywords": [
     "agent",
@@ -53,7 +55,8 @@
   "devDependencies": {
     "@types/node": "^26.1.1",
     "pm-changelog": "2026.7.18",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "@unbrained/pm-cli": "^2026.7.21"
   },
   "pm": {
     "aliases": [
