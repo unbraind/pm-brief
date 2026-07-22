@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Adopt pm field-aware merge driver for multi-agent branch-merge safety ([pm-brief-m2gp](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-m2gp.toon))
+
 ## 2026.7.14-1 - 2026-07-14
 
 ### Other
