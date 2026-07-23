@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Add pm brief since delta command for agent re-orientation after parallel/merge work ([pm-brief-da2c](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-da2c.toon))
+
 ### Fixed
 
 - Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-brief-lizi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-lizi.toon))
