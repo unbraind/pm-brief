@@ -944,4 +944,55 @@ describe("brief since / buildDelta", () => {
     // the Refresh block is a proper fenced code block, not an inline ```cmd```
     assert.match(md, /## Refresh\n\n```\npm brief since [^\n]+\n```/);
   });
+
+  test("counts real /metadata/dependencies adds and ignores the close side-effect removal", () => {
+    const entries: DeltaActivityEntry[] = [
+      // real pm emits dependency edits at /metadata/dependencies (not /metadata/deps)
+      actEntry("pm-dep", "update", "2026-07-20T01:00:00Z", [{ op: "add", path: "/metadata/dependencies", value: [{ id: "pm-x", kind: "depends_on" }] }]),
+      // closing tears down edges: `remove /metadata/dependencies` is a side-effect, not a user removal
+      actEntry("pm-dep", "close", "2026-07-20T02:00:00Z", [
+        { op: "remove", path: "/metadata/dependencies" },
+        { op: "replace", path: "/metadata/status", value: "closed" },
+      ]),
+    ];
+    const items: PmItem[] = [{ id: "pm-dep", title: "Dep", type: "Task", status: "closed", priority: 2 }];
+    const change = buildDelta(entries, itemsById(items), { since: "2026-07-20" }).items[0];
+    assert.equal(change.depsAdded, 1);
+    assert.equal(change.depsRemoved, 0, "close-side-effect removal must not count as a dependency removal");
+  });
+
+  test("buildDelta clamps maxItems to at least 1 (exported-API guard)", () => {
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-1", "create", "2026-07-20T01:00:00Z"),
+      actEntry("pm-2", "create", "2026-07-20T02:00:00Z"),
+      actEntry("pm-3", "create", "2026-07-20T03:00:00Z"),
+    ];
+    const items: PmItem[] = [
+      { id: "pm-1", title: "1", type: "Task", status: "open", priority: 2 },
+      { id: "pm-2", title: "2", type: "Task", status: "open", priority: 2 },
+      { id: "pm-3", title: "3", type: "Task", status: "open", priority: 2 },
+    ];
+    // the top-ranked item under a valid budget of 1
+    const topId = buildDelta(entries, itemsById(items), { since: "2026-07-20", maxItems: 1 }).items[0].id;
+    // maxItems 0 / negative must not slice from the end or drop everything
+    for (const bad of [0, -2]) {
+      const summary = buildDelta(entries, itemsById(items), { since: "2026-07-20", maxItems: bad });
+      assert.ok(summary.items.length >= 1, `maxItems=${bad} kept at least one item`);
+      assert.equal(summary.items[0].id, topId, `maxItems=${bad} kept the top-ranked item, not a tail slice`);
+    }
+  });
+
+  test("buildDelta tolerates a patch element without a string path", () => {
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-bad", "update", "2026-07-20T01:00:00Z", [
+        { op: "add" } as unknown as { op: "add"; path: string },
+        { op: "replace", path: "/metadata/status", value: "in_progress" },
+      ]),
+    ];
+    const items: PmItem[] = [{ id: "pm-bad", title: "B", type: "Task", status: "in_progress", priority: 2 }];
+    assert.doesNotThrow(() => {
+      const change = buildDelta(entries, itemsById(items), { since: "2026-07-20" }).items[0];
+      assert.equal(change.statusTransition?.to, "in_progress");
+    });
+  });
 });

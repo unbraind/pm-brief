@@ -1366,6 +1366,15 @@ export function readActivitySince(
 const OPEN_STATUSES = new Set(["open", "in_progress", "ready"]);
 const CLOSED_STATUSES = new Set(["closed", "done", "canceled", "cancelled"]);
 
+/** JSON-Patch paths that represent a dependency/relationship edit, across pm
+ * versions and extension schemas. Real pm 2026.7.22 uses `/metadata/dependencies`. */
+function isDependencyPath(path: string): boolean {
+  for (const root of ["/metadata/dependencies", "/metadata/blocked_by", "/metadata/relationships", "/metadata/deps", "/relationships"]) {
+    if (path === root || path.startsWith(`${root}/`)) return true;
+  }
+  return false;
+}
+
 /**
  * Pure classifier: groups full activity entries by item id and aggregates all
  * events in the window into one `DeltaItemChange` per changed item, joined with
@@ -1384,6 +1393,7 @@ export function buildDelta(
     pmVersion?: string;
     maxItems?: number;
     tokenBudget?: number;
+    format?: string;
   } = { since: "" },
 ): DeltaSummary {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
@@ -1444,6 +1454,7 @@ export function buildDelta(
       for (const p of e.patch) {
         const path = p.path;
         const pop = p.op;
+        if (typeof path !== "string") continue;
         if (path === "/metadata/status") {
           if (typeof p.value === "string") statusValues.push(p.value);
         }
@@ -1460,16 +1471,15 @@ export function buildDelta(
         if (path === "/metadata/assignee" && (pop === "add" || pop === "replace")) {
           if (typeof p.value === "string") reassignedTo = p.value;
         }
-        if (
-          path === "/metadata/deps" ||
-          path.startsWith("/metadata/deps/") ||
-          path === "/metadata/relationships" ||
-          path.startsWith("/metadata/relationships/") ||
-          path === "/relationships" ||
-          path.startsWith("/relationships/")
-        ) {
+        // Real pm (2026.7.22) stores all dependency kinds (depends_on/blocks/
+        // blocked_by/related) in a single `/metadata/dependencies` array; older
+        // shapes and extension schemas may use the other roots. Match them all.
+        if (isDependencyPath(path)) {
           if (pop === "add") depsAdded++;
-          else if (pop === "remove") depsRemoved++;
+          // A `close`/`cancel` emits `remove /metadata/dependencies` as a
+          // side-effect of tearing down edges — that is not a user-driven
+          // dependency removal, so it must not surface as "-1 dep".
+          else if (pop === "remove" && op !== "close" && op !== "cancel") depsRemoved++;
         }
         if (path === "/metadata/notes" || path.startsWith("/metadata/notes/")) {
           if (pop === "add" && !opCountedNote) notesAdded++;
@@ -1580,15 +1590,24 @@ export function buildDelta(
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 
+  // Lifecycle-category counts mirror primary-section membership so every count
+  // equals the number of items rendered under that section (each item lands in
+  // exactly one). retitled/reassigned/deps/notes/comments are cross-cutting
+  // presence/sum counts surfaced on the same per-item line.
+  const primaryCounts: Record<string, number> = {};
+  for (const i of items) {
+    const key = primaryDeltaSection(i);
+    primaryCounts[key] = (primaryCounts[key] ?? 0) + 1;
+  }
   const totals = {
     itemsChanged: items.length,
     events: entries.length,
-    created: items.filter((i) => i.created).length,
-    closed: items.filter((i) => i.closed).length,
-    canceled: items.filter((i) => i.canceled).length,
-    reopened: items.filter((i) => i.reopened).length,
-    statusChanged: items.filter((i) => i.statusTransition !== undefined && !i.created && !i.closed && !i.canceled && !i.reopened).length,
-    reprioritized: items.filter((i) => i.priorityChange !== undefined && !i.created).length,
+    created: primaryCounts.Created ?? 0,
+    closed: primaryCounts.Closed ?? 0,
+    canceled: primaryCounts.Canceled ?? 0,
+    reopened: primaryCounts.Reopened ?? 0,
+    statusChanged: primaryCounts["Status changes"] ?? 0,
+    reprioritized: primaryCounts.Reprioritized ?? 0,
     retitled: items.filter((i) => i.retitled).length,
     reassigned: items.filter((i) => i.reassigned !== undefined).length,
     depsAdded: items.reduce((n, i) => n + i.depsAdded, 0),
@@ -1608,25 +1627,35 @@ export function buildDelta(
     items,
   };
 
-  applyDeltaBudget(summary, options.maxItems ?? 40, options.tokenBudget ?? 4000);
+  applyDeltaBudget(summary, options.maxItems ?? 40, options.tokenBudget ?? 4000, options.format);
   return summary;
 }
 
-function applyDeltaBudget(summary: DeltaSummary, maxItems: number, tokenBudget: number): void {
+/** Estimate the token cost of a summary rendered in the SAME format the caller
+ * will emit, so the budget constrains the actual output (not always markdown). */
+function estimateDeltaTokens(summary: DeltaSummary, format?: string): number {
+  const rendered =
+    format === "json" ? `${JSON.stringify(summary, null, 2)}\n`
+    : format === "text" ? renderTextDelta(summary)
+    : format === "slack" ? renderSlackDelta(summary)
+    : renderMarkdownDelta(summary);
+  return estimateTokens(rendered);
+}
+
+function applyDeltaBudget(summary: DeltaSummary, maxItems: number, tokenBudget: number, format?: string): void {
   const full = summary.items;
-  let working = full.slice(0, maxItems);
-  let omitted = full.length - working.length;
-  let truncated = omitted > 0;
-  const probe = (items: DeltaItemChange[]) => estimateTokens(renderMarkdownDelta({ ...summary, items }));
-  if (probe(working) > tokenBudget) {
+  // Guard the exported API: maxItems <= 0 must not slice from the end.
+  const cap = Math.max(1, Math.floor(Number.isFinite(maxItems) ? maxItems : 40));
+  let working = full.slice(0, cap);
+  const probe = (items: DeltaItemChange[]) => estimateDeltaTokens({ ...summary, items }, format);
+  if (working.length > 1 && probe(working) > tokenBudget) {
     while (working.length > 1 && probe(working) > tokenBudget) {
       working = working.slice(0, -1);
     }
-    omitted = full.length - working.length;
-    truncated = true;
   }
+  const omitted = full.length - working.length;
   summary.items = working;
-  summary.truncated = truncated || undefined;
+  summary.truncated = omitted > 0 ? true : undefined;
   summary.omittedItems = omitted > 0 ? omitted : undefined;
   summary.budget = { requestedTokens: tokenBudget, estimatedTokens: probe(working) };
 }
@@ -2052,6 +2081,7 @@ function registerCommands(api: any): void {
         pmVersion: pmVersion(),
         maxItems,
         tokenBudget,
+        format,
       });
       const outputPath = readString(options, "output");
       if (format === "json") {
