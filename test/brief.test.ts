@@ -6,6 +6,7 @@ import extension, {
   detectStaleContext,
   explainNextItems,
   extractRelationships,
+  normalizeCheckpoint,
   parsePmItemsOutput,
   readRecentActivity,
   renderAgentPrompt,
@@ -880,5 +881,67 @@ describe("brief since / buildDelta", () => {
     const slack = renderSlackDelta(summary);
     assert.match(slack, /\*Delta since 2026-07-20 until 2026-07-22 by alice\*/);
     assert.match(slack, /\*Created\*/);
+  });
+
+  test("normalizeCheckpoint signs bare relative windows and passes timestamps through", () => {
+    assert.equal(normalizeCheckpoint("7d"), "-7d");
+    assert.equal(normalizeCheckpoint("24h"), "-24h");
+    assert.equal(normalizeCheckpoint("2w"), "-2w");
+    assert.equal(normalizeCheckpoint("30m"), "-30m");
+    assert.equal(normalizeCheckpoint("  7d  "), "-7d");
+    // already-signed, ISO timestamps, and plain dates are untouched
+    assert.equal(normalizeCheckpoint("-7d"), "-7d");
+    assert.equal(normalizeCheckpoint("2026-07-20"), "2026-07-20");
+    assert.equal(normalizeCheckpoint("2026-07-20T00:00:00Z"), "2026-07-20T00:00:00Z");
+  });
+
+  test("creation baseline is not counted as retitle/reprioritize/reassign/status change", () => {
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-fresh", "create", "2026-07-20T01:00:00Z", [
+        { op: "add", path: "/metadata/title", value: "Fresh" },
+        { op: "add", path: "/metadata/status", value: "open" },
+        { op: "add", path: "/metadata/priority", value: 1 },
+        { op: "add", path: "/metadata/assignee", value: "bob" },
+      ]),
+    ];
+    const items: PmItem[] = [{ id: "pm-fresh", title: "Fresh", type: "Feature", status: "open", priority: 1 }];
+    const summary = buildDelta(entries, itemsById(items), { since: "2026-07-20" });
+    const change = summary.items[0];
+    assert.equal(change.created, true);
+    assert.equal(change.retitled, false);
+    assert.equal(change.priorityChange, undefined);
+    assert.equal(change.reassigned, undefined);
+    assert.equal(change.statusTransition, undefined);
+    assert.equal(summary.totals.retitled, 0);
+    assert.equal(summary.totals.reprioritized, 0);
+    assert.equal(summary.totals.reassigned, 0);
+    assert.equal(summary.totals.statusChanged, 0);
+    // post-creation edits ARE still real changes
+    const withEdit: DeltaActivityEntry[] = [
+      ...entries,
+      actEntry("pm-fresh", "update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }]),
+    ];
+    const editedChange = buildDelta(withEdit, itemsById(items), { since: "2026-07-20" }).items[0];
+    assert.equal(editedChange.created, true);
+    assert.equal(editedChange.statusLabel, "started");
+  });
+
+  test("each changed item appears in exactly one markdown section (no duplication)", () => {
+    // pm-multi is created AND has a note AND a dependency change: it must render once.
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-multi", "create", "2026-07-20T01:00:00Z", [{ op: "add", path: "/metadata/title", value: "Multi" }]),
+      actEntry("pm-multi", "note_add", "2026-07-20T02:00:00Z", [{ op: "add", path: "/metadata/notes/1", value: { text: "n" } }]),
+      actEntry("pm-multi", "update", "2026-07-20T03:00:00Z", [{ op: "add", path: "/metadata/deps/0", value: { id: "pm-x" } }]),
+    ];
+    const items: PmItem[] = [{ id: "pm-multi", title: "Multi", type: "Task", status: "open", priority: 2 }];
+    const summary = buildDelta(entries, itemsById(items), { since: "2026-07-20" });
+    const md = renderMarkdownDelta(summary);
+    assert.equal((md.match(/pm-multi/g) ?? []).length, 1);
+    // its single line still surfaces every change
+    assert.match(md, /pm-multi:.*created.*\+1 dep.*note/);
+    // primary section is Created (highest rank)
+    assert.match(md, /## Created\n\n- pm-multi/);
+    // the Refresh block is a proper fenced code block, not an inline ```cmd```
+    assert.match(md, /## Refresh\n\n```\npm brief since [^\n]+\n```/);
   });
 });

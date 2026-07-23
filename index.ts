@@ -1420,7 +1420,19 @@ export function buildDelta(
 
     for (const e of events) {
       const op = e.op;
-      if (op === "create") created = true;
+      if (op === "create") {
+        // Creation establishes the item's baseline, not field-level deltas: its
+        // patch sets title/status/priority/assignee for the first time. Counting
+        // those as retitled/reprioritized/reassigned/status-changed would flag
+        // every new item as if it had been edited. Record only the `created` flag
+        // (and a title fallback for items no longer in the workspace), then skip.
+        created = true;
+        if (e.patch && !titleFromPatch) {
+          const titlePatch = e.patch.find((p) => p.path === "/metadata/title" || p.path === "/title");
+          if (titlePatch && typeof titlePatch.value === "string") titleFromPatch = titlePatch.value;
+        }
+        continue;
+      }
       if (op === "close") closed = true;
       if (op === "cancel") canceled = true;
       if (op === "reopen") reopened = true;
@@ -1656,6 +1668,61 @@ function deltaRefreshCommand(summary: DeltaSummary, format?: string): string {
   return parts.join(" ");
 }
 
+/**
+ * Normalize an agent-friendly bare relative window (e.g. "7d", "24h", "2w") to the
+ * `pm activity --from`/`--to` accepted form ("-7d"): a leading minus means "N ago".
+ * Bare forms WITHOUT the minus silently match nothing in `pm activity`, so agents
+ * that naturally type `pm brief since 7d` would otherwise get an empty delta. ISO
+ * timestamps, plain dates, and already-signed relatives pass through unchanged.
+ */
+export function normalizeCheckpoint(value: string): string {
+  const trimmed = value.trim();
+  return /^\d+(s|m|h|d|w|M)$/.test(trimmed) ? `-${trimmed}` : trimmed;
+}
+
+/** Fixed render order for delta sections; each changed item appears in exactly one. */
+const DELTA_SECTION_ORDER = [
+  "Created",
+  "Closed",
+  "Canceled",
+  "Reopened",
+  "Status changes",
+  "Reprioritized",
+  "Dependencies",
+  "Discussion",
+  "Other",
+] as const;
+
+/**
+ * The single primary section an item belongs to. Each item's rendered line already
+ * lists ALL of its changes (see describeDeltaItem), so partitioning by one primary
+ * category keeps output deterministic and token-efficient — no item is repeated
+ * across sections.
+ */
+function primaryDeltaSection(i: DeltaItemChange): string {
+  if (i.created) return "Created";
+  if (i.closed) return "Closed";
+  if (i.canceled) return "Canceled";
+  if (i.reopened) return "Reopened";
+  if (i.statusTransition !== undefined) return "Status changes";
+  if (i.priorityChange !== undefined) return "Reprioritized";
+  if (i.depsAdded > 0 || i.depsRemoved > 0) return "Dependencies";
+  if (i.notesAdded > 0 || i.commentsAdded > 0) return "Discussion";
+  return "Other";
+}
+
+/** Group already-sorted items into their primary sections, preserving item order. */
+function groupDeltaSections(items: DeltaItemChange[]): Array<{ title: string; members: DeltaItemChange[] }> {
+  const groups = new Map<string, DeltaItemChange[]>();
+  for (const item of items) {
+    const key = primaryDeltaSection(item);
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(item);
+    else groups.set(key, [item]);
+  }
+  return DELTA_SECTION_ORDER.filter((title) => groups.has(title)).map((title) => ({ title, members: groups.get(title)! }));
+}
+
 export function renderMarkdownDelta(summary: DeltaSummary): string {
   if (summary.items.length === 0) {
     const header = `# Delta since ${summary.since}${summary.until ? ` until ${summary.until}` : ""}${summary.author ? ` by ${summary.author}` : ""}`;
@@ -1688,18 +1755,10 @@ export function renderMarkdownDelta(summary: DeltaSummary): string {
     lines.push("");
   };
 
-  section("Created", summary.items.filter((i) => i.created));
-  section("Closed", summary.items.filter((i) => i.closed && !i.created));
-  section("Canceled", summary.items.filter((i) => i.canceled && !i.created));
-  section("Reopened", summary.items.filter((i) => i.reopened));
-  section("Status changes", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition !== undefined));
-  section("Reprioritized", summary.items.filter((i) => !i.created && i.priorityChange !== undefined));
-  section("Dependencies", summary.items.filter((i) => i.depsAdded > 0 || i.depsRemoved > 0));
-  section("Discussion", summary.items.filter((i) => i.notesAdded > 0 || i.commentsAdded > 0));
-  section("Other", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition === undefined && i.priorityChange === undefined && i.depsAdded === 0 && i.depsRemoved === 0 && i.notesAdded === 0 && i.commentsAdded === 0 && i.statusTransition === undefined));
+  for (const { title, members } of groupDeltaSections(summary.items)) section(title, members);
 
   lines.push("## Refresh", "");
-  lines.push(`\`\`\`${deltaRefreshCommand(summary)}\`\`\``);
+  lines.push("```", deltaRefreshCommand(summary), "```");
   lines.push("");
   return `${lines.join("\n")}\n`;
 }
@@ -1740,15 +1799,7 @@ export function renderSlackDelta(summary: DeltaSummary): string {
     }
     lines.push("");
   };
-  section("Created", summary.items.filter((i) => i.created));
-  section("Closed", summary.items.filter((i) => i.closed && !i.created));
-  section("Canceled", summary.items.filter((i) => i.canceled && !i.created));
-  section("Reopened", summary.items.filter((i) => i.reopened));
-  section("Status changes", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition !== undefined));
-  section("Reprioritized", summary.items.filter((i) => !i.created && i.priorityChange !== undefined));
-  section("Dependencies", summary.items.filter((i) => i.depsAdded > 0 || i.depsRemoved > 0));
-  section("Discussion", summary.items.filter((i) => i.notesAdded > 0 || i.commentsAdded > 0));
-  section("Other", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition === undefined && i.priorityChange === undefined && i.depsAdded === 0 && i.depsRemoved === 0 && i.notesAdded === 0 && i.commentsAdded === 0));
+  for (const { title, members } of groupDeltaSections(summary.items)) section(title, members);
   lines.push(`Refresh: \`${deltaRefreshCommand(summary)}\``);
   return `${lines.join("\n")}\n`;
 }
@@ -1963,7 +2014,7 @@ function registerCommands(api: any): void {
     description: "Summarize what changed in the workspace since a checkpoint (delta brief).",
     intent: "give an agent resuming work a precise, token-budgeted delta instead of a full re-read",
     examples: ["pm brief since 7d", "pm brief since 2026-07-20 --format json", "pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice"],
-    arguments: [{ name: "checkpoint", required: true, description: "ISO timestamp or relative window (e.g. 7d, 2026-07-20) — lower bound, passed to pm activity --from" }],
+    arguments: [{ name: "checkpoint", required: true, description: "Lower bound: a bare relative window treated as 'ago' (e.g. 7d, 24h, 2w), a signed relative (-7d), an ISO timestamp, or a date (2026-07-20)" }],
     flags: [
       { long: "--until", value_name: "checkpoint", description: "Upper bound timestamp/relative (pm activity --to)", type: "string" },
       { long: "--author", value_name: "name", description: "Only include changes by this author", type: "string" },
@@ -1976,11 +2027,13 @@ function registerCommands(api: any): void {
     ],
     async run(ctx: any) {
       const options = ctx.options as Record<string, unknown>;
-      const checkpoint = (ctx.args?.[0] ?? "").trim();
-      if (!checkpoint) throw new CommandError("pm brief since requires a <checkpoint> (ISO timestamp or relative window like 7d)", EXIT_CODE.USAGE);
+      const rawCheckpoint = (ctx.args?.[0] ?? "").trim();
+      if (!rawCheckpoint) throw new CommandError("pm brief since requires a <checkpoint> (ISO timestamp or relative window like 7d)", EXIT_CODE.USAGE);
+      const checkpoint = normalizeCheckpoint(rawCheckpoint);
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
       if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
-      const until = readString(options, "until");
+      const untilRaw = readString(options, "until");
+      const until = untilRaw ? normalizeCheckpoint(untilRaw) : undefined;
       const author = readString(options, "author");
       const limit = readInt(options, ["limit"], 1000);
       const maxItems = readInt(options, ["max-items", "maxItems"], 40);
