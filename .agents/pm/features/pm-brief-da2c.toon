@@ -2,11 +2,13 @@ id: pm-brief-da2c
 title: Add pm brief since delta command for agent re-orientation after parallel/merge work
 description: "An agent resuming a project (especially after other agents worked in parallel branches and merged) needs a precise, token-budgeted summary of WHAT CHANGED since its checkpoint instead of re-reading the whole project. Adds a new 'pm brief since <checkpoint>' subcommand that classifies activity since a checkpoint into created / closed / status-transitions (incl. newly blocked, newly unblocked, started) / reprioritized / dependency-edge changes / notes+comments, grouped per item and joined with current item state. Directly serves the ecosystem philosophy 'project management = context management' and the multi-agent merge workflow."
 type: Feature
-status: open
+status: in_progress
 priority: 1
 tags[3]: agent-context,delta,next-work
 created_at: "2026-07-23T04:53:50.272Z"
-updated_at: "2026-07-23T04:53:50.272Z"
+updated_at: "2026-07-23T05:12:16.298Z"
 author: claude
 acceptance_criteria: "pm brief since <checkpoint> summarizes changes since a checkpoint timestamp or relative window: created, closed, status transitions (newly blocked/unblocked/started), reprioritizations, dependency/edge changes, and new notes/comments; grouped per item with current title/type/status; supports --to, --author filter, --format text|json|markdown|slack, token budget, and deterministic ordering; sources from pm activity --full --json --from/--to joined with current item state; tests + README cover behavior; npm run release:check passes."
+notes[1]{created_at,author,text}:
+  "2026-07-23T05:12:16.297Z",pi-agent,"Shipped pm brief since <checkpoint> delta command: readActivitySince (pm activity --full --from/--to/--author/--limit), buildDelta classifier (created/closed/canceled/reopened/status-transition with started/newly-blocked/unblocked labels/reprioritized/retitled/reassigned/deps add-remove/notes+comments, deterministic changeRank+priority+recency+id ordering), renderMarkdownDelta/renderTextDelta/renderSlackDelta, token+item budget trimming reusing estimateTokens, brief since command registration with --until/--author/--limit/--max-items/--token-budget/--max-tokens/--format/--output. New exported types DeltaActivityEntry/DeltaItemChange/DeltaSummary. Added 6 buildDelta/render unit tests (all green). README updated with Delta briefs subsection. Gates: typecheck clean, 54/54 tests pass, pack dry-run ok, changelog:check ok; npm audit:prod blocked by environment EALLOWSCRIPTS policy (pre-existing, not code-related). Co-Authored-By: pi-agent <noreply@anthropic.com>"
 body: ""

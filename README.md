@@ -28,6 +28,9 @@ pm brief next --count 5 --dependency-order --explain --confidence
 pm brief next --count 5 --format json
 pm brief next --count 5 --explain --format text
 pm brief stale --days 7
+pm brief since 7d
+pm brief since 2026-07-20 --format json
+pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 ```
 
 ## Commands
@@ -36,6 +39,7 @@ pm brief stale --days 7
 - `pm brief prompt` renders a compact copy-pasteable agent handoff prompt.
 - `pm brief next` returns the ranked next items only.
 - `pm brief stale` returns stale open or in-progress items.
+- `pm brief since <checkpoint>` renders a delta brief of what changed since a checkpoint.
 
 ### Ranking and Budget Flags
 
@@ -68,6 +72,48 @@ pm brief stale --days 7
 instructions for coding agents: ranked work, focus context, blockers, risks,
 safe pm commands, and working rules. It is designed for handoffs where the next
 agent needs executable context rather than a full project dump.
+
+### Delta briefs (`pm brief since`)
+
+`pm brief since <checkpoint>` produces a token-budgeted **delta brief**: a
+categorized summary of what changed since a checkpoint, instead of a full
+project re-read. It is purpose-built for the multi-agent merge workflow — when
+an agent resumes a project after other agents worked in parallel branches and
+merged, it should orient on *what changed*, not re-read everything. Project
+management is context management, and a delta brief is the smallest context
+that captures the difference.
+
+**Checkpoint formats** (lower bound, passed to `pm activity --from`):
+
+- Relative windows: `7d`, `12h`, `30m`.
+- ISO timestamps / dates: `2026-07-20`, `2026-07-20T00:00:00Z`.
+
+**Filters:**
+
+- `--until <checkpoint>` — upper bound (passed to `pm activity --to`).
+- `--author <name>` — only include changes by this author.
+- `--limit <n>` — max activity entries to scan (default 1000, clamped 1–5000).
+
+**Budget & shape:**
+
+- `--max-items <n>` (default 40) and `--token-budget` / `--max-tokens` (default
+  4000) trim the lowest-ranked changes to fit; `truncated` / `omittedItems` are
+  reported in JSON and markdown when trimming occurs.
+- `--format markdown` (default), `text`, `json`, or `slack`; `--output <file>`
+  writes the result to a file.
+
+**Categories** (each a section, deterministic order, most decision-relevant
+first): Created · Closed · Canceled · Reopened · Status changes (incl. *started*,
+*newly blocked*, *unblocked* labels) · Reprioritized · Dependencies · Discussion
+(notes + comments) · Other. Items are ranked by change kind, then current
+priority, then recency, then id for a fully deterministic order.
+
+**Use case — multi-agent merge re-orientation:** after merging parallel
+branches that touched the pm tracker, run `pm brief since <last-sync>` to get a
+precise list of created / closed / reprioritized / re-blocked items and new
+notes, so the resuming agent can update its plan without re-reading the whole
+workspace. The brief ends with a `## Refresh` block showing the exact command
+that reproduces it.
 
 ## TypeScript API
 

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { describe } from "node:test";
 import extension, {
   buildBrief,
+  buildDelta,
   detectStaleContext,
   explainNextItems,
   extractRelationships,
@@ -9,10 +10,14 @@ import extension, {
   readRecentActivity,
   renderAgentPrompt,
   renderMarkdownBrief,
+  renderMarkdownDelta,
   renderSlackBrief,
+  renderSlackDelta,
+  renderTextDelta,
   selectNextItems,
   summarizeMomentum,
   summarizeRisks,
+  type DeltaActivityEntry,
   type PmItem,
 } from "../dist/index.js";
 
@@ -59,7 +64,7 @@ const items: PmItem[] = [
 test("extension registers brief commands", () => {
   const commands: Array<Record<string, unknown>> = [];
   extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum"]);
+  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since"]);
   const nextFlags = commands.find((command) => command.name === "brief next")?.flags as Array<Record<string, unknown>>;
   assert.ok(nextFlags.some((flag) => flag.long === "--explain"));
   assert.ok(nextFlags.some((flag) => flag.long === "--confidence"));
@@ -661,4 +666,219 @@ test("brief command registers a --completed-days flag and brief momentum exposes
   const momentumFlags = (momentumCommand.flags as Array<{ long?: string }>).map((flag) => flag.long);
   assert.ok(momentumFlags.includes("--days"));
   assert.ok(momentumFlags.includes("--format"));
+});
+
+// ---------------------------------------------------------------------------
+// brief since / buildDelta
+// ---------------------------------------------------------------------------
+
+function actEntry(
+  id: string,
+  op: string,
+  ts: string,
+  patch: Array<{ op: "add" | "replace" | "remove"; path: string; value?: unknown }> = [],
+  author = "pi-agent",
+): DeltaActivityEntry {
+  return { ts, author, op, id, patch };
+}
+
+function itemsById(items: PmItem[]): Map<string, PmItem> {
+  return new Map(items.map((item) => [item.id, item]));
+}
+
+describe("brief since / buildDelta", () => {
+  test("classifies created, closed, status-transition, reprioritized, and note", () => {
+    const entries: DeltaActivityEntry[] = [
+      // pm-new: created
+      actEntry("pm-new", "create", "2026-07-20T01:00:00Z", [
+        { op: "add", path: "/metadata/title", value: "New item" },
+        { op: "add", path: "/metadata/type", value: "Feature" },
+        { op: "add", path: "/metadata/status", value: "open" },
+        { op: "add", path: "/metadata/priority", value: 2 },
+      ]),
+      // pm-closed: closed via close op + close_reason
+      actEntry("pm-closed", "close", "2026-07-21T01:00:00Z", [
+        { op: "replace", path: "/metadata/status", value: "closed" },
+        { op: "add", path: "/metadata/close_reason", value: "completed" },
+      ]),
+      // pm-status: open -> in_progress (started)
+      actEntry("pm-status", "update", "2026-07-20T01:45:00Z", [
+        { op: "replace", path: "/metadata/status", value: "open" },
+      ]),
+      actEntry("pm-status", "update", "2026-07-20T02:00:00Z", [
+        { op: "replace", path: "/metadata/status", value: "in_progress" },
+      ]),
+      // pm-prio: priority 3 -> 1
+      actEntry("pm-prio", "update", "2026-07-20T02:30:00Z", [
+        { op: "replace", path: "/metadata/priority", value: 3 },
+      ]),
+      actEntry("pm-prio", "update", "2026-07-20T03:00:00Z", [
+        { op: "replace", path: "/metadata/priority", value: 1 },
+      ]),
+      // pm-note: note added
+      actEntry("pm-note", "note_add", "2026-07-20T04:00:00Z", [
+        { op: "add", path: "/metadata/notes/1", value: { text: "hi" } },
+      ]),
+    ];
+    const items: PmItem[] = [
+      { id: "pm-new", title: "New item", type: "Feature", status: "open", priority: 2 },
+      { id: "pm-closed", title: "Done thing", type: "Task", status: "closed", priority: 3 },
+      { id: "pm-status", title: "In flight", type: "Task", status: "in_progress", priority: 2 },
+      { id: "pm-prio", title: "Reordered", type: "Chore", status: "open", priority: 1 },
+      { id: "pm-note", title: "Noted", type: "Task", status: "open", priority: 4 },
+    ];
+    const summary = buildDelta(entries, itemsById(items), { since: "2026-07-20", workspace: ".agents/pm", pmVersion: "test" });
+    const byId = new Map(summary.items.map((c) => [c.id, c]));
+    assert.equal(byId.get("pm-new")?.created, true);
+    assert.equal(byId.get("pm-closed")?.closed, true);
+    assert.equal(byId.get("pm-closed")?.closeReason, "completed");
+    assert.equal(byId.get("pm-status")?.statusTransition?.from, "open");
+    assert.equal(byId.get("pm-status")?.statusTransition?.to, "in_progress");
+    assert.equal(byId.get("pm-status")?.statusLabel, "started");
+    assert.equal(byId.get("pm-prio")?.priorityChange?.from, "3");
+    assert.equal(byId.get("pm-prio")?.priorityChange?.to, 1);
+    assert.equal(byId.get("pm-note")?.notesAdded, 1);
+    assert.equal(summary.totals.created, 1);
+    assert.equal(summary.totals.closed, 1);
+    assert.equal(summary.totals.statusChanged, 1);
+    assert.equal(summary.totals.reprioritized, 1);
+    assert.equal(summary.totals.notes, 1);
+    assert.equal(summary.totals.itemsChanged, 5);
+    assert.equal(summary.totals.events, 7);
+  });
+
+  test("derives newly-blocked and unblocked status labels", () => {
+    const entries: DeltaActivityEntry[] = [
+      // pm-block: open -> blocked (newly blocked)
+      actEntry("pm-block", "update", "2026-07-20T01:00:00Z", [
+        { op: "replace", path: "/metadata/status", value: "blocked" },
+      ]),
+      // pm-unblock: blocked -> open (unblocked)
+      actEntry("pm-unblock", "update", "2026-07-20T01:30:00Z", [
+        { op: "replace", path: "/metadata/status", value: "blocked" },
+      ]),
+      actEntry("pm-unblock", "update", "2026-07-20T02:00:00Z", [
+        { op: "replace", path: "/metadata/status", value: "open" },
+      ]),
+    ];
+    const items: PmItem[] = [
+      { id: "pm-block", title: "B", type: "Task", status: "blocked", priority: 2 },
+      { id: "pm-unblock", title: "U", type: "Task", status: "open", priority: 2 },
+    ];
+    const summary = buildDelta(entries, itemsById(items), { since: "2026-07-20" });
+    const byId = new Map(summary.items.map((c) => [c.id, c]));
+    assert.equal(byId.get("pm-block")?.statusLabel, "newly blocked");
+    assert.equal(byId.get("pm-unblock")?.statusLabel, "unblocked");
+  });
+
+  test("counts dependency add/remove from /metadata/deps patch paths", () => {
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-deps", "update", "2026-07-20T01:00:00Z", [
+        { op: "add", path: "/metadata/deps/0", value: { id: "pm-x", kind: "depends_on" } },
+        { op: "add", path: "/metadata/deps/1", value: { id: "pm-y", kind: "depends_on" } },
+        { op: "remove", path: "/metadata/deps/0" },
+        { op: "add", path: "/relationships/0", value: { id: "pm-z" } },
+      ]),
+    ];
+    const items: PmItem[] = [{ id: "pm-deps", title: "D", type: "Task", status: "open", priority: 2 }];
+    const summary = buildDelta(entries, itemsById(items), { since: "2026-07-20" });
+    const change = summary.items[0];
+    assert.equal(change.depsAdded, 3);
+    assert.equal(change.depsRemoved, 1);
+    assert.equal(summary.totals.depsAdded, 3);
+    assert.equal(summary.totals.depsRemoved, 1);
+  });
+
+  test("deterministic ordering: created before status-changed before other; priority tie-break", () => {
+    // pm-other: only a note (rank 4, priority 5)
+    // pm-status: status change (rank 3, priority 3)
+    // pm-created: created (rank 0, priority 1)
+    // pm-created2: created (rank 0, priority 2)
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-created", "create", "2026-07-20T01:00:00Z", [
+        { op: "add", path: "/metadata/title", value: "C1" },
+        { op: "add", path: "/metadata/status", value: "open" },
+      ]),
+      actEntry("pm-created2", "create", "2026-07-20T02:00:00Z", [
+        { op: "add", path: "/metadata/title", value: "C2" },
+        { op: "add", path: "/metadata/status", value: "open" },
+      ]),
+      actEntry("pm-status", "update", "2026-07-20T03:00:00Z", [
+        { op: "replace", path: "/metadata/status", value: "in_progress" },
+      ]),
+      actEntry("pm-other", "note_add", "2026-07-20T04:00:00Z", [
+        { op: "add", path: "/metadata/notes/0", value: {} },
+      ]),
+    ];
+    const items: PmItem[] = [
+      { id: "pm-created", title: "C1", type: "Task", status: "open", priority: 1 },
+      { id: "pm-created2", title: "C2", type: "Task", status: "open", priority: 2 },
+      { id: "pm-status", title: "S", type: "Task", status: "in_progress", priority: 3 },
+      { id: "pm-other", title: "O", type: "Task", status: "open", priority: 5 },
+    ];
+    const summary = buildDelta(entries, itemsById(items), { since: "2026-07-20" });
+    assert.deepEqual(
+      summary.items.map((c) => c.id),
+      ["pm-created", "pm-created2", "pm-status", "pm-other"],
+    );
+  });
+
+  test("empty window produces zero totals, empty items, and a 'No changes' render", () => {
+    const summary = buildDelta([], new Map(), { since: "2026-07-01" });
+    assert.equal(summary.totals.itemsChanged, 0);
+    assert.equal(summary.totals.events, 0);
+    assert.equal(summary.items.length, 0);
+    const md = renderMarkdownDelta(summary);
+    assert.match(md, /No changes since 2026-07-01/);
+    const text = renderTextDelta(summary);
+    assert.match(text, /No changes since 2026-07-01/);
+  });
+
+  test("JSON summary shape is stable and markdown renderer contains expected section headers", () => {
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-new", "create", "2026-07-20T01:00:00Z", [
+        { op: "add", path: "/metadata/title", value: "New" },
+        { op: "add", path: "/metadata/status", value: "open" },
+      ]),
+      actEntry("pm-closed", "close", "2026-07-20T02:00:00Z", [
+        { op: "replace", path: "/metadata/status", value: "closed" },
+        { op: "add", path: "/metadata/close_reason", value: "completed" },
+      ]),
+      actEntry("pm-note", "note_add", "2026-07-20T03:00:00Z", [
+        { op: "add", path: "/metadata/notes/0", value: {} },
+      ]),
+    ];
+    const items: PmItem[] = [
+      { id: "pm-new", title: "New", type: "Feature", status: "open", priority: 1 },
+      { id: "pm-closed", title: "Done", type: "Task", status: "closed", priority: 2 },
+      { id: "pm-note", title: "Noted", type: "Task", status: "open", priority: 3 },
+    ];
+    const summary = buildDelta(entries, itemsById(items), {
+      since: "2026-07-20",
+      until: "2026-07-22",
+      author: "alice",
+      workspace: ".agents/pm",
+      pmVersion: "test",
+      generatedAt: "2026-07-22T00:00:00Z",
+    });
+    assert.equal(summary.since, "2026-07-20");
+    assert.equal(summary.until, "2026-07-22");
+    assert.equal(summary.author, "alice");
+    assert.equal(summary.workspace, ".agents/pm");
+    assert.equal(summary.pmVersion, "test");
+    assert.equal(summary.generatedAt, "2026-07-22T00:00:00Z");
+    assert.equal(summary.totals.created, 1);
+    assert.equal(summary.totals.closed, 1);
+    assert.equal(summary.totals.notes, 1);
+    const md = renderMarkdownDelta(summary);
+    assert.match(md, /# Delta since 2026-07-20 until 2026-07-22 by alice/);
+    assert.match(md, /## Summary/);
+    assert.match(md, /## Created/);
+    assert.match(md, /## Closed/);
+    assert.match(md, /## Discussion/);
+    assert.match(md, /## Refresh/);
+    const slack = renderSlackDelta(summary);
+    assert.match(slack, /\*Delta since 2026-07-20 until 2026-07-22 by alice\*/);
+    assert.match(slack, /\*Created\*/);
+  });
 });

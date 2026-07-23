@@ -202,6 +202,76 @@ export interface AgentBrief {
   insights?: BriefInsight[];
 }
 
+export interface DeltaActivityEntry {
+  ts: string;
+  author?: string;
+  op: string;
+  id: string;
+  patch?: Array<{
+    op: "add" | "replace" | "remove";
+    path: string;
+    value?: unknown;
+  }>;
+  before_hash?: string;
+  after_hash?: string;
+  message?: string;
+}
+
+export interface DeltaItemChange {
+  id: string;
+  title: string;
+  type: string;
+  currentStatus?: string;
+  currentPriority?: number;
+  created: boolean;
+  closed: boolean;
+  canceled: boolean;
+  reopened: boolean;
+  closeReason?: string;
+  statusTransition?: { from?: string; to: string };
+  statusLabel?: string;
+  priorityChange?: { from?: string; to: number };
+  retitled: boolean;
+  reassigned?: { to: string };
+  depsAdded: number;
+  depsRemoved: number;
+  notesAdded: number;
+  commentsAdded: number;
+  eventCount: number;
+  firstTs: string;
+  lastTs: string;
+  changeRank: number;
+}
+
+export interface DeltaSummary {
+  since: string;
+  until?: string;
+  author?: string;
+  generatedAt: string;
+  workspace: string;
+  pmVersion: string;
+  totals: {
+    itemsChanged: number;
+    events: number;
+    created: number;
+    closed: number;
+    canceled: number;
+    reopened: number;
+    statusChanged: number;
+    reprioritized: number;
+    retitled: number;
+    reassigned: number;
+    depsAdded: number;
+    depsRemoved: number;
+    notes: number;
+    comments: number;
+  };
+  items: DeltaItemChange[];
+  truncated?: boolean;
+  omittedItems?: number;
+  budget?: { requestedTokens: number; estimatedTokens: number };
+}
+
 interface Relationship {
   from: string;
   to: string;
@@ -1236,6 +1306,453 @@ export function readRecentActivity(pmRoot: string, limit = 10): BriefActivity[] 
     .slice(0, safeLimit);
 }
 
+/**
+ * Read full activity entries (with JSON-Patch payloads) since a checkpoint via
+ * `pm activity --json --full --from <from> [--to] [--author] --limit <n>`. Mirrors
+ * the spawnSync/CommandError idioms of `readRecentActivity` and `readPmItems`.
+ * Returns normalized `DeltaActivityEntry[]` sorted ascending by ts so the
+ * classifier can walk each item's events chronologically.
+ */
+export function readActivitySince(
+  pmRoot: string,
+  options: { from: string; to?: string; author?: string; limit?: number },
+): DeltaActivityEntry[] {
+  const requested = Math.floor(options.limit ?? 1000);
+  const limit = Number.isFinite(requested) ? Math.max(1, Math.min(requested, 5000)) : 1000;
+  const args = [PM_PATH_OPTION, pmRoot, "activity", "--json", "--full", "--from", options.from];
+  if (options.to) args.push("--to", options.to);
+  if (options.author) args.push("--author", options.author);
+  args.push("--limit", String(limit));
+  const result = spawnSync(PM_EXECUTABLE, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+  if (result.status !== 0) {
+    throw new CommandError(result.stderr?.trim() || result.error?.message || "`pm activity --json --full` failed");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new CommandError(`Unable to parse pm activity JSON: ${detail}`);
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const record = parsed as Record<string, unknown>;
+  const entries = record.activity;
+  if (!Array.isArray(entries)) return [];
+  const normalized: DeltaActivityEntry[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const r = entry as Record<string, unknown>;
+    const ts = text(r.ts);
+    const id = text(r.id);
+    if (!ts || !id) continue;
+    const patch = Array.isArray(r.patch)
+      ? (r.patch as DeltaActivityEntry["patch"])
+      : undefined;
+    normalized.push({
+      ts,
+      author: text(r.author) || undefined,
+      op: text(r.op) || "activity",
+      id,
+      patch,
+      before_hash: text(r.before_hash) || undefined,
+      after_hash: text(r.after_hash) || undefined,
+      message: text(r.message) || undefined,
+    });
+  }
+  normalized.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  return normalized;
+}
+
+const OPEN_STATUSES = new Set(["open", "in_progress", "ready"]);
+const CLOSED_STATUSES = new Set(["closed", "done", "canceled", "cancelled"]);
+
+/**
+ * Pure classifier: groups full activity entries by item id and aggregates all
+ * events in the window into one `DeltaItemChange` per changed item, joined with
+ * the current state in `itemsById`. Deterministic ordering puts the most
+ * decision-relevant changes first, then applies a token/item budget.
+ */
+export function buildDelta(
+  entries: DeltaActivityEntry[],
+  itemsById: Map<string, PmItem>,
+  options: {
+    since: string;
+    until?: string;
+    author?: string;
+    generatedAt?: string;
+    workspace?: string;
+    pmVersion?: string;
+    maxItems?: number;
+    tokenBudget?: number;
+  } = { since: "" },
+): DeltaSummary {
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+
+  const byId = new Map<string, DeltaActivityEntry[]>();
+  for (const entry of entries) {
+    let bucket = byId.get(entry.id);
+    if (!bucket) {
+      bucket = [];
+      byId.set(entry.id, bucket);
+    }
+    bucket.push(entry);
+  }
+
+  const items: DeltaItemChange[] = [];
+  for (const [id, rawEvents] of byId) {
+    const events = [...rawEvents].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+    const item = itemsById.get(id);
+
+    let created = false;
+    let closed = false;
+    let canceled = false;
+    let reopened = false;
+    let closeReason: string | undefined;
+    let retitled = false;
+    let reassignedTo: string | undefined;
+    let depsAdded = 0;
+    let depsRemoved = 0;
+    let notesAdded = 0;
+    let commentsAdded = 0;
+    let titleFromPatch: string | undefined;
+    const statusValues: string[] = [];
+    const priorityValues: number[] = [];
+
+    for (const e of events) {
+      const op = e.op;
+      if (op === "create") created = true;
+      if (op === "close") closed = true;
+      if (op === "cancel") canceled = true;
+      if (op === "reopen") reopened = true;
+      const opCountedNote = op === "note_add";
+      const opCountedComment = op === "comment_add";
+      if (opCountedNote) notesAdded++;
+      if (opCountedComment) commentsAdded++;
+      if (!e.patch) continue;
+      for (const p of e.patch) {
+        const path = p.path;
+        const pop = p.op;
+        if (path === "/metadata/status") {
+          if (typeof p.value === "string") statusValues.push(p.value);
+        }
+        if (path === "/metadata/close_reason" && (pop === "add" || pop === "replace")) {
+          if (typeof p.value === "string") closeReason = p.value;
+        }
+        if (path === "/metadata/priority" && (pop === "add" || pop === "replace")) {
+          if (typeof p.value === "number") priorityValues.push(p.value);
+        }
+        if (path === "/metadata/title" || path === "/title") {
+          retitled = true;
+          if (typeof p.value === "string" && !titleFromPatch) titleFromPatch = p.value;
+        }
+        if (path === "/metadata/assignee" && (pop === "add" || pop === "replace")) {
+          if (typeof p.value === "string") reassignedTo = p.value;
+        }
+        if (
+          path === "/metadata/deps" ||
+          path.startsWith("/metadata/deps/") ||
+          path === "/metadata/relationships" ||
+          path.startsWith("/metadata/relationships/") ||
+          path === "/relationships" ||
+          path.startsWith("/relationships/")
+        ) {
+          if (pop === "add") depsAdded++;
+          else if (pop === "remove") depsRemoved++;
+        }
+        if (path === "/metadata/notes" || path.startsWith("/metadata/notes/")) {
+          if (pop === "add" && !opCountedNote) notesAdded++;
+        }
+        if (path === "/metadata/comments" || path.startsWith("/metadata/comments/")) {
+          if (pop === "add" && !opCountedComment) commentsAdded++;
+        }
+      }
+    }
+
+    if (!closed && statusValues.some((v) => v === "closed")) closed = true;
+    if (!canceled && statusValues.some((v) => v === "canceled" || v === "cancelled")) canceled = true;
+    if (!reopened && statusValues.length >= 2) {
+      let hadClosed = false;
+      for (const v of statusValues) {
+        if (CLOSED_STATUSES.has(v)) hadClosed = true;
+        if (hadClosed && OPEN_STATUSES.has(v)) {
+          reopened = true;
+          break;
+        }
+      }
+    }
+
+    let statusTransition: { from?: string; to: string } | undefined;
+    if (statusValues.length >= 1) {
+      const distinct: string[] = [];
+      for (const v of statusValues) {
+        if (distinct.length === 0 || distinct[distinct.length - 1] !== v) distinct.push(v);
+      }
+      const to = statusValues[statusValues.length - 1];
+      if (distinct.length >= 2) {
+        statusTransition = { from: distinct[distinct.length - 2], to };
+      } else {
+        statusTransition = { to };
+      }
+    }
+
+    let statusLabel: string | undefined;
+    if (statusTransition) {
+      const to = statusTransition.to;
+      const from = statusTransition.from;
+      if (to === "in_progress" && from !== "in_progress") statusLabel = "started";
+      if (to === "blocked") statusLabel = "newly blocked";
+      if (from === "blocked" && (to === "open" || to === "in_progress")) statusLabel = "unblocked";
+    }
+    if (reopened) statusLabel = "reopened";
+
+    let priorityChange: { from?: string; to: number } | undefined;
+    if (priorityValues.length >= 1) {
+      const distinct: number[] = [];
+      for (const v of priorityValues) {
+        if (distinct.length === 0 || distinct[distinct.length - 1] !== v) distinct.push(v);
+      }
+      const to = priorityValues[priorityValues.length - 1];
+      if (distinct.length >= 2) {
+        priorityChange = { from: String(distinct[distinct.length - 2]), to };
+      } else {
+        priorityChange = { to };
+      }
+    }
+
+    const title = item ? titleOf(item) : titleFromPatch ?? "(unknown/removed)";
+    const type = item ? typeOf(item) : "Item";
+    const currentStatus = item ? statusOf(item) : undefined;
+    const currentPriority = item && typeof item.priority === "number" ? item.priority : undefined;
+    const firstTs = events[0].ts;
+    const lastTs = events[events.length - 1].ts;
+
+    let changeRank = 4;
+    if (created) changeRank = 0;
+    else if (closed || canceled) changeRank = 1;
+    else if (reopened) changeRank = 2;
+    else if (statusTransition !== undefined || priorityChange !== undefined) changeRank = 3;
+
+    items.push({
+      id,
+      title,
+      type,
+      currentStatus,
+      currentPriority,
+      created,
+      closed,
+      canceled,
+      reopened,
+      closeReason,
+      statusTransition,
+      statusLabel,
+      priorityChange,
+      retitled,
+      reassigned: reassignedTo !== undefined ? { to: reassignedTo } : undefined,
+      depsAdded,
+      depsRemoved,
+      notesAdded,
+      commentsAdded,
+      eventCount: events.length,
+      firstTs,
+      lastTs,
+      changeRank,
+    });
+  }
+
+  items.sort((a, b) => {
+    if (a.changeRank !== b.changeRank) return a.changeRank - b.changeRank;
+    const pa = typeof a.currentPriority === "number" ? a.currentPriority : 99;
+    const pb = typeof b.currentPriority === "number" ? b.currentPriority : 99;
+    if (pa !== pb) return pa - pb;
+    if (a.lastTs !== b.lastTs) return a.lastTs > b.lastTs ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+
+  const totals = {
+    itemsChanged: items.length,
+    events: entries.length,
+    created: items.filter((i) => i.created).length,
+    closed: items.filter((i) => i.closed).length,
+    canceled: items.filter((i) => i.canceled).length,
+    reopened: items.filter((i) => i.reopened).length,
+    statusChanged: items.filter((i) => i.statusTransition !== undefined && !i.created && !i.closed && !i.canceled && !i.reopened).length,
+    reprioritized: items.filter((i) => i.priorityChange !== undefined && !i.created).length,
+    retitled: items.filter((i) => i.retitled).length,
+    reassigned: items.filter((i) => i.reassigned !== undefined).length,
+    depsAdded: items.reduce((n, i) => n + i.depsAdded, 0),
+    depsRemoved: items.reduce((n, i) => n + i.depsRemoved, 0),
+    notes: items.reduce((n, i) => n + i.notesAdded, 0),
+    comments: items.reduce((n, i) => n + i.commentsAdded, 0),
+  };
+
+  const summary: DeltaSummary = {
+    since: options.since,
+    until: options.until,
+    author: options.author,
+    generatedAt,
+    workspace: options.workspace ?? ".agents/pm",
+    pmVersion: options.pmVersion ?? "unknown",
+    totals,
+    items,
+  };
+
+  applyDeltaBudget(summary, options.maxItems ?? 40, options.tokenBudget ?? 4000);
+  return summary;
+}
+
+function applyDeltaBudget(summary: DeltaSummary, maxItems: number, tokenBudget: number): void {
+  const full = summary.items;
+  let working = full.slice(0, maxItems);
+  let omitted = full.length - working.length;
+  let truncated = omitted > 0;
+  const probe = (items: DeltaItemChange[]) => estimateTokens(renderMarkdownDelta({ ...summary, items }));
+  if (probe(working) > tokenBudget) {
+    while (working.length > 1 && probe(working) > tokenBudget) {
+      working = working.slice(0, -1);
+    }
+    omitted = full.length - working.length;
+    truncated = true;
+  }
+  summary.items = working;
+  summary.truncated = truncated || undefined;
+  summary.omittedItems = omitted > 0 ? omitted : undefined;
+  summary.budget = { requestedTokens: tokenBudget, estimatedTokens: probe(working) };
+}
+
+function describeDeltaItem(change: DeltaItemChange): string {
+  const parts: string[] = [];
+  if (change.created) parts.push("created");
+  if (change.closed) {
+    parts.push("closed");
+    if (change.closeReason) parts.push(`(${change.closeReason})`);
+  }
+  if (change.canceled) parts.push("canceled");
+  if (change.reopened) parts.push("reopened");
+  if (change.statusTransition) {
+    const t = change.statusTransition;
+    const from = t.from ? `${t.from} → ${t.to}` : `→ ${t.to}`;
+    parts.push(`status ${from}`);
+  }
+  if (change.statusLabel) parts.push(change.statusLabel);
+  if (change.priorityChange) {
+    const p = change.priorityChange;
+    parts.push(p.from ? `priority ${p.from} → ${p.to}` : `priority → ${p.to}`);
+  }
+  if (change.retitled) parts.push("retitled");
+  if (change.reassigned) parts.push(`assigned → ${change.reassigned.to}`);
+  if (change.depsAdded > 0) parts.push(`+${change.depsAdded} dep${change.depsAdded === 1 ? "" : "s"}`);
+  if (change.depsRemoved > 0) parts.push(`-${change.depsRemoved} dep${change.depsRemoved === 1 ? "" : "s"}`);
+  if (change.notesAdded > 0) parts.push(`${change.notesAdded} note${change.notesAdded === 1 ? "" : "s"}`);
+  if (change.commentsAdded > 0) parts.push(`${change.commentsAdded} comment${change.commentsAdded === 1 ? "" : "s"}`);
+  const detail = parts.length > 0 ? parts.join("; ") : `${change.eventCount} event${change.eventCount === 1 ? "" : "s"}`;
+  return detail;
+}
+
+function deltaRefreshCommand(summary: DeltaSummary, format?: string): string {
+  const parts = ["pm", "brief", "since", summary.since];
+  if (summary.until) parts.push("--until", summary.until);
+  if (summary.author) parts.push("--author", summary.author);
+  if (format) parts.push("--format", format);
+  return parts.join(" ");
+}
+
+export function renderMarkdownDelta(summary: DeltaSummary): string {
+  if (summary.items.length === 0) {
+    const header = `# Delta since ${summary.since}${summary.until ? ` until ${summary.until}` : ""}${summary.author ? ` by ${summary.author}` : ""}`;
+    return `${header}\n\nNo changes since ${summary.since}.\n`;
+  }
+  const header = `# Delta since ${summary.since}${summary.until ? ` until ${summary.until}` : ""}${summary.author ? ` by ${summary.author}` : ""}`;
+  const lines: string[] = [
+    header,
+    "",
+    `${summary.workspace} · pm ${summary.pmVersion} · generated ${summary.generatedAt}`,
+    "",
+    "## Summary",
+    "",
+  ];
+  const t = summary.totals;
+  lines.push(
+    `- ${t.itemsChanged} item(s) changed across ${t.events} event(s): ${t.created} created, ${t.closed} closed, ${t.canceled} canceled, ${t.reopened} reopened, ${t.statusChanged} status changed, ${t.reprioritized} reprioritized, ${t.retitled} retitled, ${t.reassigned} reassigned, ${t.depsAdded} deps added, ${t.depsRemoved} deps removed, ${t.notes} notes, ${t.comments} comments.`,
+  );
+  if (summary.truncated) {
+    lines.push(`- _truncated: ${summary.omittedItems ?? 0} lower-ranked item(s) omitted to fit budget_`);
+  }
+  lines.push("");
+
+  const section = (title: string, members: DeltaItemChange[]) => {
+    if (members.length === 0) return;
+    lines.push(`## ${title}`, "");
+    for (const change of members) {
+      lines.push(`- ${change.id}: ${escapeLine(change.title)} (${change.type}) — ${describeDeltaItem(change)}`);
+    }
+    lines.push("");
+  };
+
+  section("Created", summary.items.filter((i) => i.created));
+  section("Closed", summary.items.filter((i) => i.closed && !i.created));
+  section("Canceled", summary.items.filter((i) => i.canceled && !i.created));
+  section("Reopened", summary.items.filter((i) => i.reopened));
+  section("Status changes", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition !== undefined));
+  section("Reprioritized", summary.items.filter((i) => !i.created && i.priorityChange !== undefined));
+  section("Dependencies", summary.items.filter((i) => i.depsAdded > 0 || i.depsRemoved > 0));
+  section("Discussion", summary.items.filter((i) => i.notesAdded > 0 || i.commentsAdded > 0));
+  section("Other", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition === undefined && i.priorityChange === undefined && i.depsAdded === 0 && i.depsRemoved === 0 && i.notesAdded === 0 && i.commentsAdded === 0 && i.statusTransition === undefined));
+
+  lines.push("## Refresh", "");
+  lines.push(`\`\`\`${deltaRefreshCommand(summary)}\`\`\``);
+  lines.push("");
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderTextDelta(summary: DeltaSummary): string {
+  if (summary.items.length === 0) {
+    return `No changes since ${summary.since}.\n`;
+  }
+  const t = summary.totals;
+  const lines: string[] = [
+    `Delta since ${summary.since}${summary.until ? ` until ${summary.until}` : ""}${summary.author ? ` by ${summary.author}` : ""} (${summary.workspace}, pm ${summary.pmVersion})`,
+    `${t.itemsChanged} item(s) changed across ${t.events} event(s)${summary.truncated ? ` (truncated, ${summary.omittedItems ?? 0} omitted)` : ""}`,
+    "",
+  ];
+  for (const change of summary.items) {
+    lines.push(`${change.id}: ${escapeLine(change.title)} — ${describeDeltaItem(change)}`);
+  }
+  lines.push("");
+  lines.push(`Refresh: ${deltaRefreshCommand(summary)}`);
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderSlackDelta(summary: DeltaSummary): string {
+  if (summary.items.length === 0) {
+    return `No changes since ${summary.since}.\n`;
+  }
+  const header = `*Delta since ${summary.since}${summary.until ? ` until ${summary.until}` : ""}${summary.author ? ` by ${summary.author}` : ""}*`;
+  const meta = `_${summary.workspace} | pm ${summary.pmVersion} | generated ${summary.generatedAt}_`;
+  const lines: string[] = [header, meta, ""];
+  const t = summary.totals;
+  lines.push(`*Summary* — ${t.itemsChanged} item(s) / ${t.events} event(s): ${t.created} created, ${t.closed} closed, ${t.canceled} canceled, ${t.reopened} reopened, ${t.statusChanged} status, ${t.reprioritized} repri, ${t.notes} notes, ${t.comments} comments${summary.truncated ? ` _(${summary.omittedItems ?? 0} omitted)_` : ""}`);
+  lines.push("");
+  const section = (title: string, members: DeltaItemChange[]) => {
+    if (members.length === 0) return;
+    lines.push(`*${title}*`);
+    for (const change of members) {
+      lines.push(`• \`${change.id}\` ${escapeLine(change.title)} (${change.type}) — ${describeDeltaItem(change)}`);
+    }
+    lines.push("");
+  };
+  section("Created", summary.items.filter((i) => i.created));
+  section("Closed", summary.items.filter((i) => i.closed && !i.created));
+  section("Canceled", summary.items.filter((i) => i.canceled && !i.created));
+  section("Reopened", summary.items.filter((i) => i.reopened));
+  section("Status changes", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition !== undefined));
+  section("Reprioritized", summary.items.filter((i) => !i.created && i.priorityChange !== undefined));
+  section("Dependencies", summary.items.filter((i) => i.depsAdded > 0 || i.depsRemoved > 0));
+  section("Discussion", summary.items.filter((i) => i.notesAdded > 0 || i.commentsAdded > 0));
+  section("Other", summary.items.filter((i) => !i.created && !i.closed && !i.canceled && !i.reopened && i.statusTransition === undefined && i.priorityChange === undefined && i.depsAdded === 0 && i.depsRemoved === 0 && i.notesAdded === 0 && i.commentsAdded === 0));
+  lines.push(`Refresh: \`${deltaRefreshCommand(summary)}\``);
+  return `${lines.join("\n")}\n`;
+}
+
 function registerCommands(api: any): void {
   const commonFlags = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
@@ -1439,6 +1956,65 @@ function registerCommands(api: any): void {
         }
       }
       return renderedCommandResult(`${lines.join("\n")}\n`);
+    },
+  });
+  api.registerCommand({
+    name: "brief since",
+    description: "Summarize what changed in the workspace since a checkpoint (delta brief).",
+    intent: "give an agent resuming work a precise, token-budgeted delta instead of a full re-read",
+    examples: ["pm brief since 7d", "pm brief since 2026-07-20 --format json", "pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice"],
+    arguments: [{ name: "checkpoint", required: true, description: "ISO timestamp or relative window (e.g. 7d, 2026-07-20) — lower bound, passed to pm activity --from" }],
+    flags: [
+      { long: "--until", value_name: "checkpoint", description: "Upper bound timestamp/relative (pm activity --to)", type: "string" },
+      { long: "--author", value_name: "name", description: "Only include changes by this author", type: "string" },
+      { long: "--limit", value_name: "n", description: "Max activity entries to scan (default 1000)", type: "string" },
+      { long: "--max-items", value_name: "n", description: "Max changed items to render (default 40)", type: "string" },
+      { long: "--token-budget", value_name: "n", description: "Approx max output token budget (alias --max-tokens; default 4000)", type: "string" },
+      { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget", type: "string" },
+      { long: "--format", value_name: "format", description: "Output format: markdown, text, json, or slack (default markdown)", type: "string" },
+      { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
+    ],
+    async run(ctx: any) {
+      const options = ctx.options as Record<string, unknown>;
+      const checkpoint = (ctx.args?.[0] ?? "").trim();
+      if (!checkpoint) throw new CommandError("pm brief since requires a <checkpoint> (ISO timestamp or relative window like 7d)", EXIT_CODE.USAGE);
+      const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
+      if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
+      const until = readString(options, "until");
+      const author = readString(options, "author");
+      const limit = readInt(options, ["limit"], 1000);
+      const maxItems = readInt(options, ["max-items", "maxItems"], 40);
+      const tokenBudget = readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000);
+      const workspace = ctx.pm_root ?? ".agents/pm";
+      const entries = readActivitySince(workspace, { from: checkpoint, to: until, author, limit });
+      const items = readPmItems(workspace);
+      const itemsById = new Map<string, PmItem>();
+      for (const item of items) itemsById.set(item.id, item);
+      const summary = buildDelta(entries, itemsById, {
+        since: checkpoint,
+        until,
+        author,
+        generatedAt: new Date().toISOString(),
+        workspace,
+        pmVersion: pmVersion(),
+        maxItems,
+        tokenBudget,
+      });
+      const outputPath = readString(options, "output");
+      if (format === "json") {
+        const output = `${JSON.stringify(summary, null, 2)}\n`;
+        if (outputPath) {
+          writeFileSync(outputPath, output, "utf-8");
+          return { ok: true, format, output: outputPath, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+        }
+        return renderedCommandResult(output);
+      }
+      const output = format === "text" ? renderTextDelta(summary) : format === "slack" ? renderSlackDelta(summary) : renderMarkdownDelta(summary);
+      if (outputPath) {
+        writeFileSync(outputPath, output, "utf-8");
+        return { ok: true, format, output: outputPath, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+      }
+      return renderedCommandResult(output);
     },
   });
 }
