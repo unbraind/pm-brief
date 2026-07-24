@@ -2184,8 +2184,8 @@ export function classifyItemDivergence(input: {
   const baseFields = [...changedFieldPaths(baseNew)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
   const headFields = [...changedFieldPaths(headNew)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
 
-  const baseSide = summarizeSide(base.events, baseNew, base.itemPresent, base.malformedLines ?? 0);
-  const headSide = summarizeSide(head.events, headNew, head.itemPresent, head.malformedLines ?? 0);
+  const baseSide = summarizeSide(baseNew, base.itemPresent, base.malformedLines ?? 0);
+  const headSide = summarizeSide(headNew, head.itemPresent, head.malformedLines ?? 0);
 
   let kind: DivergeKind;
   let severity: "low" | "medium" | "high";
@@ -2229,7 +2229,12 @@ export function classifyItemDivergence(input: {
   return { id, kind, severity, collidingFields, base: baseSide, head: headSide };
 }
 
-function summarizeSide(allEvents: DivergeEvent[], newSideEvents: DivergeEvent[], itemPresent: boolean, malformedLines: number): DivergeItem["base"] {
+/**
+ * Summarize one side's contribution. Deliberately scoped to the events that are
+ * NEW relative to the merge base — `eventCount` is the count of new events, not of
+ * the side's whole history, since only new events can collide.
+ */
+function summarizeSide(newSideEvents: DivergeEvent[], itemPresent: boolean, malformedLines: number): DivergeItem["base"] {
   const sorted = [...newSideEvents].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   const fields = [...changedFieldPaths(newSideEvents)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
   const authors = [...new Set(sorted.map((e) => e.author ?? "").filter(Boolean))].sort();
@@ -2246,31 +2251,69 @@ function summarizeSide(allEvents: DivergeEvent[], newSideEvents: DivergeEvent[],
 
 // ---- fence check -------------------------------------------------------------
 
+/**
+ * Ask git which merge driver it would actually apply to representative pm paths.
+ *
+ * `git check-attr` is the authoritative resolver: it honours `.gitattributes` in
+ * every parent directory of the target, the untracked `.git/info/attributes`, and
+ * the global/system attributes files. Parsing only the repo-root `.gitattributes`
+ * misses all of those, so a correctly fenced workspace could be reported as
+ * unfenced — a false warning that tells the agent to run `pm merge install` it does
+ * not need, and, worse, leaves the reverse case (reporting a fence that git will not
+ * apply) equally possible.
+ *
+ * Returns a map of probe path to resolved `merge` attribute value. Values git
+ * reports as `unspecified`, `unset` or `set` carry no driver name and are dropped.
+ */
+export function checkAttrMerge(repoRoot: string, paths: string[]): Map<string, string> {
+  const resolved = new Map<string, string>();
+  if (paths.length === 0) return resolved;
+  const result = spawnSync("git", ["check-attr", "merge", "--", ...paths], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  assertGitRan(result, "check-attr");
+  if (result.status !== 0) {
+    throw new CommandError(`git check-attr failed: ${result.stderr?.trim() || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
+  }
+  for (const line of result.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Output shape: "<path>: merge: <value>". A path may itself contain ": ", so
+    // split from the right on the known ": merge: " separator.
+    const marker = trimmed.lastIndexOf(": merge: ");
+    if (marker < 0) continue;
+    const path = trimmed.slice(0, marker);
+    const value = trimmed.slice(marker + ": merge: ".length).trim();
+    if (!value || value === "unspecified" || value === "unset" || value === "set") continue;
+    resolved.set(path, value);
+  }
+  return resolved;
+}
+
+/**
+ * Build the probe paths whose resolved `merge` attribute decides fence status: one
+ * history ledger and one item file. Real paths from the divergence scan are
+ * preferred so the probe reflects the directories actually in play; the
+ * conventional fallbacks keep the check meaningful when nothing changed.
+ */
+export function fenceProbePaths(pmRootRel: string, observedItemPath?: string): { historyPath: string; itemPath: string } {
+  return {
+    historyPath: `${pmRootRel}/history/pm-fence-probe.jsonl`,
+    itemPath: observedItemPath ?? `${pmRootRel}/tasks/pm-fence-probe.toon`,
+  };
+}
+
 export function evaluateFence(input: {
-  gitattributesText: string | undefined;
-  pmRootRel: string;
+  /** Resolved `merge` attribute for an item `.toon` path, from `git check-attr`. */
+  itemToonAttr?: string;
+  /** Resolved `merge` attribute for a history `.jsonl` path, from `git check-attr`. */
+  historyAttr?: string;
   itemToonDriver?: string;
   historyDriver?: string;
 }): FenceStatus {
-  const { gitattributesText, pmRootRel } = input;
   const missing: string[] = [];
 
-  let attributesInstalled = false;
-  if (gitattributesText) {
-    const lines = gitattributesText.split("\n");
-    let hasItemToon = false;
-    let hasHistory = false;
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line || line.startsWith("#")) continue;
-      // The pathspec may be quoted (".agents/pm/...") or unquoted
-      const pathPart = line.replace(/^"([^"]+)"/, "$1").split(/\s+/)[0] ?? "";
-      if (!pathPart.startsWith(pmRootRel)) continue;
-      if (/\bmerge=pm-item-toon\b/.test(line)) hasItemToon = true;
-      if (/\bmerge=pm-history\b/.test(line)) hasHistory = true;
-    }
-    attributesInstalled = hasItemToon && hasHistory;
-  }
+  const hasItemToon = input.itemToonAttr === "pm-item-toon";
+  const hasHistory = input.historyAttr === "pm-history";
+  const attributesInstalled = hasItemToon && hasHistory;
   if (!attributesInstalled) missing.push(".gitattributes merge=pm-item-toon / merge=pm-history entries");
 
   const driversConfigured = Boolean(input.itemToonDriver) && Boolean(input.historyDriver);
@@ -2400,13 +2443,26 @@ function estimateDivergenceTokens(summary: DivergenceSummary, format?: string): 
 
 function applyDivergenceBudget(summary: DivergenceSummary, maxItems: number, tokenBudget: number, format?: string): void {
   const full = summary.items;
-  let working = full.slice(0, maxItems);
+  const capped = full.slice(0, maxItems);
   const probe = (items: DivergeItem[]) => estimateDivergenceTokens({ ...summary, items }, format);
-  if (working.length > 1 && probe(working) > tokenBudget) {
-    while (working.length > 1 && probe(working) > tokenBudget) {
-      working = working.slice(0, -1);
+
+  // Binary search the longest prefix that fits the budget. Dropping one item per
+  // iteration re-rendered the whole summary each time, so a 40-item report cost ~40
+  // full renders; this converges in ~log2(n) probes to the identical prefix length.
+  // Items are already ordered most-decision-relevant first, so a prefix is the right
+  // thing to keep, and at least one item is always retained.
+  let working = capped;
+  if (capped.length > 1 && probe(capped) > tokenBudget) {
+    let fits = 1;                 // length 1 is always kept, fitting or not
+    let tooBig = capped.length;   // known not to fit
+    while (tooBig - fits > 1) {
+      const mid = fits + Math.floor((tooBig - fits) / 2);
+      if (probe(capped.slice(0, mid)) > tokenBudget) tooBig = mid;
+      else fits = mid;
     }
+    working = capped.slice(0, fits);
   }
+
   const omitted = full.length - working.length;
   summary.items = working;
   summary.truncated = omitted > 0 ? true : undefined;
@@ -2864,12 +2920,6 @@ function registerCommands(api: any): void {
         if (dateResult.status === 0 && dateResult.stdout?.trim()) ancestorDate = dateResult.stdout.trim();
       }
 
-      // fence check: read .gitattributes at HEAD and git config drivers
-      const gitattributesText = readBlob(repoRoot, headSha, ".gitattributes");
-      const itemToonDriver = gitConfigGet(repoRoot, "merge.pm-item-toon.driver");
-      const historyDriver = gitConfigGet(repoRoot, "merge.pm-history.driver");
-      const fence = evaluateFence({ gitattributesText, pmRootRel, itemToonDriver, historyDriver });
-
       // collect changed paths on each side relative to the ancestor
       const basePaths = ancestorSha
         ? listChangedPaths(repoRoot, ancestorSha, baseSha, pmRootRel)
@@ -2889,24 +2939,47 @@ function registerCommands(api: any): void {
       // union of all touched item ids
       const allIds = new Set<string>([...baseHistoryIds, ...headHistoryIds, ...baseToonIds, ...headToonIds]);
 
+      // Fence check: ask git which merge driver it would actually apply, rather than
+      // parsing the repo-root .gitattributes — git also honours attributes files in
+      // parent directories of the target and the untracked .git/info/attributes.
+      // Probe a real observed .toon path when one is available so the answer reflects
+      // the directory actually in play.
+      const observedToonPath = [...basePaths, ...headPaths].find((p) => p.endsWith(".toon"));
+      const probes = fenceProbePaths(pmRootRel, observedToonPath);
+      const attrs = checkAttrMerge(repoRoot, [probes.historyPath, probes.itemPath]);
+      const fence = evaluateFence({
+        historyAttr: attrs.get(probes.historyPath),
+        itemToonAttr: attrs.get(probes.itemPath),
+        itemToonDriver: gitConfigGet(repoRoot, "merge.pm-item-toon.driver"),
+        historyDriver: gitConfigGet(repoRoot, "merge.pm-history.driver"),
+      });
+
+      // The set of item ids with a .toon at a revision depends only on the revision,
+      // so each of the three trees is listed exactly once here rather than once per
+      // item per side (which cost 3N full-tree scans on a single invocation).
+      // listChangedPaths is reused so a failed ls-tree raises instead of being read
+      // as "the item is absent", which would misclassify items as delete-vs-edit.
+      const toonIdsAt = (sha: string): Set<string> => {
+        const toonIds = new Set<string>();
+        classifyPaths(listChangedPaths(repoRoot, undefined, sha, pmRootRel), pmRootRel, new Set<string>(), toonIds);
+        return toonIds;
+      };
+      const ancestorToonIds = ancestorSha ? toonIdsAt(ancestorSha) : new Set<string>();
+      const baseToonIdsPresent = toonIdsAt(baseSha);
+      const headToonIdsPresent = toonIdsAt(headSha);
+
       const items: DivergeItem[] = [];
       for (const itemId of allIds) {
         const historyRel = `${pmRootRel}/history/${itemId}.jsonl`;
-        const toonPresent = (sha: string): boolean => {
-          // check if any .toon path for this id exists at the given revision
-          const result = spawnSync("git", ["ls-tree", "-r", "--name-only", sha, "--", pmRootRel], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
-          if (result.status !== 0) return false;
-          return result.stdout.split("\n").some((line) => line.trim().endsWith(`/${itemId}.toon`));
-        };
 
         // One scan per ledger: scanHistoryJsonl returns events and the unusable-line
         // count together, so a ledger near the 64 MiB buffer is not JSON-parsed twice.
         const ancestorScan = ancestorSha ? scanHistoryJsonl(readBlob(repoRoot, ancestorSha, historyRel)) : { events: [], malformedLines: 0 };
-        const ancestorPresent = ancestorSha ? toonPresent(ancestorSha) : false;
+        const ancestorPresent = ancestorToonIds.has(itemId);
         const baseScan = scanHistoryJsonl(readBlob(repoRoot, baseSha, historyRel));
-        const basePresent = toonPresent(baseSha);
+        const basePresent = baseToonIdsPresent.has(itemId);
         const headScan = scanHistoryJsonl(readBlob(repoRoot, headSha, historyRel));
-        const headPresent = toonPresent(headSha);
+        const headPresent = headToonIdsPresent.has(itemId);
 
         items.push(classifyItemDivergence({
           id: itemId,

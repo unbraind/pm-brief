@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- pm brief diverge: pre-merge multi-agent item collision preview ([pm-brief-vj2y](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-vj2y.toon))
+
 ### Fixed
 
 - CHANGELOG mislabels shipped 2026.7.23 work as Unreleased, leaving changelog:check red ([pm-brief-edam](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-edam.toon))

@@ -8,6 +8,8 @@ import extension, {
   classifyItemDivergence,
   detectStaleContext,
   evaluateFence,
+  checkAttrMerge,
+  fenceProbePaths,
   eventKey,
   explainNextItems,
   extractRelationships,
@@ -1349,34 +1351,41 @@ describe("brief diverge / buildDivergence", () => {
     assert.equal(related.recommendedCommands.some((c) => c.includes("--allow-unrelated-histories")), false);
   });
 
-  test("evaluateFence: ok when both attributes and drivers are configured", () => {
-    const fence = evaluateFence({
-      gitattributesText: `".agents/pm/features/*.toon" merge=pm-item-toon\n".agents/pm/history/*.jsonl" merge=pm-history`,
-      pmRootRel: ".agents/pm",
-      itemToonDriver: "pm merge driver item %O %A %B",
-      historyDriver: "pm merge driver history %O %A %B",
-    });
+  const DRIVERS = {
+    itemToonDriver: "pm merge driver item %O %A %B",
+    historyDriver: "pm merge driver history %O %A %B",
+  };
+
+  test("evaluateFence: ok when git resolves both merge attributes and both drivers exist", () => {
+    const fence = evaluateFence({ itemToonAttr: "pm-item-toon", historyAttr: "pm-history", ...DRIVERS });
     assert.equal(fence.ok, true);
     assert.equal(fence.attributesInstalled, true);
     assert.equal(fence.driversConfigured, true);
     assert.deepEqual(fence.missing, []);
   });
 
-  test("evaluateFence: not ok when attributes missing", () => {
-    const fence = evaluateFence({
-      gitattributesText: `# no pm entries here`,
-      pmRootRel: ".agents/pm",
-      itemToonDriver: "pm merge driver item %O %A %B",
-      historyDriver: "pm merge driver history %O %A %B",
-    });
+  test("evaluateFence: not ok when git resolves no merge attribute for the pm paths", () => {
+    const fence = evaluateFence({ itemToonAttr: undefined, historyAttr: undefined, ...DRIVERS });
     assert.equal(fence.ok, false);
     assert.equal(fence.attributesInstalled, false);
   });
 
+  test("evaluateFence: not ok when only one of the two attributes resolves", () => {
+    assert.equal(evaluateFence({ itemToonAttr: "pm-item-toon", historyAttr: undefined, ...DRIVERS }).attributesInstalled, false);
+    assert.equal(evaluateFence({ itemToonAttr: undefined, historyAttr: "pm-history", ...DRIVERS }).attributesInstalled, false);
+  });
+
+  test("evaluateFence: a foreign merge driver on the pm paths is not the pm fence", () => {
+    // Another tool claiming these paths must not read as the pm fence being installed.
+    const fence = evaluateFence({ itemToonAttr: "union", historyAttr: "union", ...DRIVERS });
+    assert.equal(fence.attributesInstalled, false);
+    assert.equal(fence.ok, false);
+  });
+
   test("evaluateFence: not ok when drivers not configured", () => {
     const fence = evaluateFence({
-      gitattributesText: `".agents/pm/features/*.toon" merge=pm-item-toon\n".agents/pm/history/*.jsonl" merge=pm-history`,
-      pmRootRel: ".agents/pm",
+      itemToonAttr: "pm-item-toon",
+      historyAttr: "pm-history",
       itemToonDriver: undefined,
       historyDriver: undefined,
     });
@@ -1384,14 +1393,53 @@ describe("brief diverge / buildDivergence", () => {
     assert.equal(fence.driversConfigured, false);
   });
 
-  test("evaluateFence: not ok when gitattributes is missing entirely", () => {
-    const fence = evaluateFence({
-      gitattributesText: undefined,
-      pmRootRel: ".agents/pm",
-      itemToonDriver: "pm merge driver item %O %A %B",
-      historyDriver: "pm merge driver history %O %A %B",
+  test("fenceProbePaths prefers a real observed item path over the conventional fallback", () => {
+    assert.deepEqual(fenceProbePaths(".agents/pm"), {
+      historyPath: ".agents/pm/history/pm-fence-probe.jsonl",
+      itemPath: ".agents/pm/tasks/pm-fence-probe.toon",
     });
-    assert.equal(fence.ok, false);
+    assert.deepEqual(fenceProbePaths(".agents/pm", ".agents/pm/features/pm-x.toon"), {
+      historyPath: ".agents/pm/history/pm-fence-probe.jsonl",
+      itemPath: ".agents/pm/features/pm-x.toon",
+    });
+  });
+
+  test("checkAttrMerge resolves what git would actually apply, including a nested attributes file", async () => {
+    const { spawnSync } = await import("node:child_process");
+    const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const dir = mkdtempSync(join(tmpdir(), "pm-brief-attr-"));
+    try {
+      spawnSync("git", ["init", "-q", "-b", "main", "."], { cwd: dir, stdio: "pipe", encoding: "utf-8" });
+      mkdirSync(join(dir, ".agents", "pm", "history"), { recursive: true });
+      // Attributes live in a SUBDIRECTORY, not at the repo root — the case that
+      // repo-root .gitattributes parsing cannot see.
+      writeFileSync(
+        join(dir, ".agents", "pm", ".gitattributes"),
+        'history/*.jsonl merge=pm-history\ntasks/*.toon merge=pm-item-toon\n',
+      );
+
+      const resolved = checkAttrMerge(dir, [
+        ".agents/pm/history/pm-fence-probe.jsonl",
+        ".agents/pm/tasks/pm-fence-probe.toon",
+        ".agents/pm/unfenced/other.txt",
+      ]);
+      assert.equal(resolved.get(".agents/pm/history/pm-fence-probe.jsonl"), "pm-history");
+      assert.equal(resolved.get(".agents/pm/tasks/pm-fence-probe.toon"), "pm-item-toon");
+      // "unspecified" carries no driver name and must be dropped, not stored.
+      assert.equal(resolved.has(".agents/pm/unfenced/other.txt"), false);
+
+      const fence = evaluateFence({
+        historyAttr: resolved.get(".agents/pm/history/pm-fence-probe.jsonl"),
+        itemToonAttr: resolved.get(".agents/pm/tasks/pm-fence-probe.toon"),
+        ...DRIVERS,
+      });
+      assert.equal(fence.attributesInstalled, true, "a nested .gitattributes still fences the workspace");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("renderMarkdownDivergence emits verdict heading and empty case", () => {
@@ -1452,13 +1500,15 @@ describe("brief diverge / buildDivergence", () => {
 // ---------------------------------------------------------------------------
 
 describe("brief diverge end-to-end", () => {
-  test("integration: real git repo with divergent branches", async () => {
+  test("integration: real git repo with divergent branches", async (t) => {
     const pmBin = process.env.PM_BIN ?? "pm";
     const fs = await import("node:fs/promises");
     const path = await import("node:path");
+    const os = await import("node:os");
     const { spawnSync } = await import("node:child_process");
 
-    // skip if pm is not on PATH
+    // skip if pm is not on PATH — reported as a real skip, not a silent pass, so a
+    // missing pm shows up as an E2E coverage gap instead of a green no-assertion test
     let pmAvailable = false;
     try {
       const r = spawnSync(pmBin, ["--version"], { stdio: "pipe", encoding: "utf-8" });
@@ -1467,11 +1517,11 @@ describe("brief diverge end-to-end", () => {
       pmAvailable = false;
     }
     if (!pmAvailable) {
-      console.log("skipping integration test: pm not on PATH");
+      t.skip("pm not on PATH");
       return;
     }
 
-    const tmpDir = await fs.mkdtemp(path.join("/tmp", "pm-diverge-test-"));
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pm-diverge-test-"));
     try {
       const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
       const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
@@ -1519,49 +1569,62 @@ describe("brief diverge end-to-end", () => {
       git(["add", "-A"]);
       git(["commit", "-m", "branch-b: item1 status (collision), item3 title, item2 assignee"]);
 
-      // Now run the classifier by reading real blobs from the repo
-      // Use branch-a as HEAD (the "head" side) and branch-b as the "base" side
-      const pmRootRel = ".agents/pm";
-      const baseSha = git(["rev-parse", "branch-b"]);
-      const headSha = git(["rev-parse", "branch-a"]);
-      const mbSha = git(["merge-base", baseSha, headSha]);
+      // Drive the REAL registered command, not a re-implementation of its pipeline.
+      // This is what covers the wiring the unit tests cannot reach: ref resolution,
+      // pmRootRelFromCtx, listChangedPaths, classifyPaths, the check-attr fence probe,
+      // renderer selection and --output.
+      const commands: Array<Record<string, unknown>> = [];
+      extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
+      const diverge = commands.find((command) => command.name === "brief diverge");
+      assert.ok(diverge, "brief diverge command should be registered");
+      const run = diverge!.run as (ctx: Record<string, unknown>) => Promise<any>;
 
-      const readBlobAt = (sha: string, filePath: string): string | undefined => {
-        const r = spawnSync("git", ["show", `${sha}:${filePath}`], { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
-        return r.status === 0 ? r.stdout : undefined;
-      };
-
-      const toonPresent = (sha: string, id: string): boolean => {
-        const tree = git(["ls-tree", "-r", "--name-only", sha, "--", pmRootRel]);
-        return tree.split("\n").some((line) => line.trim().endsWith(`/${id}.toon`));
-      };
-
-      const allIds = [item1!, item2!, item3!];
-      const divItems = allIds.map((itemId) => {
-        const historyPath = `${pmRootRel}/history/${itemId}.jsonl`;
-        const ancestorEvents = parseHistoryJsonl(readBlobAt(mbSha, historyPath));
-        const baseEvents = parseHistoryJsonl(readBlobAt(baseSha, historyPath));
-        const headEvents = parseHistoryJsonl(readBlobAt(headSha, historyPath));
-        return classifyItemDivergence({
-          id: itemId,
-          ancestor: { events: ancestorEvents, itemPresent: toonPresent(mbSha, itemId) },
-          base: { events: baseEvents, itemPresent: toonPresent(baseSha, itemId) },
-          head: { events: headEvents, itemPresent: toonPresent(headSha, itemId) },
+      // the command resolves the repo from process.cwd(), so run it inside the fixture
+      const previousCwd = process.cwd();
+      let jsonResult: any;
+      let markdownResult: any;
+      const outFile = path.join(tmpDir, "diverge.json");
+      try {
+        process.chdir(tmpDir);
+        jsonResult = await run({
+          args: ["branch-b"],
+          options: { head: "branch-a", "include-clean": true, format: "json", output: outFile },
+          pm_root: ".agents/pm",
         });
-      });
+        markdownResult = await run({
+          args: ["branch-b"],
+          options: { head: "branch-a", "include-clean": true },
+          pm_root: ".agents/pm",
+        });
+      } finally {
+        process.chdir(previousCwd);
+      }
 
-      const summary = buildDivergence(divItems, {
-        base: "branch-b", head: "branch-a", baseSha, headSha, ancestorSha: mbSha,
-        workspace: pmRootRel, pmVersion: "test",
-        fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
-        includeClean: true,
-      });
+      // --output path: the command reports the file it wrote plus a decision summary
+      assert.equal(jsonResult.ok, true);
+      assert.equal(jsonResult.format, "json");
+      assert.equal(jsonResult.output, outFile);
+      assert.equal(jsonResult.verdict, "review-required");
 
-      // Assertions
-      assert.equal(summary.verdict, "review-required");
-      const item1Result = divItems.find((i) => i.id === item1);
-      const item2Result = divItems.find((i) => i.id === item2);
-      const item3Result = divItems.find((i) => i.id === item3);
+      const summary = JSON.parse(await fs.readFile(outFile, "utf-8")) as {
+        verdict: string;
+        workspace: string;
+        base: string;
+        head: string;
+        ancestorSha?: string;
+        fence: { ok: boolean };
+        items: Array<{ id: string; kind: string; collidingFields: string[] }>;
+      };
+
+      // ref resolution and workspace wiring came from the command, not the test
+      assert.equal(summary.base, "branch-b");
+      assert.equal(summary.head, "branch-a");
+      assert.equal(summary.workspace, ".agents/pm");
+      assert.ok(summary.ancestorSha, "merge base resolved by the command");
+
+      const item1Result = summary.items.find((i) => i.id === item1);
+      const item2Result = summary.items.find((i) => i.id === item2);
+      const item3Result = summary.items.find((i) => i.id === item3);
       assert.ok(item1Result);
       assert.ok(item2Result);
       assert.ok(item3Result);
@@ -1570,6 +1633,13 @@ describe("brief diverge end-to-end", () => {
       assert.equal(item2Result!.kind, "union-safe");
       // item3: only branch-b changed it (title) → one-sided
       assert.ok(item3Result!.kind === "base-only" || item3Result!.kind === "head-only", `item3 should be one-sided, got ${item3Result!.kind}`);
+
+      // renderer selection: the default markdown path returns the rendered-result
+      // envelope the pm renderer hook consumes
+      assert.equal(markdownResult.pmBriefRendered, true);
+      const markdown = String(markdownResult.output);
+      assert.match(markdown, /review-required/);
+      assert.ok(markdown.includes(item1!), "markdown render names the colliding item");
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
