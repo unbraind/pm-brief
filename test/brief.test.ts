@@ -1293,6 +1293,56 @@ describe("brief diverge / buildDivergence", () => {
     assert.equal(summary.items[0]?.kind, "head-only");
   });
 
+  test("buildDivergence: unrelatedHistories is an explicit boolean that survives JSON round-trip", () => {
+    const item = classifyItemDivergence({
+      id: "pm-h",
+      ancestor: { events: [], itemPresent: false },
+      base: { events: [], itemPresent: false },
+      head: { events: [divEvent("create", "2026-07-20T01:00:00Z", [{ op: "add", path: "/metadata/title", value: "H" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    const common = {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    };
+
+    const unrelated = buildDivergence([item], { ...common, ancestorSha: undefined });
+    assert.equal(unrelated.unrelatedHistories, true);
+    // JSON.stringify drops `undefined`, so `ancestorSha` disappears from the wire
+    // format — the boolean is the only signal a JSON consumer can rely on.
+    const wire = JSON.parse(JSON.stringify(unrelated));
+    assert.equal("ancestorSha" in wire, false);
+    assert.equal(wire.unrelatedHistories, true);
+
+    const related = buildDivergence([item], { ...common, ancestorSha: "s0" });
+    assert.equal(related.unrelatedHistories, false);
+    assert.equal(JSON.parse(JSON.stringify(related)).unrelatedHistories, false);
+  });
+
+  test("buildDivergence recommends --allow-unrelated-histories only when there is no merge base", () => {
+    const item = classifyItemDivergence({
+      id: "pm-h",
+      ancestor: { events: [], itemPresent: false },
+      base: { events: [], itemPresent: false },
+      head: { events: [divEvent("create", "2026-07-20T01:00:00Z", [{ op: "add", path: "/metadata/title", value: "H" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    const common = {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    };
+
+    // git refuses a no-merge-base merge outright, so the bare form would be a
+    // command that cannot succeed.
+    const unrelated = buildDivergence([item], { ...common, ancestorSha: undefined });
+    assert.ok(unrelated.recommendedCommands.includes("git merge --allow-unrelated-histories main"));
+    assert.equal(unrelated.recommendedCommands.includes("git merge main"), false);
+
+    const related = buildDivergence([item], { ...common, ancestorSha: "s0" });
+    assert.ok(related.recommendedCommands.includes("git merge main"));
+    assert.equal(related.recommendedCommands.some((c) => c.includes("--allow-unrelated-histories")), false);
+  });
+
   test("evaluateFence: ok when both attributes and drivers are configured", () => {
     const fence = evaluateFence({
       gitattributesText: `".agents/pm/features/*.toon" merge=pm-item-toon\n".agents/pm/history/*.jsonl" merge=pm-history`,

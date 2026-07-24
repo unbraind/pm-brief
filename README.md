@@ -40,6 +40,7 @@ pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 - `pm brief next` returns the ranked next items only.
 - `pm brief stale` returns stale open or in-progress items.
 - `pm brief since <checkpoint>` renders a delta brief of what changed since a checkpoint.
+- `pm brief diverge [base]` previews pm item collisions between two branches **before** merging.
 
 ### Ranking and Budget Flags
 
@@ -116,6 +117,56 @@ precise list of created / closed / reprioritized / re-blocked items and new
 notes, so the resuming agent can update its plan without re-reading the whole
 workspace. The brief ends with a `## Refresh` block showing the exact command
 that reproduces it.
+
+### Pre-merge collision preview (`pm brief diverge`)
+
+`pm brief since` is the *post*-merge half of the multi-agent workflow. `pm brief
+diverge [base]` is the *pre*-merge half: it answers "which pm items did both
+branches touch, and will the field-aware merge driver resolve them cleanly?"
+before you run `git merge` — rather than after, when `pm merge reconcile` is
+repairing the damage.
+
+```bash
+pm brief diverge                                  # HEAD vs origin/HEAD (else main, else master)
+pm brief diverge main                             # explicit base
+pm brief diverge --base main --head feat/other    # neither side has to be checked out
+pm brief diverge --base main --format json        # machine-readable for agents
+pm brief diverge --base main --include-clean      # also list one-sided items individually
+```
+
+It reads each item's append-only history ledger at the merge base, the base tip
+and the head tip, diffs the JSON-Patch paths each side added, and classifies
+every item:
+
+| Classification | Severity | Meaning |
+|---|---|---|
+| `duplicate-id` | high | Both branches minted the **same item id** after the merge base. The driver cannot fix this — one side must be re-keyed. |
+| `delete-vs-edit` | high | One side deleted the item while the other edited it. |
+| `field-collision` | medium | Both sides wrote the **same field**. The driver resolves it via `--prefer`, so review the losing value. |
+| `union-safe` | low | Both sides touched the item but **disjoint fields** — the driver merges both and unions the history. |
+| `head-only` / `base-only` | — | Only one side touched it; nothing to resolve. |
+
+`/metadata/updated_at` is treated as benign: it changes on every write and never
+produces a collision verdict on its own.
+
+The verdict is `clean` (no item touched by both sides), `union-safe` (all
+both-sided items have disjoint fields), or `review-required` (any high/medium
+finding).
+
+**Merge fence check.** The report also verifies the field-aware driver is
+actually installed — the `.gitattributes` entries *and* the `merge.*.driver` git
+config. Without both, even `union-safe` items hard-conflict, so a missing fence
+is reported as a warning with `pm merge install` as the first recommended step.
+
+**Unrelated histories.** When the refs share no merge base, `unrelatedHistories`
+is `true` in the JSON (an explicit boolean, because `JSON.stringify` drops the
+`undefined` `ancestorSha`), every changed item is reported one-sided, and the
+recommended merge command becomes `git merge --allow-unrelated-histories <base>`
+— the bare form git refuses outright.
+
+Each report ends with an ordered `Recommended next steps` block containing only
+the commands that apply, including `pm history <id> --verify` per high-severity
+item and a `pm brief since <merge-base-date>` for post-merge re-orientation.
 
 ## TypeScript API
 

@@ -1903,6 +1903,14 @@ export interface DivergenceSummary {
   baseSha: string;
   headSha: string;
   ancestorSha: string | undefined;
+  /**
+   * True when base and head share no common ancestor. Always present so a JSON
+   * consumer never has to infer it from an omitted `ancestorSha` (JSON.stringify
+   * drops `undefined`). A `clean` verdict here means only "no item was touched by
+   * both sides" — an unrelated-histories merge still rewrites the whole tree and
+   * needs `--allow-unrelated-histories`, so the flag must be machine-readable.
+   */
+  unrelatedHistories: boolean;
   workspace: string;
   pmVersion: string;
   generatedAt: string;
@@ -2267,8 +2275,14 @@ export function buildDivergence(
 
   // recommended commands (ordered, deduped, only what applies)
   const recommendedCommands: string[] = [];
+  const unrelatedHistories = options.ancestorSha === undefined;
   if (!options.fence.ok) recommendedCommands.push("pm merge install");
-  recommendedCommands.push(`git merge ${options.base}`);
+  // Without a merge base git refuses outright ("fatal: refusing to merge unrelated
+  // histories"), so recommending the bare form would hand the agent a command that
+  // cannot succeed.
+  recommendedCommands.push(
+    unrelatedHistories ? `git merge --allow-unrelated-histories ${options.base}` : `git merge ${options.base}`,
+  );
   if (hasBothSided) recommendedCommands.push("pm merge reconcile");
   const highSeverity = visible.filter((i) => i.severity === "high").slice(0, 5);
   for (const item of highSeverity) {
@@ -2288,6 +2302,7 @@ export function buildDivergence(
     baseSha: options.baseSha,
     headSha: options.headSha,
     ancestorSha: options.ancestorSha,
+    unrelatedHistories,
     workspace: options.workspace,
     pmVersion: options.pmVersion,
     generatedAt,
@@ -2368,7 +2383,7 @@ export function renderMarkdownDivergence(summary: DivergenceSummary): string {
   if (summary.truncated) {
     lines.push(`- _truncated: ${summary.omittedItems ?? 0} lower-ranked item(s) omitted to fit budget_`);
   }
-  if (summary.ancestorSha === undefined) {
+  if (summary.unrelatedHistories) {
     lines.push(`- _unrelated histories: ${summary.base} and ${summary.head} share no common ancestor; every changed item is one-sided._`);
   }
   lines.push("");
@@ -2409,7 +2424,7 @@ export function renderTextDivergence(summary: DivergenceSummary): string {
     `${summary.workspace} | pm ${summary.pmVersion} | generated ${summary.generatedAt}`,
     `${t.itemsChanged} item(s) changed: ${t.duplicateId} dup-id, ${t.deleteVsEdit} del-vs-edit, ${t.fieldCollision} collision, ${t.unionSafe} union-safe, ${t.headOnly} head-only, ${t.baseOnly} base-only${summary.truncated ? ` (truncated, ${summary.omittedItems ?? 0} omitted)` : ""}`,
   ];
-  if (summary.ancestorSha === undefined) {
+  if (summary.unrelatedHistories) {
     lines.push("unrelated histories: no common ancestor");
   }
   if (!summary.fence.ok) {
@@ -2436,7 +2451,7 @@ export function renderSlackDivergence(summary: DivergenceSummary): string {
     `_${summary.workspace} | pm ${summary.pmVersion} | generated ${summary.generatedAt}_`,
     `*Verdict: ${summary.verdict}* — ${t.itemsChanged} item(s): ${t.duplicateId} dup-id, ${t.deleteVsEdit} del-vs-edit, ${t.fieldCollision} collision, ${t.unionSafe} union-safe, ${t.headOnly} head-only, ${t.baseOnly} base-only${summary.truncated ? ` _(${summary.omittedItems ?? 0} omitted)_` : ""}`,
   ];
-  if (summary.ancestorSha === undefined) {
+  if (summary.unrelatedHistories) {
     lines.push("_unrelated histories: no common ancestor_");
   }
   lines.push("");
