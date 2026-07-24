@@ -1,0 +1,16 @@
+id: pm-brief-edam
+title: "CHANGELOG mislabels shipped 2026.7.23 work as Unreleased, leaving changelog:check red"
+description: "The 2026-07-23 regeneration commit (6e903c4) ran in a clone whose local tags were stale, so pm-changelog had no v2026.07.23 tag boundary and filed pm-brief-da2c (pm brief since) and pm-brief-lizi (merge-reconcile docs) under '## Unreleased'. Both items actually closed BEFORE that tag (da2c 2026-07-23T05:55:39Z, lizi 2026-07-22T19:41:17Z vs tag committer date 2026-07-23T06:03:35Z) and shipped in the published npm release 2026.7.23. Consequence: npm run changelog:check is RED on main right now, so the next PR in this repo fails its changelog gate before it starts. Fix: regenerate with complete tag history (git fetch --tags --force first) so the section is filed as '## 2026.7.23 - 2026-07-23'."
+type: Issue
+status: closed
+priority: 1
+tags[4]: changelog,ci-gate,release-hygiene,stale-tags
+created_at: "2026-07-24T19:47:44.605Z"
+updated_at: "2026-07-24T19:48:20.466Z"
+closed_at: "2026-07-24T19:48:20.464Z"
+author: claude-opus-5
+resolution: "Ran git fetch --tags --force then npm run changelog:full, which filed pm-brief-da2c and pm-brief-lizi under '## 2026.7.23 - 2026-07-23' instead of '## Unreleased' (both closed before the v2026.07.23 tag boundary and shipped in npm 2026.7.23)."
+expected_result: "npm run changelog:check exits 0 on main so the repo's changelog gate stops blocking future PRs, and the published changelog attributes the pm brief since delta command to the release that actually shipped it."
+actual_result: "changelog:check reports 'Changelog is up to date'; 60/60 tests pass; the only diff is the section heading (Unreleased -> 2026.7.23 - 2026-07-23)."
+close_reason: "Regenerated CHANGELOG.md with complete tag history; the 2026.7.23 section is now correctly labeled and changelog:check is green"
+body: ""

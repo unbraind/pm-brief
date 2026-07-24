@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- CHANGELOG mislabels shipped 2026.7.23 work as Unreleased, leaving changelog:check red ([pm-brief-edam](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-edam.toon))
+
 ## 2026.7.23 - 2026-07-23
 
 ### Added
