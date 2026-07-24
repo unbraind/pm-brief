@@ -13,6 +13,12 @@ import extension, {
   extractRelationships,
   normalizeCheckpoint,
   parseHistoryJsonl,
+  countMalformedLines,
+  scanHistoryJsonl,
+  pmRootRelFromCtx,
+  mergeBase,
+  readBlob,
+  listChangedPaths,
   parsePmItemsOutput,
   readRecentActivity,
   renderAgentPrompt,
@@ -1566,6 +1572,91 @@ describe("brief diverge end-to-end", () => {
       assert.ok(item3Result!.kind === "base-only" || item3Result!.kind === "head-only", `item3 should be one-sided, got ${item3Result!.kind}`);
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief diverge — review round 2 (CodeRabbit findings)
+// ---------------------------------------------------------------------------
+describe("brief diverge / review round 2 hardening", () => {
+  test("scanHistoryJsonl counts an object line without ts as malformed (single source of truth)", () => {
+    // Previously parseHistoryJsonl dropped this line while countMalformedLines did
+    // not count it, so the report under-stated the data loss.
+    const text = [
+      JSON.stringify({ ts: "2026-07-20T00:00:00Z", op: "create", after_hash: "a1" }),
+      JSON.stringify({ op: "update", author: "bob" }), // parses as an object, but no ts
+      "{not json at all",
+      "",
+      "   ",
+      JSON.stringify(["an", "array"]), // parses, but is not an object
+    ].join("\n");
+
+    const scan = scanHistoryJsonl(text);
+    assert.equal(scan.events.length, 1);
+    assert.equal(scan.malformedLines, 3, "no-ts object, non-JSON line, and array line are all unusable");
+    // The wrappers must agree with the single pass, and with each other.
+    assert.deepEqual(parseHistoryJsonl(text), scan.events);
+    assert.equal(countMalformedLines(text), scan.malformedLines);
+    // Blank lines are never counted.
+    assert.equal(scanHistoryJsonl("\n\n   \n").malformedLines, 0);
+    assert.equal(scanHistoryJsonl(undefined).malformedLines, 0);
+  });
+
+  test("pmRootRelFromCtx accepts an in-repo directory whose name merely starts with dots", () => {
+    // `rel.startsWith("..")` used to reject this legitimate sibling.
+    assert.equal(pmRootRelFromCtx("/repo/..cache/pm", "/repo"), "..cache/pm");
+    assert.equal(pmRootRelFromCtx("/repo/.agents/pm", "/repo"), ".agents/pm");
+  });
+
+  test("pmRootRelFromCtx rejects a pm root outside the repo and one equal to the repo root", () => {
+    assert.throws(() => pmRootRelFromCtx("/elsewhere/pm", "/repo"), /outside the git repository root/);
+    assert.throws(() => pmRootRelFromCtx("/repo/../pm", "/repo"), /outside the git repository root/);
+    // An empty relative path would make every downstream prefix a bare "/…" and
+    // match nothing, silently reporting no divergence. It must fail loudly.
+    assert.throws(() => pmRootRelFromCtx("/repo", "/repo"), /resolves to the git repository root/);
+  });
+
+  test("git readers fail loudly instead of reporting a false clean verdict", () => {
+    // A non-existent repo root makes git itself fail. The safety property is that
+    // this surfaces as an error rather than as "nothing changed" / "file absent",
+    // which would render as a `clean` verdict.
+    const missing = "/nonexistent-repo-root-for-pm-brief-diverge-test";
+    assert.throws(() => listChangedPaths(missing, "aaaa", "bbbb", ".agents/pm"), /git (diff|ls-tree).*(failed|could not run)/);
+    assert.throws(() => readBlob(missing, "aaaa", ".agents/pm/history/x.jsonl"), /git show.*(failed|could not run)/);
+    assert.throws(() => mergeBase(missing, "aaaa", "bbbb"), /git merge-base.*(failed|could not run)/);
+  });
+
+  test("mergeBase returns undefined only for the legitimate no-merge-base case", async () => {
+    const { spawnSync } = await import("node:child_process");
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    // Real repo, two orphan roots: git exits 1, which means "unrelated histories"
+    // and must stay a non-throwing undefined rather than becoming an error.
+    const dir = mkdtempSync(join(tmpdir(), "pm-brief-mb-"));
+    try {
+      const git = (...args: string[]): void => {
+        spawnSync("git", args, { cwd: dir, stdio: "pipe", encoding: "utf-8" });
+      };
+      git("init", "-q", "-b", "main", ".");
+      git("config", "user.email", "t@t.t");
+      git("config", "user.name", "t");
+      writeFileSync(join(dir, "a.txt"), "a");
+      git("add", "-A");
+      git("commit", "-qm", "root a");
+      git("checkout", "-q", "--orphan", "other");
+      git("rm", "-rq", "--cached", ".");
+      writeFileSync(join(dir, "b.txt"), "b");
+      git("add", "-A");
+      git("commit", "-qm", "root b");
+
+      assert.equal(mergeBase(dir, "main", "other"), undefined);
+      // A shared history still yields a sha.
+      assert.ok(mergeBase(dir, "main", "main"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

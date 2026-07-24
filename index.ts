@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { resolve as pathResolve, relative as pathRelative, sep as pathSep } from "node:path";
+import { resolve as pathResolve, relative as pathRelative, sep as pathSep, isAbsolute as pathIsAbsolute } from "node:path";
 import type { defineExtension as defineExtensionType } from "@unbrained/pm-cli/sdk";
 
 const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
@@ -1975,10 +1975,39 @@ function refResolves(repoRoot: string, ref: string): boolean {
   return result.status === 0 && Boolean(result.stdout?.trim());
 }
 
-/** `git merge-base a b`; undefined when the refs share no ancestor (unrelated histories). */
+/**
+ * Fail loudly when git could not run at all, as opposed to running and reporting
+ * an expected negative result.
+ *
+ * This distinction is the whole safety property of `pm brief diverge`: a spawn
+ * error, a killed process, or a `maxBuffer` overflow on a large ledger must never
+ * be indistinguishable from "nothing changed" / "file absent", because that
+ * renders as a `clean` verdict and an agent merges on the strength of it.
+ * Exit *status* is deliberately left to each caller — for `merge-base` a non-zero
+ * status is a legitimate answer, for `diff` it is not.
+ */
+function assertGitRan(result: ReturnType<typeof spawnSync>, what: string): void {
+  if (result.error) {
+    throw new CommandError(`git ${what} could not run: ${result.error.message}`, EXIT_CODE.USAGE);
+  }
+  if (result.signal) {
+    throw new CommandError(`git ${what} was terminated by signal ${result.signal} (output may have exceeded the ${GIT_MAX_BUFFER} byte buffer)`, EXIT_CODE.USAGE);
+  }
+}
+
+/**
+ * `git merge-base a b`; undefined when the refs share no ancestor (unrelated
+ * histories). Exit status 1 is that legitimate "no merge base" answer; any other
+ * non-zero status is a real failure and must not be reported as unrelated
+ * histories.
+ */
 export function mergeBase(repoRoot: string, a: string, b: string): string | undefined {
   const result = spawnSync("git", ["merge-base", a, b], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
-  if (result.status !== 0) return undefined;
+  assertGitRan(result, "merge-base");
+  if (result.status === 1) return undefined;
+  if (result.status !== 0) {
+    throw new CommandError(`git merge-base failed: ${result.stderr?.trim() || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
+  }
   const sha = result.stdout?.trim();
   return sha || undefined;
 }
@@ -1989,15 +2018,33 @@ export function listChangedPaths(repoRoot: string, fromSha: string | undefined, 
     ? ["diff", "--name-only", "--diff-filter=ACMRD", fromSha, toSha, "--", pathspec]
     : ["ls-tree", "-r", "--name-only", toSha, "--", pathspec];
   const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
-  if (result.status !== 0) return [];
+  assertGitRan(result, args[0] ?? "diff");
+  // Neither `diff` nor `ls-tree` has a "negative but fine" exit code here: an
+  // empty change set is reported as status 0 with empty stdout.
+  if (result.status !== 0) {
+    throw new CommandError(`git ${args[0]} failed: ${result.stderr?.trim() || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
+  }
   return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
-/** `git show <sha>:<path>`; undefined when the path does not exist at that revision. */
+/**
+ * `git show <sha>:<path>`; undefined when the path does not exist at that
+ * revision — the normal signal for "this item did not exist yet on that side".
+ *
+ * git reports a missing path with status 128 and a recognizable stderr, which is
+ * also the status it uses for genuine errors (bad object, unreadable repo). The
+ * stderr shape is therefore matched explicitly so a corrupt object cannot be
+ * silently read as an absent item.
+ */
 export function readBlob(repoRoot: string, sha: string, path: string): string | undefined {
   const result = spawnSync("git", ["show", `${sha}:${path}`], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
-  if (result.status !== 0) return undefined;
-  return result.stdout;
+  assertGitRan(result, "show");
+  if (result.status === 0) return result.stdout;
+  const stderr = result.stderr?.trim() ?? "";
+  if (/(does not exist|exists on disk, but not in|unknown revision or path|no such path)/i.test(stderr)) {
+    return undefined;
+  }
+  throw new CommandError(`git show ${sha}:${path} failed: ${stderr || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
 }
 
 // ---- path model --------------------------------------------------------------
@@ -2006,59 +2053,80 @@ export function readBlob(repoRoot: string, sha: string, path: string): string | 
 export function pmRootRelFromCtx(pmRoot: string, repoRoot: string): string {
   const absPmRoot = pathResolve(repoRoot, pmRoot);
   const rel = pathRelative(repoRoot, absPmRoot);
-  if (rel.startsWith("..")) {
+  // Test the parent-directory boundary rather than a bare ".." prefix, so a
+  // legitimately named in-repo directory such as `..cache/pm` is not rejected as
+  // being outside the repository.
+  if (rel === ".." || rel.startsWith(`..${pathSep}`) || pathIsAbsolute(rel)) {
     throw new CommandError(`pm root '${pmRoot}' is outside the git repository root '${repoRoot}'`, EXIT_CODE.USAGE);
+  }
+  // An empty relative path means the pm root *is* the repository root, which would
+  // make every downstream prefix (`${pmRootRel}/history/`) start with a bare "/"
+  // and match nothing — the command would silently report no divergence at all.
+  // Fail loudly instead.
+  if (!rel) {
+    throw new CommandError(`pm root '${pmRoot}' resolves to the git repository root '${repoRoot}'; pm brief diverge needs the tracker in a subdirectory so its paths can be matched against git output`, EXIT_CODE.USAGE);
   }
   return rel.split(pathSep).join("/");
 }
 
 // ---- event identity + parsing ------------------------------------------------
 
-/** Parse a JSON-Lines history ledger text into DivergeEvent[]; tolerant of blank/malformed lines. */
-export function parseHistoryJsonl(text: string | undefined): DivergeEvent[] {
-  if (!text) return [];
+/**
+ * Single-pass scan of a JSON-Lines history ledger.
+ *
+ * Returns the usable events *and* the count of unusable non-blank lines from one
+ * `JSON.parse` per line. Doing this in one pass is both a correctness and a cost
+ * fix: two independent scans previously disagreed about what "malformed" means —
+ * a line that parsed as an object but carried no `ts` was dropped from the events
+ * yet not counted as malformed, so the report under-stated exactly the data loss a
+ * pre-merge check exists to surface. Ledgers can approach the 64 MiB read buffer,
+ * so parsing each line twice was also the dominant cost of the command.
+ *
+ * "Unusable" therefore means any non-blank line that is not parseable JSON, is not
+ * an object, or lacks a usable `ts` — the same predicate that decides whether the
+ * line contributes an event.
+ */
+export function scanHistoryJsonl(text: string | undefined): { events: DivergeEvent[]; malformedLines: number } {
+  if (!text) return { events: [], malformedLines: 0 };
   const events: DivergeEvent[] = [];
+  let malformedLines = 0;
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+    let parsed: Record<string, unknown> | undefined;
     try {
-      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-      if (!parsed || typeof parsed !== "object") continue;
-      const ts = typeof parsed.ts === "string" ? parsed.ts : "";
-      if (!ts) continue;
-      const patch = Array.isArray(parsed.patch)
-        ? (parsed.patch as DivergeEvent["patch"])
-        : undefined;
-      events.push({
-        ts,
-        author: typeof parsed.author === "string" ? parsed.author : undefined,
-        op: typeof parsed.op === "string" ? parsed.op : "activity",
-        patch,
-        before_hash: typeof parsed.before_hash === "string" ? parsed.before_hash : undefined,
-        after_hash: typeof parsed.after_hash === "string" ? parsed.after_hash : undefined,
-      });
+      const candidate = JSON.parse(trimmed) as unknown;
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        parsed = candidate as Record<string, unknown>;
+      }
     } catch {
-      // malformed lines are counted by the caller via a separate scan
+      parsed = undefined;
     }
+    const ts = parsed && typeof parsed.ts === "string" ? parsed.ts : "";
+    if (!parsed || !ts) {
+      malformedLines++;
+      continue;
+    }
+    events.push({
+      ts,
+      author: typeof parsed.author === "string" ? parsed.author : undefined,
+      op: typeof parsed.op === "string" ? parsed.op : "activity",
+      patch: Array.isArray(parsed.patch) ? (parsed.patch as DivergeEvent["patch"]) : undefined,
+      before_hash: typeof parsed.before_hash === "string" ? parsed.before_hash : undefined,
+      after_hash: typeof parsed.after_hash === "string" ? parsed.after_hash : undefined,
+    });
   }
-  return events;
+  return { events, malformedLines };
 }
 
-/** Count malformed (non-blank, non-parseable) lines in a history ledger text. */
+/** Parse a JSON-Lines history ledger text into DivergeEvent[]; thin wrapper over {@link scanHistoryJsonl}. */
+export function parseHistoryJsonl(text: string | undefined): DivergeEvent[] {
+  return scanHistoryJsonl(text).events;
+}
+
+/** Count unusable (non-blank, non-event) lines in a history ledger text; thin wrapper over {@link scanHistoryJsonl}. */
 export function countMalformedLines(text: string | undefined): number {
-  if (!text) return 0;
-  let count = 0;
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (!parsed || typeof parsed !== "object") count++;
-    } catch {
-      count++;
-    }
-  }
-  return count;
+  return scanHistoryJsonl(text).malformedLines;
 }
 
 /** Identity key for an event: after_hash when available, else ts|author|op. */
@@ -2831,20 +2899,20 @@ function registerCommands(api: any): void {
           return result.stdout.split("\n").some((line) => line.trim().endsWith(`/${itemId}.toon`));
         };
 
-        const ancestorEvents = ancestorSha ? parseHistoryJsonl(readBlob(repoRoot, ancestorSha, historyRel)) : [];
+        // One scan per ledger: scanHistoryJsonl returns events and the unusable-line
+        // count together, so a ledger near the 64 MiB buffer is not JSON-parsed twice.
+        const ancestorScan = ancestorSha ? scanHistoryJsonl(readBlob(repoRoot, ancestorSha, historyRel)) : { events: [], malformedLines: 0 };
         const ancestorPresent = ancestorSha ? toonPresent(ancestorSha) : false;
-        const baseRawText = readBlob(repoRoot, baseSha, historyRel);
-        const baseEvents = parseHistoryJsonl(baseRawText);
+        const baseScan = scanHistoryJsonl(readBlob(repoRoot, baseSha, historyRel));
         const basePresent = toonPresent(baseSha);
-        const headRawText = readBlob(repoRoot, headSha, historyRel);
-        const headEvents = parseHistoryJsonl(headRawText);
+        const headScan = scanHistoryJsonl(readBlob(repoRoot, headSha, historyRel));
         const headPresent = toonPresent(headSha);
 
         items.push(classifyItemDivergence({
           id: itemId,
-          ancestor: { events: ancestorEvents, itemPresent: ancestorPresent },
-          base: { events: baseEvents, itemPresent: basePresent, malformedLines: countMalformedLines(baseRawText) },
-          head: { events: headEvents, itemPresent: headPresent, malformedLines: countMalformedLines(headRawText) },
+          ancestor: { events: ancestorScan.events, itemPresent: ancestorPresent },
+          base: { events: baseScan.events, itemPresent: basePresent, malformedLines: baseScan.malformedLines },
+          head: { events: headScan.events, itemPresent: headPresent, malformedLines: headScan.malformedLines },
         }));
       }
 
