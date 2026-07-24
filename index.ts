@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { resolve as pathResolve, relative as pathRelative, sep as pathSep } from "node:path";
 import type { defineExtension as defineExtensionType } from "@unbrained/pm-cli/sdk";
 
 const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
@@ -1833,6 +1834,641 @@ export function renderSlackDelta(summary: DeltaSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+// ---------------------------------------------------------------------------
+// brief diverge — pre-merge pm item divergence preview
+// ---------------------------------------------------------------------------
+
+/** Fields that change on every write and must never, on their own, cause a collision. */
+export const BENIGN_FIELDS = new Set(["/metadata/updated_at", "/metadata/updated", "/updated_at"]);
+
+export interface DivergeEvent {
+  ts: string;
+  author?: string;
+  op: string;
+  patch?: Array<{ op: "add" | "replace" | "remove" | string; path: string; value?: unknown }>;
+  before_hash?: string;
+  after_hash?: string;
+}
+
+export interface DivergeItemSide {
+  events: DivergeEvent[];
+  itemPresent: boolean;
+  malformedLines?: number;
+}
+
+export type DivergeKind =
+  | "head-only"
+  | "base-only"
+  | "unchanged"
+  | "duplicate-id"
+  | "delete-vs-edit"
+  | "field-collision"
+  | "union-safe";
+
+export interface DivergeItem {
+  id: string;
+  kind: DivergeKind;
+  severity: "low" | "medium" | "high";
+  collidingFields: string[];
+  base: {
+    eventCount: number;
+    authors: string[];
+    firstTs: string | undefined;
+    lastTs: string | undefined;
+    fields: string[];
+    itemPresent: boolean;
+    malformedLines: number;
+  };
+  head: {
+    eventCount: number;
+    authors: string[];
+    firstTs: string | undefined;
+    lastTs: string | undefined;
+    fields: string[];
+    itemPresent: boolean;
+    malformedLines: number;
+  };
+}
+
+export interface FenceStatus {
+  attributesInstalled: boolean;
+  driversConfigured: boolean;
+  ok: boolean;
+  missing: string[];
+}
+
+export interface DivergenceSummary {
+  base: string;
+  head: string;
+  baseSha: string;
+  headSha: string;
+  ancestorSha: string | undefined;
+  workspace: string;
+  pmVersion: string;
+  generatedAt: string;
+  verdict: "clean" | "union-safe" | "review-required";
+  totals: {
+    itemsChanged: number;
+    headOnly: number;
+    baseOnly: number;
+    unionSafe: number;
+    fieldCollision: number;
+    duplicateId: number;
+    deleteVsEdit: number;
+  };
+  items: DivergeItem[];
+  truncated?: boolean;
+  omittedItems?: number;
+  budget?: { requestedTokens: number; estimatedTokens: number };
+  fence: FenceStatus;
+  recommendedCommands: string[];
+}
+
+// ---- git readers (spawnSync git, cwd = repo root, maxBuffer 64 MiB) ----------
+
+const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+
+/** `git rev-parse --show-toplevel`; throws CommandError if not a git repo. */
+export function resolveRepoRoot(cwd: string): string {
+  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  if (result.status !== 0 || !result.stdout) {
+    const detail = result.stderr?.trim() || result.error?.message || "not a git repository";
+    throw new CommandError(`Unable to determine git repo root: ${detail}`, EXIT_CODE.USAGE);
+  }
+  return result.stdout.trim();
+}
+
+/** `git rev-parse --verify <ref>^{commit}`; throws CommandError naming the unknown ref. */
+export function resolveRef(repoRoot: string, ref: string): string {
+  const result = spawnSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  if (result.status !== 0 || !result.stdout) {
+    const detail = result.stderr?.trim() || result.error?.message || "unknown ref";
+    throw new CommandError(`Unknown git ref '${ref}': ${detail}`, EXIT_CODE.USAGE);
+  }
+  return result.stdout.trim();
+}
+
+/** Try origin/HEAD, main, master — return the first ref that resolves. Throw if none. */
+export function detectDefaultBase(repoRoot: string): string {
+  const symResult = spawnSync("git", ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  if (symResult.status === 0 && symResult.stdout) {
+    const symbolic = symResult.stdout.trim();
+    const stripped = symbolic.startsWith("origin/") ? symbolic.slice("origin/".length) : symbolic;
+    if (refResolves(repoRoot, stripped)) return stripped;
+  }
+  for (const candidate of ["main", "master"] as const) {
+    if (refResolves(repoRoot, candidate)) return candidate;
+  }
+  throw new CommandError("Unable to detect a default base branch (tried origin/HEAD, main, master). Specify --base explicitly.", EXIT_CODE.USAGE);
+}
+
+function refResolves(repoRoot: string, ref: string): boolean {
+  const result = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  return result.status === 0 && Boolean(result.stdout?.trim());
+}
+
+/** `git merge-base a b`; undefined when the refs share no ancestor (unrelated histories). */
+export function mergeBase(repoRoot: string, a: string, b: string): string | undefined {
+  const result = spawnSync("git", ["merge-base", a, b], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  if (result.status !== 0) return undefined;
+  const sha = result.stdout?.trim();
+  return sha || undefined;
+}
+
+/** `git diff --name-only --diff-filter=ACMRD <from> <to> -- <pathspec>`, or `git ls-tree` when fromSha is undefined. */
+export function listChangedPaths(repoRoot: string, fromSha: string | undefined, toSha: string, pathspec: string): string[] {
+  const args: string[] = fromSha
+    ? ["diff", "--name-only", "--diff-filter=ACMRD", fromSha, toSha, "--", pathspec]
+    : ["ls-tree", "-r", "--name-only", toSha, "--", pathspec];
+  const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  if (result.status !== 0) return [];
+  return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+/** `git show <sha>:<path>`; undefined when the path does not exist at that revision. */
+export function readBlob(repoRoot: string, sha: string, path: string): string | undefined {
+  const result = spawnSync("git", ["show", `${sha}:${path}`], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  if (result.status !== 0) return undefined;
+  return result.stdout;
+}
+
+// ---- path model --------------------------------------------------------------
+
+/** Derive the pm workspace path relative to the repo root, normalized to POSIX separators. */
+export function pmRootRelFromCtx(pmRoot: string, repoRoot: string): string {
+  const absPmRoot = pathResolve(repoRoot, pmRoot);
+  const rel = pathRelative(repoRoot, absPmRoot);
+  if (rel.startsWith("..")) {
+    throw new CommandError(`pm root '${pmRoot}' is outside the git repository root '${repoRoot}'`, EXIT_CODE.USAGE);
+  }
+  return rel.split(pathSep).join("/");
+}
+
+// ---- event identity + parsing ------------------------------------------------
+
+/** Parse a JSON-Lines history ledger text into DivergeEvent[]; tolerant of blank/malformed lines. */
+export function parseHistoryJsonl(text: string | undefined): DivergeEvent[] {
+  if (!text) return [];
+  const events: DivergeEvent[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object") continue;
+      const ts = typeof parsed.ts === "string" ? parsed.ts : "";
+      if (!ts) continue;
+      const patch = Array.isArray(parsed.patch)
+        ? (parsed.patch as DivergeEvent["patch"])
+        : undefined;
+      events.push({
+        ts,
+        author: typeof parsed.author === "string" ? parsed.author : undefined,
+        op: typeof parsed.op === "string" ? parsed.op : "activity",
+        patch,
+        before_hash: typeof parsed.before_hash === "string" ? parsed.before_hash : undefined,
+        after_hash: typeof parsed.after_hash === "string" ? parsed.after_hash : undefined,
+      });
+    } catch {
+      // malformed lines are counted by the caller via a separate scan
+    }
+  }
+  return events;
+}
+
+/** Count malformed (non-blank, non-parseable) lines in a history ledger text. */
+export function countMalformedLines(text: string | undefined): number {
+  if (!text) return 0;
+  let count = 0;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!parsed || typeof parsed !== "object") count++;
+    } catch {
+      count++;
+    }
+  }
+  return count;
+}
+
+/** Identity key for an event: after_hash when available, else ts|author|op. */
+export function eventKey(e: DivergeEvent): string {
+  return e.after_hash && e.after_hash.length > 0 ? e.after_hash : `${e.ts}|${e.author ?? ""}|${e.op ?? ""}`;
+}
+
+/** Events on a side whose key is not in the ancestor set. */
+export function newEvents(sideEvents: DivergeEvent[], ancestorKeys: Set<string>): DivergeEvent[] {
+  return sideEvents.filter((e) => !ancestorKeys.has(eventKey(e)));
+}
+
+// ---- field extraction --------------------------------------------------------
+
+/** Extract every patch[].path, normalizing trailing numeric segments so array appends merge. */
+export function changedFieldPaths(events: DivergeEvent[]): Set<string> {
+  const fields = new Set<string>();
+  for (const e of events) {
+    if (!e.patch) continue;
+    for (const p of e.patch) {
+      if (typeof p.path !== "string" || !p.path) continue;
+      fields.add(normalizeFieldPath(p.path));
+    }
+  }
+  return fields;
+}
+
+/** Normalize trailing numeric array segments: /metadata/tags/3 → /metadata/tags. */
+export function normalizeFieldPath(path: string): string {
+  const segments = path.split("/");
+  // drop trailing numeric segments
+  while (segments.length > 1 && /^\d+$/.test(segments[segments.length - 1]!)) {
+    segments.pop();
+  }
+  return segments.join("/");
+}
+
+// ---- per-item classification -------------------------------------------------
+
+export function classifyItemDivergence(input: {
+  id: string;
+  ancestor: DivergeItemSide;
+  base: DivergeItemSide;
+  head: DivergeItemSide;
+}): DivergeItem {
+  const { id, ancestor, base, head } = input;
+
+  const ancestorKeys = new Set(ancestor.events.map(eventKey));
+  const baseNew = newEvents(base.events, ancestorKeys);
+  const headNew = newEvents(head.events, ancestorKeys);
+
+  const baseHasNew = baseNew.length > 0;
+  const headHasNew = headNew.length > 0;
+
+  const baseFields = [...changedFieldPaths(baseNew)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
+  const headFields = [...changedFieldPaths(headNew)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
+
+  const baseSide = summarizeSide(base.events, baseNew, base.itemPresent, base.malformedLines ?? 0);
+  const headSide = summarizeSide(head.events, headNew, head.itemPresent, head.malformedLines ?? 0);
+
+  let kind: DivergeKind;
+  let severity: "low" | "medium" | "high";
+  let collidingFields: string[] = [];
+
+  if (!baseHasNew && !headHasNew) {
+    kind = "unchanged";
+    severity = "low";
+  } else if (headHasNew && !baseHasNew) {
+    kind = "head-only";
+    severity = "low";
+  } else if (baseHasNew && !headHasNew) {
+    kind = "base-only";
+    severity = "low";
+  } else {
+    // both sides have new events
+    const ancestorPresent = ancestor.itemPresent;
+    const basePresent = base.itemPresent;
+    const headPresent = head.itemPresent;
+
+    if (!ancestorPresent && basePresent && headPresent) {
+      kind = "duplicate-id";
+      severity = "high";
+    } else if (basePresent !== headPresent) {
+      // .toon absent on exactly one side but that side (or the other) has new events
+      kind = "delete-vs-edit";
+      severity = "high";
+    } else {
+      const collision = baseFields.filter((f) => headFields.includes(f));
+      if (collision.length > 0) {
+        kind = "field-collision";
+        severity = "medium";
+        collidingFields = [...new Set(collision)].sort();
+      } else {
+        kind = "union-safe";
+        severity = "low";
+      }
+    }
+  }
+
+  return { id, kind, severity, collidingFields, base: baseSide, head: headSide };
+}
+
+function summarizeSide(allEvents: DivergeEvent[], newSideEvents: DivergeEvent[], itemPresent: boolean, malformedLines: number): DivergeItem["base"] {
+  const sorted = [...newSideEvents].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  const fields = [...changedFieldPaths(newSideEvents)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
+  const authors = [...new Set(sorted.map((e) => e.author ?? "").filter(Boolean))].sort();
+  return {
+    eventCount: newSideEvents.length,
+    authors,
+    firstTs: sorted[0]?.ts,
+    lastTs: sorted[sorted.length - 1]?.ts,
+    fields,
+    itemPresent,
+    malformedLines,
+  };
+}
+
+// ---- fence check -------------------------------------------------------------
+
+export function evaluateFence(input: {
+  gitattributesText: string | undefined;
+  pmRootRel: string;
+  itemToonDriver?: string;
+  historyDriver?: string;
+}): FenceStatus {
+  const { gitattributesText, pmRootRel } = input;
+  const missing: string[] = [];
+
+  let attributesInstalled = false;
+  if (gitattributesText) {
+    const lines = gitattributesText.split("\n");
+    let hasItemToon = false;
+    let hasHistory = false;
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      // The pathspec may be quoted (".agents/pm/...") or unquoted
+      const pathPart = line.replace(/^"([^"]+)"/, "$1").split(/\s+/)[0] ?? "";
+      if (!pathPart.startsWith(pmRootRel)) continue;
+      if (/\bmerge=pm-item-toon\b/.test(line)) hasItemToon = true;
+      if (/\bmerge=pm-history\b/.test(line)) hasHistory = true;
+    }
+    attributesInstalled = hasItemToon && hasHistory;
+  }
+  if (!attributesInstalled) missing.push(".gitattributes merge=pm-item-toon / merge=pm-history entries");
+
+  const driversConfigured = Boolean(input.itemToonDriver) && Boolean(input.historyDriver);
+  if (!driversConfigured) missing.push("git config merge.pm-item-toon.driver / merge.pm-history.driver");
+
+  return { attributesInstalled, driversConfigured, ok: attributesInstalled && driversConfigured, missing };
+}
+
+// ---- aggregate ---------------------------------------------------------------
+
+const DIVERGE_SEVERITY_RANK: Record<DivergeKind, number> = {
+  "duplicate-id": 0,
+  "delete-vs-edit": 1,
+  "field-collision": 2,
+  "union-safe": 3,
+  "head-only": 4,
+  "base-only": 5,
+  unchanged: 6,
+};
+
+export function buildDivergence(
+  items: DivergeItem[],
+  options: {
+    base: string;
+    head: string;
+    baseSha: string;
+    headSha: string;
+    ancestorSha: string | undefined;
+    workspace: string;
+    pmVersion: string;
+    generatedAt?: string;
+    fence: FenceStatus;
+    includeClean?: boolean;
+    maxItems?: number;
+    tokenBudget?: number;
+    format?: string;
+    ancestorDate?: string;
+  },
+): DivergenceSummary {
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const includeClean = options.includeClean ?? false;
+
+  // filter out unchanged items always; head-only/base-only only with --include-clean
+  const visible = items.filter((item) => {
+    if (item.kind === "unchanged") return false;
+    if (!includeClean && (item.kind === "head-only" || item.kind === "base-only")) return false;
+    return true;
+  });
+
+  // deterministic ordering: most decision-relevant first, tie-break by id ascending
+  visible.sort((a, b) => {
+    const rankDiff = DIVERGE_SEVERITY_RANK[a.kind] - DIVERGE_SEVERITY_RANK[b.kind];
+    if (rankDiff !== 0) return rankDiff;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+
+  const totals = {
+    itemsChanged: items.filter((i) => i.kind !== "unchanged").length,
+    headOnly: items.filter((i) => i.kind === "head-only").length,
+    baseOnly: items.filter((i) => i.kind === "base-only").length,
+    unionSafe: items.filter((i) => i.kind === "union-safe").length,
+    fieldCollision: items.filter((i) => i.kind === "field-collision").length,
+    duplicateId: items.filter((i) => i.kind === "duplicate-id").length,
+    deleteVsEdit: items.filter((i) => i.kind === "delete-vs-edit").length,
+  };
+
+  const hasReview = totals.fieldCollision > 0 || totals.duplicateId > 0 || totals.deleteVsEdit > 0;
+  const hasBothSided = totals.unionSafe + totals.fieldCollision + totals.duplicateId + totals.deleteVsEdit > 0;
+  const verdict: DivergenceSummary["verdict"] = !hasBothSided ? "clean" : hasReview ? "review-required" : "union-safe";
+
+  // recommended commands (ordered, deduped, only what applies)
+  const recommendedCommands: string[] = [];
+  if (!options.fence.ok) recommendedCommands.push("pm merge install");
+  recommendedCommands.push(`git merge ${options.base}`);
+  if (hasBothSided) recommendedCommands.push("pm merge reconcile");
+  const highSeverity = visible.filter((i) => i.severity === "high").slice(0, 5);
+  for (const item of highSeverity) {
+    recommendedCommands.push(`pm history ${item.id} --verify`);
+  }
+  if (options.ancestorSha && options.ancestorDate) {
+    recommendedCommands.push(`pm brief since ${options.ancestorDate}`);
+  }
+
+  // apply maxItems + token budget trimming (same pattern as buildDelta)
+  const maxItems = Math.max(1, Math.floor(options.maxItems ?? 40));
+  const tokenBudget = options.tokenBudget ?? 4000;
+
+  const summary: DivergenceSummary = {
+    base: options.base,
+    head: options.head,
+    baseSha: options.baseSha,
+    headSha: options.headSha,
+    ancestorSha: options.ancestorSha,
+    workspace: options.workspace,
+    pmVersion: options.pmVersion,
+    generatedAt,
+    verdict,
+    totals,
+    items: visible,
+    fence: options.fence,
+    recommendedCommands: dedupeStrings(recommendedCommands),
+  };
+
+  applyDivergenceBudget(summary, maxItems, tokenBudget, options.format);
+  return summary;
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function estimateDivergenceTokens(summary: DivergenceSummary, format?: string): number {
+  const rendered =
+    format === "json" ? `${JSON.stringify(summary, null, 2)}\n`
+    : format === "text" ? renderTextDivergence(summary)
+    : format === "slack" ? renderSlackDivergence(summary)
+    : renderMarkdownDivergence(summary);
+  return estimateTokens(rendered);
+}
+
+function applyDivergenceBudget(summary: DivergenceSummary, maxItems: number, tokenBudget: number, format?: string): void {
+  const full = summary.items;
+  let working = full.slice(0, maxItems);
+  const probe = (items: DivergeItem[]) => estimateDivergenceTokens({ ...summary, items }, format);
+  if (working.length > 1 && probe(working) > tokenBudget) {
+    while (working.length > 1 && probe(working) > tokenBudget) {
+      working = working.slice(0, -1);
+    }
+  }
+  const omitted = full.length - working.length;
+  summary.items = working;
+  summary.truncated = omitted > 0 ? true : undefined;
+  summary.omittedItems = omitted > 0 ? omitted : undefined;
+  summary.budget = { requestedTokens: tokenBudget, estimatedTokens: probe(working) };
+}
+
+// ---- renderers ---------------------------------------------------------------
+
+const DIVERGE_KIND_LABELS: Record<DivergeKind, string> = {
+  "duplicate-id": "Duplicate ID (high)",
+  "delete-vs-edit": "Delete vs Edit (high)",
+  "field-collision": "Field Collision (medium)",
+  "union-safe": "Union-Safe (low)",
+  "head-only": "Head Only",
+  "base-only": "Base Only",
+  unchanged: "Unchanged",
+};
+
+function divergeItemLine(item: DivergeItem): string {
+  const parts = [`${item.id}: ${DIVERGE_KIND_LABELS[item.kind]}`];
+  if (item.collidingFields.length > 0) parts.push(`fields: ${item.collidingFields.join(", ")}`);
+  parts.push(`base(${item.base.eventCount} ev, ${item.base.authors.join(",") || "-"}) head(${item.head.eventCount} ev, ${item.head.authors.join(",") || "-"})`);
+  return parts.join(" — ");
+}
+
+export function renderMarkdownDivergence(summary: DivergenceSummary): string {
+ const header = `# Divergence: ${summary.base} ← ${summary.head}`;
+  if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
+    return `${header}\n\nNo pm item divergence between ${summary.base} and ${summary.head}.\n`;
+  }
+  const lines: string[] = [
+    header,
+    "",
+    `**Verdict: ${summary.verdict}** · ${summary.workspace} · pm ${summary.pmVersion} · generated ${summary.generatedAt}`,
+    "",
+  ];
+
+  const t = summary.totals;
+  lines.push(`## Totals`, "");
+  lines.push(`- ${t.itemsChanged} item(s) changed: ${t.duplicateId} duplicate-id, ${t.deleteVsEdit} delete-vs-edit, ${t.fieldCollision} field-collision, ${t.unionSafe} union-safe, ${t.headOnly} head-only, ${t.baseOnly} base-only.`);
+  if (summary.truncated) {
+    lines.push(`- _truncated: ${summary.omittedItems ?? 0} lower-ranked item(s) omitted to fit budget_`);
+  }
+  if (summary.ancestorSha === undefined) {
+    lines.push(`- _unrelated histories: ${summary.base} and ${summary.head} share no common ancestor; every changed item is one-sided._`);
+  }
+  lines.push("");
+
+  if (!summary.fence.ok) {
+    lines.push("## ⚠ Merge Driver Fence Not Installed", "");
+    lines.push("The pm field-aware merge driver is NOT fully installed. Even **union-safe** items will hard-conflict on merge.");
+    lines.push("Missing: " + summary.fence.missing.join("; "));
+    lines.push("Run `pm merge install` before merging.", "");
+  }
+
+  // group items by kind in severity order
+  const grouped = groupDivergeItems(summary.items);
+  for (const { title, members } of grouped) {
+    lines.push(`## ${title}`, "");
+    for (const item of members) {
+      lines.push(`- ${divergeItemLine(item)}`);
+    }
+    lines.push("");
+  }
+
+  if (summary.recommendedCommands.length > 0) {
+    lines.push("## Recommended next steps", "", "```");
+    for (const cmd of summary.recommendedCommands) lines.push(cmd);
+    lines.push("```", "");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderTextDivergence(summary: DivergenceSummary): string {
+  if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
+    return `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
+  }
+  const t = summary.totals;
+  const lines: string[] = [
+    `Divergence: ${summary.base} <- ${summary.head} (verdict: ${summary.verdict})`,
+    `${summary.workspace} | pm ${summary.pmVersion} | generated ${summary.generatedAt}`,
+    `${t.itemsChanged} item(s) changed: ${t.duplicateId} dup-id, ${t.deleteVsEdit} del-vs-edit, ${t.fieldCollision} collision, ${t.unionSafe} union-safe, ${t.headOnly} head-only, ${t.baseOnly} base-only${summary.truncated ? ` (truncated, ${summary.omittedItems ?? 0} omitted)` : ""}`,
+  ];
+  if (summary.ancestorSha === undefined) {
+    lines.push("unrelated histories: no common ancestor");
+  }
+  if (!summary.fence.ok) {
+    lines.push(`WARNING: merge driver fence not installed (${summary.fence.missing.join("; ")}). Even union-safe items will hard-conflict. Run 'pm merge install'.`);
+  }
+  lines.push("");
+  for (const item of summary.items) {
+    lines.push(divergeItemLine(item));
+  }
+  if (summary.recommendedCommands.length > 0) {
+    lines.push("", "Recommended next steps:");
+    for (const cmd of summary.recommendedCommands) lines.push(`  ${cmd}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderSlackDivergence(summary: DivergenceSummary): string {
+  if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
+    return `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
+  }
+  const t = summary.totals;
+  const lines: string[] = [
+    `*Divergence: ${summary.base} <- ${summary.head}*`,
+    `_${summary.workspace} | pm ${summary.pmVersion} | generated ${summary.generatedAt}_`,
+    `*Verdict: ${summary.verdict}* — ${t.itemsChanged} item(s): ${t.duplicateId} dup-id, ${t.deleteVsEdit} del-vs-edit, ${t.fieldCollision} collision, ${t.unionSafe} union-safe, ${t.headOnly} head-only, ${t.baseOnly} base-only${summary.truncated ? ` _(${summary.omittedItems ?? 0} omitted)_` : ""}`,
+  ];
+  if (summary.ancestorSha === undefined) {
+    lines.push("_unrelated histories: no common ancestor_");
+  }
+  lines.push("");
+  if (!summary.fence.ok) {
+    lines.push(`*⚠ Merge driver fence not installed* — missing: ${summary.fence.missing.join("; ")}. Even union-safe items will hard-conflict. Run \`pm merge install\`.`);
+  }
+  const grouped = groupDivergeItems(summary.items);
+  for (const { title, members } of grouped) {
+    lines.push(`*${title}*`);
+    for (const item of members) {
+      lines.push(`• \`${item.id}\` ${DIVERGE_KIND_LABELS[item.kind]}${item.collidingFields.length > 0 ? ` _fields: ${item.collidingFields.join(", ")}_` : ""} — base(${item.base.eventCount}ev) head(${item.head.eventCount}ev)`);
+    }
+    lines.push("");
+  }
+  if (summary.recommendedCommands.length > 0) {
+    lines.push("*Recommended next steps*");
+    for (const cmd of summary.recommendedCommands) lines.push(`\`${cmd}\``);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function groupDivergeItems(items: DivergeItem[]): Array<{ title: string; members: DivergeItem[] }> {
+  const order: DivergeKind[] = ["duplicate-id", "delete-vs-edit", "field-collision", "union-safe", "head-only", "base-only"];
+  const groups = new Map<DivergeKind, DivergeItem[]>();
+  for (const item of items) {
+    const bucket = groups.get(item.kind);
+    if (bucket) bucket.push(item);
+    else groups.set(item.kind, [item]);
+  }
+  return order.filter((kind) => groups.has(kind)).map((kind) => ({ title: DIVERGE_KIND_LABELS[kind], members: groups.get(kind)! }));
+}
+
 function registerCommands(api: any): void {
   const commonFlags = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
@@ -2100,6 +2736,158 @@ function registerCommands(api: any): void {
       return renderedCommandResult(output);
     },
   });
+  api.registerCommand({
+    name: "brief diverge",
+    description: "Preview pm item divergence between two git branches before merging (multi-agent collision check).",
+    intent: "let an agent see which items both branches touched, and whether the field-aware merge driver will resolve them cleanly, before running git merge",
+    examples: ["pm brief diverge", "pm brief diverge main", "pm brief diverge --base main --head feat/other --format json"],
+    arguments: [{ name: "base", required: false, description: "Base ref to compare against (default: origin/HEAD, else main, else master)" }],
+    flags: [
+      { long: "--base", value_name: "ref", description: "Explicit base ref (wins over positional)", type: "string" },
+      { long: "--head", value_name: "ref", description: "Head ref (default: HEAD)", type: "string" },
+      { long: "--include-clean", description: "Also list items touched by only one side individually", type: "boolean" },
+      { long: "--max-items", value_name: "n", description: "Max items to render (default 40)", type: "string" },
+      { long: "--token-budget", value_name: "n", description: "Approx max output token budget (alias --max-tokens; default 4000)", type: "string" },
+      { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget", type: "string" },
+      { long: "--format", value_name: "format", description: "Output format: markdown, text, json, or slack (default markdown)", type: "string" },
+      { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
+    ],
+    async run(ctx: any) {
+      const options = ctx.options as Record<string, unknown>;
+      const positionalBase = (ctx.args?.[0] ?? "").trim() || undefined;
+      const explicitBase = readString(options, "base");
+      const headRef = readString(options, "head") ?? "HEAD";
+      const includeClean = readBool(options, "include-clean", "includeClean");
+      const maxItems = readInt(options, ["max-items", "maxItems"], 40);
+      const tokenBudget = readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000);
+      const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
+      if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
+
+      const workspace = ctx.pm_root ?? ".agents/pm";
+      const cwd = process.cwd();
+      const repoRoot = resolveRepoRoot(cwd);
+      const pmRootRel = pmRootRelFromCtx(workspace, repoRoot);
+
+      // resolve refs
+      const baseRef = explicitBase ?? positionalBase ?? detectDefaultBase(repoRoot);
+      const baseSha = resolveRef(repoRoot, baseRef);
+      const headSha = resolveRef(repoRoot, headRef);
+      const ancestorSha = mergeBase(repoRoot, baseSha, headSha);
+
+      // ancestor commit date for the 'pm brief since' recommendation
+      let ancestorDate: string | undefined;
+      if (ancestorSha) {
+        const dateResult = spawnSync("git", ["show", "-s", "--format=%cI", ancestorSha], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+        if (dateResult.status === 0 && dateResult.stdout?.trim()) ancestorDate = dateResult.stdout.trim();
+      }
+
+      // fence check: read .gitattributes at HEAD and git config drivers
+      const gitattributesText = readBlob(repoRoot, headSha, ".gitattributes");
+      const itemToonDriver = gitConfigGet(repoRoot, "merge.pm-item-toon.driver");
+      const historyDriver = gitConfigGet(repoRoot, "merge.pm-history.driver");
+      const fence = evaluateFence({ gitattributesText, pmRootRel, itemToonDriver, historyDriver });
+
+      // collect changed paths on each side relative to the ancestor
+      const basePaths = ancestorSha
+        ? listChangedPaths(repoRoot, ancestorSha, baseSha, pmRootRel)
+        : listChangedPaths(repoRoot, undefined, baseSha, pmRootRel);
+      const headPaths = ancestorSha
+        ? listChangedPaths(repoRoot, ancestorSha, headSha, pmRootRel)
+        : listChangedPaths(repoRoot, undefined, headSha, pmRootRel);
+
+      // classify each path as history or toon, extract item ids
+      const baseHistoryIds = new Set<string>();
+      const baseToonIds = new Set<string>();
+      classifyPaths(basePaths, pmRootRel, baseHistoryIds, baseToonIds);
+      const headHistoryIds = new Set<string>();
+      const headToonIds = new Set<string>();
+      classifyPaths(headPaths, pmRootRel, headHistoryIds, headToonIds);
+
+      // union of all touched item ids
+      const allIds = new Set<string>([...baseHistoryIds, ...headHistoryIds, ...baseToonIds, ...headToonIds]);
+
+      const items: DivergeItem[] = [];
+      for (const itemId of allIds) {
+        const historyRel = `${pmRootRel}/history/${itemId}.jsonl`;
+        const toonPresent = (sha: string): boolean => {
+          // check if any .toon path for this id exists at the given revision
+          const result = spawnSync("git", ["ls-tree", "-r", "--name-only", sha, "--", pmRootRel], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+          if (result.status !== 0) return false;
+          return result.stdout.split("\n").some((line) => line.trim().endsWith(`/${itemId}.toon`));
+        };
+
+        const ancestorEvents = ancestorSha ? parseHistoryJsonl(readBlob(repoRoot, ancestorSha, historyRel)) : [];
+        const ancestorPresent = ancestorSha ? toonPresent(ancestorSha) : false;
+        const baseRawText = readBlob(repoRoot, baseSha, historyRel);
+        const baseEvents = parseHistoryJsonl(baseRawText);
+        const basePresent = toonPresent(baseSha);
+        const headRawText = readBlob(repoRoot, headSha, historyRel);
+        const headEvents = parseHistoryJsonl(headRawText);
+        const headPresent = toonPresent(headSha);
+
+        items.push(classifyItemDivergence({
+          id: itemId,
+          ancestor: { events: ancestorEvents, itemPresent: ancestorPresent },
+          base: { events: baseEvents, itemPresent: basePresent, malformedLines: countMalformedLines(baseRawText) },
+          head: { events: headEvents, itemPresent: headPresent, malformedLines: countMalformedLines(headRawText) },
+        }));
+      }
+
+      const summary = buildDivergence(items, {
+        base: baseRef,
+        head: headRef,
+        baseSha,
+        headSha,
+        ancestorSha,
+        ancestorDate,
+        workspace,
+        pmVersion: pmVersion(),
+        generatedAt: new Date().toISOString(),
+        fence,
+        includeClean,
+        maxItems,
+        tokenBudget,
+        format,
+      });
+
+      const outputPath = readString(options, "output");
+      if (format === "json") {
+        const output = `${JSON.stringify(summary, null, 2)}\n`;
+        if (outputPath) {
+          writeFileSync(outputPath, output, "utf-8");
+          return { ok: true, format, output: outputPath, verdict: summary.verdict, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+        }
+        return renderedCommandResult(output);
+      }
+      const output = format === "text" ? renderTextDivergence(summary) : format === "slack" ? renderSlackDivergence(summary) : renderMarkdownDivergence(summary);
+      if (outputPath) {
+        writeFileSync(outputPath, output, "utf-8");
+        return { ok: true, format, output: outputPath, verdict: summary.verdict, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+      }
+      return renderedCommandResult(output);
+    },
+  });
+}
+
+function gitConfigGet(repoRoot: string, key: string): string | undefined {
+  const result = spawnSync("git", ["config", "--get", key], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
+  if (result.status !== 0) return undefined;
+  const value = result.stdout?.trim();
+  return value || undefined;
+}
+
+function classifyPaths(paths: string[], pmRootRel: string, historyIds: Set<string>, toonIds: Set<string>): void {
+  const historyPrefix = `${pmRootRel}/history/`;
+  for (const path of paths) {
+    if (path.startsWith(historyPrefix) && path.endsWith(".jsonl")) {
+      const basename = path.slice(historyPrefix.length, -".jsonl".length);
+      historyIds.add(basename);
+    } else if (path.endsWith(".toon")) {
+      const slashIdx = path.lastIndexOf("/");
+      const basename = slashIdx >= 0 ? path.slice(slashIdx + 1, -".toon".length) : path.slice(0, -".toon".length);
+      toonIds.add(basename);
+    }
+  }
 }
 
 export default defineExtension({

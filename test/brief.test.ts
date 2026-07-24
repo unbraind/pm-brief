@@ -3,22 +3,32 @@ import test, { describe } from "node:test";
 import extension, {
   buildBrief,
   buildDelta,
+  buildDivergence,
+  changedFieldPaths,
+  classifyItemDivergence,
   detectStaleContext,
+  evaluateFence,
+  eventKey,
   explainNextItems,
   extractRelationships,
   normalizeCheckpoint,
+  parseHistoryJsonl,
   parsePmItemsOutput,
   readRecentActivity,
   renderAgentPrompt,
   renderMarkdownBrief,
   renderMarkdownDelta,
+  renderMarkdownDivergence,
   renderSlackBrief,
   renderSlackDelta,
+  renderSlackDivergence,
   renderTextDelta,
+  renderTextDivergence,
   selectNextItems,
   summarizeMomentum,
   summarizeRisks,
   type DeltaActivityEntry,
+  type DivergeEvent,
   type PmItem,
 } from "../dist/index.js";
 
@@ -65,7 +75,7 @@ const items: PmItem[] = [
 test("extension registers brief commands", () => {
   const commands: Array<Record<string, unknown>> = [];
   extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since"]);
+  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge"]);
   const nextFlags = commands.find((command) => command.name === "brief next")?.flags as Array<Record<string, unknown>>;
   assert.ok(nextFlags.some((flag) => flag.long === "--explain"));
   assert.ok(nextFlags.some((flag) => flag.long === "--confidence"));
@@ -994,5 +1004,518 @@ describe("brief since / buildDelta", () => {
       const change = buildDelta(entries, itemsById(items), { since: "2026-07-20" }).items[0];
       assert.equal(change.statusTransition?.to, "in_progress");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief diverge / buildDivergence
+// ---------------------------------------------------------------------------
+
+function divEvent(
+  op: string,
+  ts: string,
+  patch: Array<{ op: string; path: string; value?: unknown }> = [],
+  opts: { author?: string; afterHash?: string } = {},
+): DivergeEvent {
+  return {
+    ts,
+    author: opts.author ?? "pi-agent",
+    op,
+    patch,
+    after_hash: opts.afterHash,
+  };
+}
+
+describe("brief diverge / buildDivergence", () => {
+  test("parseHistoryJsonl tolerates blank and malformed lines", () => {
+    const text = [
+      '{"ts":"2026-07-20T01:00:00Z","author":"a","op":"create","patch":[],"after_hash":"h1"}',
+      "",
+      "   ",
+      "not-json",
+      '{"ts":"2026-07-20T02:00:00Z","author":"b","op":"update","patch":[{"op":"replace","path":"/metadata/status","value":"open"}],"after_hash":"h2"}',
+      '{"op":"update"}', // missing ts — should be skipped
+    ].join("\n");
+    const events = parseHistoryJsonl(text);
+    assert.equal(events.length, 2);
+    assert.equal(events[0]?.op, "create");
+    assert.equal(events[1]?.op, "update");
+  });
+
+  test("parseHistoryJsonl returns empty for undefined/empty input", () => {
+    assert.deepEqual(parseHistoryJsonl(undefined), []);
+    assert.deepEqual(parseHistoryJsonl(""), []);
+  });
+
+  test("changedFieldPaths normalizes trailing numeric array segments", () => {
+    const events: DivergeEvent[] = [
+      divEvent("update", "2026-07-20T01:00:00Z", [
+        { op: "add", path: "/metadata/tags/3", value: "foo" },
+        { op: "add", path: "/metadata/tags/7", value: "bar" },
+        { op: "replace", path: "/metadata/status", value: "open" },
+        { op: "add", path: "/metadata/notes/1", value: {} },
+      ]),
+    ];
+    const fields = [...changedFieldPaths(events)].sort();
+    // /metadata/tags/3 and /metadata/tags/7 both normalize to /metadata/tags
+    assert.ok(fields.includes("/metadata/tags"));
+    assert.ok(fields.includes("/metadata/status"));
+    assert.ok(fields.includes("/metadata/notes"));
+    // no raw numeric paths
+    assert.ok(!fields.includes("/metadata/tags/3"));
+    assert.ok(!fields.includes("/metadata/tags/7"));
+    assert.ok(!fields.includes("/metadata/notes/1"));
+  });
+
+  test("eventKey uses after_hash when available, else ts|author|op", () => {
+    assert.equal(eventKey(divEvent("create", "2026-07-20T01:00:00Z", [], { afterHash: "abc123" })), "abc123");
+    assert.equal(eventKey(divEvent("update", "2026-07-20T01:00:00Z", [], { author: "bob" })), "2026-07-20T01:00:00Z|bob|update");
+  });
+
+  test("classifyItemDivergence: head-only when only head has new events", () => {
+    const result = classifyItemDivergence({
+      id: "pm-1",
+      ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+      base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+      head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    assert.equal(result.kind, "head-only");
+    assert.equal(result.severity, "low");
+    assert.equal(result.head.eventCount, 1);
+    assert.equal(result.base.eventCount, 0);
+  });
+
+  test("classifyItemDivergence: base-only when only base has new events", () => {
+    const result = classifyItemDivergence({
+      id: "pm-1",
+      ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+      base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/title", value: "New" }], { afterHash: "b1" })], itemPresent: true },
+      head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+    });
+    assert.equal(result.kind, "base-only");
+  });
+
+  test("classifyItemDivergence: unchanged when neither side has new events", () => {
+    const ancestorEvent = divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" });
+    const result = classifyItemDivergence({
+      id: "pm-1",
+      ancestor: { events: [ancestorEvent], itemPresent: true },
+      base: { events: [ancestorEvent], itemPresent: true },
+      head: { events: [ancestorEvent], itemPresent: true },
+    });
+    assert.equal(result.kind, "unchanged");
+  });
+
+  test("classifyItemDivergence: duplicate-id when item absent at ancestor but present on both sides", () => {
+    const result = classifyItemDivergence({
+      id: "pm-dup",
+      ancestor: { events: [], itemPresent: false },
+      base: { events: [divEvent("create", "2026-07-20T01:00:00Z", [{ op: "add", path: "/metadata/title", value: "Base" }], { afterHash: "b1" })], itemPresent: true },
+      head: { events: [divEvent("create", "2026-07-20T02:00:00Z", [{ op: "add", path: "/metadata/title", value: "Head" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    assert.equal(result.kind, "duplicate-id");
+    assert.equal(result.severity, "high");
+  });
+
+  test("classifyItemDivergence: delete-vs-edit when .toon absent on exactly one side", () => {
+    const ancestorEvent = divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" });
+    const result = classifyItemDivergence({
+      id: "pm-del",
+      ancestor: { events: [ancestorEvent], itemPresent: true },
+      base: { events: [ancestorEvent, divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: false },
+      head: { events: [ancestorEvent, divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    assert.equal(result.kind, "delete-vs-edit");
+    assert.equal(result.severity, "high");
+  });
+
+  test("classifyItemDivergence: field-collision when both sides touch the same non-benign field", () => {
+    const ancestorEvent = divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" });
+    const result = classifyItemDivergence({
+      id: "pm-coll",
+      ancestor: { events: [ancestorEvent], itemPresent: true },
+      base: { events: [ancestorEvent, divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: true },
+      head: { events: [ancestorEvent, divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    assert.equal(result.kind, "field-collision");
+    assert.equal(result.severity, "medium");
+    assert.deepEqual(result.collidingFields, ["/metadata/status"]);
+  });
+
+  test("classifyItemDivergence: union-safe when both sides touch disjoint fields", () => {
+    const ancestorEvent = divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" });
+    const result = classifyItemDivergence({
+      id: "pm-uni",
+      ancestor: { events: [ancestorEvent], itemPresent: true },
+      base: { events: [ancestorEvent, divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/priority", value: 1 }], { afterHash: "b1" })], itemPresent: true },
+      head: { events: [ancestorEvent, divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/assignee", value: "bob" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    assert.equal(result.kind, "union-safe");
+    assert.equal(result.severity, "low");
+    assert.deepEqual(result.collidingFields, []);
+  });
+
+  test("BENIGN_FIELDS alone never yields field-collision", () => {
+    const ancestorEvent = divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" });
+    const result = classifyItemDivergence({
+      id: "pm-benign",
+      ancestor: { events: [ancestorEvent], itemPresent: true },
+      base: { events: [ancestorEvent, divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/updated_at", value: "2026-07-20T01:00:00Z" }], { afterHash: "b1" })], itemPresent: true },
+      head: { events: [ancestorEvent, divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/updated_at", value: "2026-07-20T02:00:00Z" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    // both sides only touched /metadata/updated_at (benign) — disjoint non-benign fields → union-safe
+    assert.equal(result.kind, "union-safe");
+    assert.deepEqual(result.collidingFields, []);
+  });
+
+  test("buildDivergence verdict precedence: review-required beats union-safe", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-uni",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/priority", value: 1 }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/assignee", value: "bob" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+      classifyItemDivergence({
+        id: "pm-coll",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+    ];
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    });
+    assert.equal(summary.verdict, "review-required");
+    // field-collision (rank 2) before union-safe (rank 3)
+    assert.equal(summary.items[0]?.kind, "field-collision");
+    assert.equal(summary.items[1]?.kind, "union-safe");
+  });
+
+  test("buildDivergence verdict: union-safe when all both-sided items are union-safe", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-uni",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/priority", value: 1 }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/assignee", value: "bob" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+    ];
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    });
+    assert.equal(summary.verdict, "union-safe");
+  });
+
+  test("buildDivergence verdict: clean when no both-sided items", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-h",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+    ];
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    });
+    assert.equal(summary.verdict, "clean");
+    // head-only is not rendered without --include-clean
+    assert.equal(summary.items.length, 0);
+  });
+
+  test("buildDivergence deterministic ordering: duplicate-id before delete-vs-edit before field-collision before union-safe, tie-break by id", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-z",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/assignee", value: "x" }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/priority", value: 1 }], { afterHash: "h1" })], itemPresent: true },
+      }),
+      classifyItemDivergence({
+        id: "pm-a",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/assignee", value: "x" }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/priority", value: 1 }], { afterHash: "h1" })], itemPresent: true },
+      }),
+    ];
+    // both are union-safe; tie-break by id ascending → pm-a before pm-z
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    });
+    assert.deepEqual(summary.items.map((i) => i.id), ["pm-a", "pm-z"]);
+  });
+
+  test("buildDivergence --include-clean surfaces one-sided items", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-h",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+      classifyItemDivergence({
+        id: "pm-b",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/title", value: "New" }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+      }),
+    ];
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+      includeClean: true,
+    });
+    // head-only (rank 4) before base-only (rank 5)
+    assert.deepEqual(summary.items.map((i) => i.kind), ["head-only", "base-only"]);
+  });
+
+  test("buildDivergence: unrelated histories (ancestorSha === undefined) treats every changed item as one-sided", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-h",
+        ancestor: { events: [], itemPresent: false },
+        base: { events: [], itemPresent: false },
+        head: { events: [divEvent("create", "2026-07-20T01:00:00Z", [{ op: "add", path: "/metadata/title", value: "H" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+    ];
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: undefined,
+      workspace: ".agents/pm", pmVersion: "test", fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+      includeClean: true,
+    });
+    assert.equal(summary.ancestorSha, undefined);
+    assert.equal(summary.verdict, "clean");
+    assert.equal(summary.items[0]?.kind, "head-only");
+  });
+
+  test("evaluateFence: ok when both attributes and drivers are configured", () => {
+    const fence = evaluateFence({
+      gitattributesText: `".agents/pm/features/*.toon" merge=pm-item-toon\n".agents/pm/history/*.jsonl" merge=pm-history`,
+      pmRootRel: ".agents/pm",
+      itemToonDriver: "pm merge driver item %O %A %B",
+      historyDriver: "pm merge driver history %O %A %B",
+    });
+    assert.equal(fence.ok, true);
+    assert.equal(fence.attributesInstalled, true);
+    assert.equal(fence.driversConfigured, true);
+    assert.deepEqual(fence.missing, []);
+  });
+
+  test("evaluateFence: not ok when attributes missing", () => {
+    const fence = evaluateFence({
+      gitattributesText: `# no pm entries here`,
+      pmRootRel: ".agents/pm",
+      itemToonDriver: "pm merge driver item %O %A %B",
+      historyDriver: "pm merge driver history %O %A %B",
+    });
+    assert.equal(fence.ok, false);
+    assert.equal(fence.attributesInstalled, false);
+  });
+
+  test("evaluateFence: not ok when drivers not configured", () => {
+    const fence = evaluateFence({
+      gitattributesText: `".agents/pm/features/*.toon" merge=pm-item-toon\n".agents/pm/history/*.jsonl" merge=pm-history`,
+      pmRootRel: ".agents/pm",
+      itemToonDriver: undefined,
+      historyDriver: undefined,
+    });
+    assert.equal(fence.ok, false);
+    assert.equal(fence.driversConfigured, false);
+  });
+
+  test("evaluateFence: not ok when gitattributes is missing entirely", () => {
+    const fence = evaluateFence({
+      gitattributesText: undefined,
+      pmRootRel: ".agents/pm",
+      itemToonDriver: "pm merge driver item %O %A %B",
+      historyDriver: "pm merge driver history %O %A %B",
+    });
+    assert.equal(fence.ok, false);
+  });
+
+  test("renderMarkdownDivergence emits verdict heading and empty case", () => {
+    const summary = buildDivergence([], {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", generatedAt: "2026-07-24T00:00:00Z",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    });
+    const md = renderMarkdownDivergence(summary);
+    assert.match(md, /No pm item divergence between main and feat\/x/);
+  });
+
+  test("renderMarkdownDivergence emits fence warning when not ok", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-uni",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/priority", value: 1 }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/assignee", value: "bob" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+    ];
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", generatedAt: "2026-07-24T00:00:00Z",
+      fence: { attributesInstalled: false, driversConfigured: true, ok: false, missing: [".gitattributes entries"] },
+    });
+    const md = renderMarkdownDivergence(summary);
+    assert.match(md, /Merge Driver Fence Not Installed/);
+    assert.match(md, /pm merge install/);
+  });
+
+  test("renderTextDivergence and renderSlackDivergence produce expected output", () => {
+    const items = [
+      classifyItemDivergence({
+        id: "pm-coll",
+        ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+        base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: true },
+        head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+      }),
+    ];
+    const summary = buildDivergence(items, {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test", generatedAt: "2026-07-24T00:00:00Z",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    });
+    const text = renderTextDivergence(summary);
+    assert.match(text, /Divergence: main <- feat\/x/);
+    assert.match(text, /verdict: review-required/);
+    assert.match(text, /pm-coll/);
+    const slack = renderSlackDivergence(summary);
+    assert.match(slack, /\*Divergence/);
+    assert.match(slack, /Field Collision/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief diverge end-to-end integration test (real git repo + real pm CLI)
+// ---------------------------------------------------------------------------
+
+describe("brief diverge end-to-end", () => {
+  test("integration: real git repo with divergent branches", async () => {
+    const pmBin = process.env.PM_BIN ?? "pm";
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { spawnSync } = await import("node:child_process");
+
+    // skip if pm is not on PATH
+    let pmAvailable = false;
+    try {
+      const r = spawnSync(pmBin, ["--version"], { stdio: "pipe", encoding: "utf-8" });
+      pmAvailable = r.status === 0;
+    } catch {
+      pmAvailable = false;
+    }
+    if (!pmAvailable) {
+      console.log("skipping integration test: pm not on PATH");
+      return;
+    }
+
+    const tmpDir = await fs.mkdtemp(path.join("/tmp", "pm-diverge-test-"));
+    try {
+      const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+
+      // init repo
+      git(["init"]);
+      git(["config", "user.email", "test@test.com"]);
+      git(["config", "user.name", "Test"]);
+      const pmPath = path.join(tmpDir, ".agents", "pm");
+
+      // init pm tracker
+      pm(["init", "--pm-path", pmPath]);
+
+      // create 3 items — this is the ancestor
+      pm(["--pm-path", pmPath, "create", "Task", "--title", "Item 1", "--author", "agent-a", "--json"]);
+      pm(["--pm-path", pmPath, "create", "Task", "--title", "Item 2", "--author", "agent-a", "--json"]);
+      pm(["--pm-path", pmPath, "create", "Task", "--title", "Item 3", "--author", "agent-a", "--json"]);
+      git(["add", "-A"]);
+      git(["commit", "-m", "ancestor: 3 items"]);
+      const ancestorSha = git(["rev-parse", "HEAD"]);
+
+      // get item ids
+      const listOutput = pm(["--pm-path", pmPath, "list-all", "--json"]);
+      const parsed = JSON.parse(listOutput) as { items?: Array<{ id: string; title: string }> };
+      const itemList = parsed.items ?? (parsed as unknown as Array<{ id: string; title: string }>);
+      const item1 = itemList.find((i) => i.title === "Item 1")?.id;
+      const item2 = itemList.find((i) => i.title === "Item 2")?.id;
+      const item3 = itemList.find((i) => i.title === "Item 3")?.id;
+      assert.ok(item1 && item2 && item3, "all 3 items created");
+
+      // Branch A: change item1 status, item2 priority
+      git(["checkout", "-b", "branch-a"]);
+      pm(["--pm-path", pmPath, "update", item1!, "--status", "in_progress", "--author", "agent-a"]);
+      pm(["--pm-path", pmPath, "update", item2!, "--priority", "1", "--author", "agent-a"]);
+      git(["add", "-A"]);
+      git(["commit", "-m", "branch-a: item1 status, item2 priority"]);
+
+      // Branch B (from ancestor): change item1 status to different value (field-collision),
+      // item3 title (one-sided), item2 assignee (union-safe with A's priority edit)
+      git(["checkout", ancestorSha]);
+      git(["checkout", "-b", "branch-b"]);
+      pm(["--pm-path", pmPath, "update", item1!, "--status", "blocked", "--author", "agent-b"]);
+      pm(["--pm-path", pmPath, "update", item3!, "--title", "Item 3 Renamed", "--author", "agent-b"]);
+      pm(["--pm-path", pmPath, "update", item2!, "--assignee", "agent-b", "--author", "agent-b"]);
+      git(["add", "-A"]);
+      git(["commit", "-m", "branch-b: item1 status (collision), item3 title, item2 assignee"]);
+
+      // Now run the classifier by reading real blobs from the repo
+      // Use branch-a as HEAD (the "head" side) and branch-b as the "base" side
+      const pmRootRel = ".agents/pm";
+      const baseSha = git(["rev-parse", "branch-b"]);
+      const headSha = git(["rev-parse", "branch-a"]);
+      const mbSha = git(["merge-base", baseSha, headSha]);
+
+      const readBlobAt = (sha: string, filePath: string): string | undefined => {
+        const r = spawnSync("git", ["show", `${sha}:${filePath}`], { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+        return r.status === 0 ? r.stdout : undefined;
+      };
+
+      const toonPresent = (sha: string, id: string): boolean => {
+        const tree = git(["ls-tree", "-r", "--name-only", sha, "--", pmRootRel]);
+        return tree.split("\n").some((line) => line.trim().endsWith(`/${id}.toon`));
+      };
+
+      const allIds = [item1!, item2!, item3!];
+      const divItems = allIds.map((itemId) => {
+        const historyPath = `${pmRootRel}/history/${itemId}.jsonl`;
+        const ancestorEvents = parseHistoryJsonl(readBlobAt(mbSha, historyPath));
+        const baseEvents = parseHistoryJsonl(readBlobAt(baseSha, historyPath));
+        const headEvents = parseHistoryJsonl(readBlobAt(headSha, historyPath));
+        return classifyItemDivergence({
+          id: itemId,
+          ancestor: { events: ancestorEvents, itemPresent: toonPresent(mbSha, itemId) },
+          base: { events: baseEvents, itemPresent: toonPresent(baseSha, itemId) },
+          head: { events: headEvents, itemPresent: toonPresent(headSha, itemId) },
+        });
+      });
+
+      const summary = buildDivergence(divItems, {
+        base: "branch-b", head: "branch-a", baseSha, headSha, ancestorSha: mbSha,
+        workspace: pmRootRel, pmVersion: "test",
+        fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+        includeClean: true,
+      });
+
+      // Assertions
+      assert.equal(summary.verdict, "review-required");
+      const item1Result = divItems.find((i) => i.id === item1);
+      const item2Result = divItems.find((i) => i.id === item2);
+      const item3Result = divItems.find((i) => i.id === item3);
+      assert.ok(item1Result);
+      assert.ok(item2Result);
+      assert.ok(item3Result);
+      assert.equal(item1Result!.kind, "field-collision");
+      assert.ok(item1Result!.collidingFields.includes("/metadata/status"));
+      assert.equal(item2Result!.kind, "union-safe");
+      // item3: only branch-b changed it (title) → one-sided
+      assert.ok(item3Result!.kind === "base-only" || item3Result!.kind === "head-only", `item3 should be one-sided, got ${item3Result!.kind}`);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
