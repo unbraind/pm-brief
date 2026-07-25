@@ -6,6 +6,10 @@
 
 - Add pm brief duplicates post-merge near-duplicate sweep ([pm-brief-58en](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-58en.toon))
 
+### Fixed
+
+- Documented install command fails: pm install github.com/unbraind/pm-brief cannot resolve an entry file ([pm-brief-xd8z](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-xd8z.toon))
+
 ## 2026.7.25 - 2026-07-25
 
 ### Added

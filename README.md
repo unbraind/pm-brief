@@ -10,7 +10,7 @@ an agent needs a low-token handoff instead of a full project dump.
 ## Install
 
 ```bash
-pm install github.com/unbraind/pm-brief --project
+pm install npm:pm-brief --project
 ```
 
 ## Usage
