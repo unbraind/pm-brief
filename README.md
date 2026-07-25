@@ -41,6 +41,7 @@ pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 - `pm brief stale` returns stale open or in-progress items.
 - `pm brief since <checkpoint>` renders a delta brief of what changed since a checkpoint.
 - `pm brief diverge [base]` previews pm item collisions between two branches **before** merging.
+- `pm brief duplicates` sweeps the merged tracker for near-duplicate items the create-time advisory cannot see across branches.
 
 ### Ranking and Budget Flags
 
@@ -167,6 +168,53 @@ recommended merge command becomes `git merge --allow-unrelated-histories <base>`
 Each report ends with an ordered `Recommended next steps` block containing only
 the commands that apply, including `pm history <id> --verify` per high-severity
 item and a `pm brief since <merge-base-date>` for post-merge re-orientation.
+
+### Post-merge duplicate sweep (`pm brief duplicates`)
+
+`pm brief diverge` closes the *pre*-merge gap. There is still one hole it cannot
+reach: two agents who each create a **new** item on their own branch both land
+cleanly on `main` — the field-aware merge driver is deliberately conflict-free
+for that — and neither create-time duplicate advisory can see the other, because
+the other item does not exist in that branch's tracker yet. `main` now holds two
+items for one problem and nothing ever flags it.
+
+`pm brief duplicates` is the post-merge sweep that closes that loop. It enumerates
+the merged tracker, asks the shared SDK `findSimilarItems` primitive (the same
+one `pm create` advisory mode uses, so the two agree exactly) for near-duplicate
+matches per candidate, and collapses bidirectional matches into unordered pairs
+ranked by score.
+
+```bash
+pm brief duplicates                                  # default threshold 0.6, all statuses
+pm brief duplicates --threshold 0.5                 # looser match cutoff (0..1 inclusive)
+pm brief duplicates --since 2026-07-25               # post-merge mode: only items created at/after this merge
+pm brief duplicates --status open,closed --limit 5  # filter candidates, cap pairs reported
+pm brief duplicates --format json                    # bare object, no envelope
+```
+
+For each pair it emits both ids, titles, statuses, types, the score rounded to
+three decimals, the SDK match reason, and an **advisory** remediation command
+(never executed by this command):
+- when exactly one of the pair is closed, it suggests linking the open item to
+  the closed one: `pm update <open-id> --dep id=<closed-id>,kind=related`;
+- when both are open (or both closed), it keeps the older item by `created_at` as
+  canonical and relates the newer to it.
+
+A clean tracker is a success, not an error — the command exits 0 with an explicit
+`No likely duplicate items found` line.
+
+Example output on a tracker where two agents each filed the same flaky test from
+different branches:
+
+```
+$ pm brief duplicates --threshold 0.3
+pm brief duplicates — 1 likely duplicate pair(s) (threshold 0.3, scanned 3)
+
+pm-p800|pm-plbh  score 0.5  title_token_jaccard
+  pm-p800: flaky auth test fails intermittently (Task, open)
+  pm-plbh: Fix flaky auth test (Task, open)
+  → pm update pm-p800 --dep id=pm-plbh,kind=related
+```
 
 ## TypeScript API
 

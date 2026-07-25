@@ -4,6 +4,7 @@
 
 ### Added
 
+- Add pm brief duplicates post-merge near-duplicate sweep ([pm-brief-58en](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-58en.toon))
 - pm brief diverge: pre-merge multi-agent item collision preview ([pm-brief-vj2y](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-vj2y.toon))
 
 ### Fixed
