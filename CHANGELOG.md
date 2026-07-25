@@ -10,6 +10,10 @@
 
 - CHANGELOG mislabels shipped 2026.7.23 work as Unreleased, leaving changelog:check red ([pm-brief-edam](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-edam.toon))
 
+### Other
+
+- Adopt --respect-item-release so release attribution matches the rest of the fleet ([pm-brief-ce55](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-ce55.toon))
+
 ## 2026.7.23 - 2026-07-23
 
 ### Added
