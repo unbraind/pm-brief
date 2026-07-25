@@ -1,0 +1,17 @@
+id: pm-brief-xd8z
+title: "Documented install command fails: pm install github.com/unbraind/pm-brief cannot resolve an entry file"
+description: ""
+type: Issue
+status: closed
+priority: 1
+tags: []
+created_at: "2026-07-25T23:47:54.931Z"
+updated_at: "2026-07-25T23:48:04.004Z"
+closed_at: "2026-07-25T23:48:04.004Z"
+author: claude
+notes[3]{created_at,author,text}:
+  "2026-07-25T23:47:55.582Z",claude,"REPRODUCED on pm 2026.7.25: `pm install github.com/unbraind/pm-brief --project` fails with `Extension entry file is missing at \"/tmp/pm-extension-source-XXXX/dist/index.js\"`. Root cause: `dist/` is in .gitignore and no build output is committed, and pm never runs a build when installing from a GitHub source - it copies the repository as-is."
+  "2026-07-25T23:47:56.128Z",claude,"FIX: document `pm install npm:pm-brief --project`, verified working end to end (ok: true, failed_count: 0, `pm brief --help` resolves). npm is the actual distribution channel for this package - the Daily Release workflow publishes it and `prepack` builds dist into the tarball - so the npm source needs no build output in git. Rejected the alternative of committing dist/: it puts build artifacts under version control, invites drift (pm-web already tracks 72 dist files against 30 produced by a clean build) and adds a conflict surface to the multi-agent merge workflow."
+  "2026-07-25T23:47:56.620Z",claude,"Bare-name installs do NOT reach npm: `pm install pm-brief --project` fails with `Local extension source does not exist`, because a bare target resolves only a local directory or a bundled alias. The `npm:` prefix is required."
+close_reason: "Documented pm install npm:pm-brief --project, verified working; GitHub source cannot work without committed build output"
+body: ""
