@@ -203,6 +203,26 @@ three decimals, the SDK match reason, and an **advisory** remediation command
 A clean tracker is a success, not an error — the command exits 0 with an explicit
 `No likely duplicate items found` line.
 
+**Choosing a threshold.** This matters more than it looks: the default `0.6` is
+deliberately conservative, and real cross-agent paraphrases often score *below*
+it. The worked example below scores `0.5` — two agents describing the same flaky
+test — so a default-threshold sweep would not report it. `title_token_jaccard`
+compares token sets, so paraphrases that agree on the problem but not the wording
+score lower than an intuition calibrated on "these are obviously the same bug"
+would suggest.
+
+Practical guidance:
+
+- `--threshold 0.4` for a genuine post-merge sweep, where a handful of false
+  pairs to eyeball costs far less than a duplicate that survives on `main`.
+- `0.6` (default) when you want only high-confidence pairs, e.g. in automation
+  that acts without a human reading the output.
+- Exact-title collisions surface as `reason: exact_title` and score `1.0`, so any
+  threshold catches them; the tuning only affects paraphrases.
+
+For comparison, create-time advisory mode uses `governance.duplicate_detection_threshold`,
+which defaults to `0.8` — this sweep is already the more sensitive of the two.
+
 Example output on a tracker where two agents each filed the same flaky test from
 different branches:
 
