@@ -46,7 +46,7 @@
 
 - brief: blocked_by edges doubled in blockers/risks (dependencies + blocked_by both parsed) ([pm-brief-o4s9](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-o4s9.toon))
 
-## 2026.7.12 - 2026-07-12
+## 2026.7.11-2 - 2026-07-11
 
 ### Other
 
