@@ -1950,8 +1950,14 @@ describe("brief duplicates", () => {
     ]);
     const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
     const parsed = JSON.parse(JSON.stringify(summary)) as DuplicateSweepSummary;
-    // bare object: top-level keys are pairs/count/threshold/scanned, no envelope
-    assert.deepEqual(Object.keys(parsed).sort(), ["count", "generatedAt", "pairs", "scanned", "threshold"]);
+    // bare object: no envelope. `total`/`truncated` let a caller tell "1 pair found"
+    // apart from "1 of 40 shown", matching brief since / brief diverge.
+    assert.deepEqual(
+      Object.keys(parsed).sort(),
+      ["count", "generatedAt", "pairs", "scanned", "threshold", "total", "truncated"],
+    );
+    assert.equal(parsed.total, 1);
+    assert.equal(parsed.truncated, false);
     assert.equal(parsed.count, 1);
     assert.equal(parsed.threshold, 0.6);
     assert.equal(parsed.scanned, 2);
@@ -2020,6 +2026,90 @@ describe("brief duplicates", () => {
     const dup = commands.find((command) => command.name === "brief duplicates");
     const run = dup!.run as (ctx: Record<string, unknown>) => Promise<unknown>;
     await assert.rejects(() => run({ args: [], options: { since: "7d" }, pm_root: "/nonexistent-tracker" }), /ISO 8601 timestamp/);
+  });
+
+  test("buildDuplicateSweep reports truncation instead of hiding it", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "Shared title", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "Shared title", status: "open", createdAt: "2026-07-02T00:00:00Z" }),
+      dupItem("pm-c", { title: "Shared title", status: "open", createdAt: "2026-07-03T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.9, "exact_title"), match("pm-c", 0.8, "exact_title")]],
+      ["pm-b", [match("pm-c", 0.7, "exact_title")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6, limit: 1 });
+    assert.equal(summary.count, 1, "only one pair is shown");
+    assert.equal(summary.total, 3, "but three were found");
+    assert.equal(summary.truncated, true, "and the caller can tell");
+  });
+
+  test("buildDuplicateSweep rejects a non-positive limit instead of reporting a clean tracker", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "A", status: "open", createdAt: "2026-07-02T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([["pm-a", [match("pm-b", 0.9, "exact_title")]]]);
+    for (const limit of [0, -1, 1.5]) {
+      assert.throws(
+        () => buildDuplicateSweep(items, matches, { threshold: 0.6, limit }),
+        /limit must be a positive integer/,
+        `limit ${limit} must be rejected, not silently reported as no duplicates`,
+      );
+    }
+  });
+
+  test("selectDuplicateCandidates throws on an unparseable since instead of keeping everything", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+    ];
+    // Date.parse yields NaN and `created < NaN` is false, so a naive guard would let
+    // every item through and silently widen the sweep. This is the exported path a
+    // direct SDK caller uses, so it must fail loudly.
+    for (const bad of ["7d", "not-a-date", "totally bogus"]) {
+      assert.throws(
+        () => selectDuplicateCandidates(items, { since: bad }),
+        /since must be an ISO 8601 timestamp/,
+        `since ${JSON.stringify(bad)} must be rejected`,
+      );
+    }
+  });
+
+  test("selectDuplicateCandidates drops a since candidate that has no created_at", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-10T00:00:00Z" }),
+      dupItem("pm-b", { title: "B", status: "open" }),
+    ];
+    const kept = selectDuplicateCandidates(items, { since: "2026-07-01T00:00:00Z" });
+    assert.deepEqual(kept.map((i) => i.id), ["pm-a"], "an item with no created_at cannot be proven in-window");
+  });
+
+  test("collapseDuplicatePairs drops a pair whose matched id is absent from the loaded items", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+    ];
+    const itemsById = new Map(items.map((i) => [i.id, i]));
+    // The SDK returned a match for an id this sweep never loaded; it must be skipped
+    // rather than producing a pair with fabricated title/status/type.
+    const matches = new Map<string, SimilarItemMatch[]>([["pm-a", [match("pm-ghost", 0.95, "exact_title")]]]);
+    assert.deepEqual(collapseDuplicatePairs(items, matches, itemsById), []);
+  });
+
+  test("buildDuplicateSweep uses a caller-supplied candidate list without re-filtering", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "A", status: "closed", createdAt: "2026-07-02T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([["pm-a", [match("pm-b", 0.9, "exact_title")]]]);
+    // `statuses` would exclude pm-b, but an explicit candidate list is authoritative:
+    // one source of truth for what was scanned.
+    const summary = buildDuplicateSweep(items, matches, {
+      threshold: 0.6,
+      statuses: ["open"],
+      candidates: items,
+    });
+    assert.equal(summary.scanned, 2);
+    assert.equal(summary.count, 1);
   });
 
   test("command run rejects an invalid --format", async () => {

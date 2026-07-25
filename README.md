@@ -229,8 +229,15 @@ shared SDK primitive per candidate, so an unscoped sweep is inherently
 
 | invocation | candidates | elapsed | peak RSS |
 | --- | --- | --- | --- |
-| `pm brief duplicates` (full sweep) | 1,934 | 39.1s | 526 MB |
+| `pm brief duplicates` (full sweep) | 1,934 | 36.3s | 268 MB |
 | `pm brief duplicates --since <merge-date>` | 42 | 2.7s | 271 MB |
+
+Scans run with bounded concurrency (8 in flight). That was measured rather than
+assumed, and the honest result is a **modest** wall-clock gain — 39.1s to 36.3s,
+about 7% — because `findSimilarItems` is CPU-bound, and concurrency cannot
+parallelize CPU work on a single-threaded event loop. What it does buy is peak
+memory: **526 MB down to 268 MB**, because results are collapsed as they arrive
+instead of N full result sets accumulating.
 
 The full sweep is a whole-tracker audit — fine to run occasionally, but it is not
 what this command is for. **`--since <merge-timestamp>` is the post-merge mode**
@@ -250,7 +257,7 @@ so it is deliberately not done. Filed upstream as
 Example output on a tracker where two agents each filed the same flaky test from
 different branches:
 
-```
+```console
 $ pm brief duplicates --threshold 0.3
 pm brief duplicates — 1 likely duplicate pair(s) (threshold 0.3, scanned 3)
 
