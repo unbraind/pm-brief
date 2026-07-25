@@ -13,6 +13,11 @@ an agent needs a low-token handoff instead of a full project dump.
 pm install npm:pm-brief --project
 ```
 
+> The `npm:` prefix is required. A bare `pm install pm-brief` resolves only a local
+> directory or a bundled alias, never the registry, and a
+> `github.com/unbraind/pm-brief` source cannot work either — pm copies a GitHub
+> source as-is without building it, and this repository does not commit `dist/`.
+
 ## Usage
 
 ```bash
