@@ -41,6 +41,7 @@ pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 - `pm brief stale` returns stale open or in-progress items.
 - `pm brief since <checkpoint>` renders a delta brief of what changed since a checkpoint.
 - `pm brief diverge [base]` previews pm item collisions between two branches **before** merging.
+- `pm brief duplicates` sweeps the merged tracker for near-duplicate items the create-time advisory cannot see across branches.
 
 ### Ranking and Budget Flags
 
@@ -167,6 +168,104 @@ recommended merge command becomes `git merge --allow-unrelated-histories <base>`
 Each report ends with an ordered `Recommended next steps` block containing only
 the commands that apply, including `pm history <id> --verify` per high-severity
 item and a `pm brief since <merge-base-date>` for post-merge re-orientation.
+
+### Post-merge duplicate sweep (`pm brief duplicates`)
+
+`pm brief diverge` closes the *pre*-merge gap. There is still one hole it cannot
+reach: two agents who each create a **new** item on their own branch both land
+cleanly on `main` — the field-aware merge driver is deliberately conflict-free
+for that — and neither create-time duplicate advisory can see the other, because
+the other item does not exist in that branch's tracker yet. `main` now holds two
+items for one problem and nothing ever flags it.
+
+`pm brief duplicates` is the post-merge sweep that closes that loop. It enumerates
+the merged tracker, asks the shared SDK `findSimilarItems` primitive (the same
+one `pm create` advisory mode uses, so the two agree exactly) for near-duplicate
+matches per candidate, and collapses bidirectional matches into unordered pairs
+ranked by score.
+
+```bash
+pm brief duplicates                                  # default threshold 0.6, all statuses
+pm brief duplicates --threshold 0.5                 # looser match cutoff (0..1 inclusive)
+pm brief duplicates --since 2026-07-25               # post-merge mode: only items created at/after this merge
+pm brief duplicates --status open,closed --limit 5  # filter candidates, cap pairs reported
+pm brief duplicates --format json                    # bare object, no envelope
+```
+
+For each pair it emits both ids, titles, statuses, types, the score rounded to
+three decimals, the SDK match reason, and an **advisory** remediation command
+(never executed by this command):
+- when exactly one of the pair is closed, it suggests linking the open item to
+  the closed one: `pm update <open-id> --dep id=<closed-id>,kind=related`;
+- when both are open (or both closed), it keeps the older item by `created_at` as
+  canonical and relates the newer to it.
+
+A clean tracker is a success, not an error — the command exits 0 with an explicit
+`No likely duplicate items found` line.
+
+**Choosing a threshold.** This matters more than it looks: the default `0.6` is
+deliberately conservative, and real cross-agent paraphrases often score *below*
+it. The worked example below scores `0.5` — two agents describing the same flaky
+test — so a default-threshold sweep would not report it. `title_token_jaccard`
+compares token sets, so paraphrases that agree on the problem but not the wording
+score lower than an intuition calibrated on "these are obviously the same bug"
+would suggest.
+
+Practical guidance:
+
+- `--threshold 0.4` for a genuine post-merge sweep, where a handful of false
+  pairs to eyeball costs far less than a duplicate that survives on `main`.
+- `0.6` (default) when you want only high-confidence pairs, e.g. in automation
+  that acts without a human reading the output.
+- Exact-title collisions surface as `reason: exact_title` and score `1.0`, so any
+  threshold catches them; the tuning only affects paraphrases.
+
+For comparison, create-time advisory mode uses `governance.duplicate_detection_threshold`,
+which defaults to `0.8` — this sweep is already the more sensitive of the two.
+
+**Cost, and why `--since` is the mode you usually want.** Scoring runs through the
+shared SDK primitive per candidate, so an unscoped sweep is inherently
+`candidates x tracker-scan`. Measured on a real 1,934-item tracker (pm-cli's own):
+
+| invocation | candidates | elapsed | peak RSS |
+| --- | --- | --- | --- |
+| `pm brief duplicates` (full sweep) | 1,934 | 36.3s | 268 MB |
+| `pm brief duplicates --since <merge-date>` | 42 | 2.7s | 271 MB |
+
+Scans run with bounded concurrency (8 in flight). That was measured rather than
+assumed, and the honest result is a **modest** wall-clock gain — 39.1s to 36.3s,
+about 7% — because `findSimilarItems` is CPU-bound, and concurrency cannot
+parallelize CPU work on a single-threaded event loop. What it does buy is peak
+memory: **526 MB down to 268 MB**, because results are collapsed as they arrive
+instead of N full result sets accumulating.
+
+The full sweep is a whole-tracker audit — fine to run occasionally, but it is not
+what this command is for. **`--since <merge-timestamp>` is the post-merge mode**
+and the one that keeps the cost proportional to what the merge actually
+introduced. Trackers of a few hundred items complete quickly either way.
+
+The cost is not avoidable from outside the SDK today: `findSimilarItems` is a
+per-candidate query with no batch entry point, and the exported
+`scoreItemSimilarity` re-tokenizes both titles on every call, so precomputing
+tokens and pre-filtering on `jaccardSimilarity` would silently drop `issue_code`
+matches (two titles sharing an issue code score ~0.99 while their token overlap
+can sit well below any useful threshold). Reimplementing that signal locally would
+break the exact agreement with create-time advisory that this command depends on,
+so it is deliberately not done. Filed upstream as
+[pm-cli#709](https://github.com/unbraind/pm-cli/issues/709).
+
+Example output on a tracker where two agents each filed the same flaky test from
+different branches:
+
+```console
+$ pm brief duplicates --threshold 0.3
+pm brief duplicates — 1 likely duplicate pair(s) (threshold 0.3, scanned 3)
+
+pm-p800|pm-plbh  score 0.5  title_token_jaccard
+  pm-p800: flaky auth test fails intermittently (Task, open)
+  pm-plbh: Fix flaky auth test (Task, open)
+  → pm update pm-p800 --dep id=pm-plbh,kind=related
+```
 
 ## TypeScript API
 

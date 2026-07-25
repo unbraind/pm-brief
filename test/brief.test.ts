@@ -35,9 +35,21 @@ import extension, {
   selectNextItems,
   summarizeMomentum,
   summarizeRisks,
+  buildDuplicateSweep,
+  collapseDuplicatePairs,
+  duplicateRemediationCommand,
+  parseDuplicateThreshold,
+  parseSinceTimestamp,
+  renderMarkdownDuplicates,
+  renderTextDuplicates,
+  selectDuplicateCandidates,
   type DeltaActivityEntry,
   type DivergeEvent,
   type PmItem,
+  type DuplicatePair,
+  type DuplicatePairItem,
+  type DuplicateSweepSummary,
+  type SimilarItemMatch,
 } from "../dist/index.js";
 
 const items: PmItem[] = [
@@ -83,7 +95,7 @@ const items: PmItem[] = [
 test("extension registers brief commands", () => {
   const commands: Array<Record<string, unknown>> = [];
   extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge"]);
+  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates"]);
   const nextFlags = commands.find((command) => command.name === "brief next")?.flags as Array<Record<string, unknown>>;
   assert.ok(nextFlags.some((flag) => flag.long === "--explain"));
   assert.ok(nextFlags.some((flag) => flag.long === "--confidence"));
@@ -1728,5 +1740,383 @@ describe("brief diverge / review round 2 hardening", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief duplicates — post-merge near-duplicate sweep
+// ---------------------------------------------------------------------------
+
+/** Helper: build a synthetic SimilarItemMatch with sane defaults. */
+function match(id: string, score: number, reason: SimilarItemMatch["reason"] = "title_token_jaccard", title = id): SimilarItemMatch {
+  return { id, title, status: "open", type: "Task", score, reason };
+}
+
+/** Helper: build a PmItem with the fields the sweep needs. */
+function dupItem(id: string, opts: { title?: string; status?: string; type?: string; createdAt?: string } = {}): PmItem {
+  return {
+    id,
+    title: opts.title ?? id,
+    type: opts.type ?? "Task",
+    status: opts.status ?? "open",
+    created_at: opts.createdAt,
+  };
+}
+
+describe("brief duplicates", () => {
+  test("selectDuplicateCandidates keeps all statuses by default and applies --status and --since filters", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { status: "open", createdAt: "2026-07-20T00:00:00Z" }),
+      dupItem("pm-b", { status: "closed", createdAt: "2026-07-18T00:00:00Z" }),
+      dupItem("pm-c", { status: "in_progress", createdAt: "2026-07-25T00:00:00Z" }),
+    ];
+    // default: all statuses
+    assert.equal(selectDuplicateCandidates(items).length, 3);
+    // status filter
+    assert.equal(selectDuplicateCandidates(items, { statuses: ["open"] }).map((i) => i.id).join(","), "pm-a");
+    // since filter: only items at or after the timestamp
+    assert.equal(selectDuplicateCandidates(items, { since: "2026-07-25T00:00:00Z" }).map((i) => i.id).join(","), "pm-c");
+    // since + status combined
+    assert.equal(selectDuplicateCandidates(items, { statuses: ["open", "in_progress"], since: "2026-07-20T00:00:00Z" }).length, 2);
+  });
+
+  test("no-duplicates case yields an empty summary and a clean text line", () => {
+    const items: PmItem[] = [dupItem("pm-a"), dupItem("pm-b")];
+    const summary = buildDuplicateSweep(items, new Map(), { threshold: 0.6 });
+    assert.equal(summary.count, 0);
+    assert.equal(summary.pairs.length, 0);
+    assert.equal(summary.scanned, 2);
+    assert.match(renderTextDuplicates(summary), /No likely duplicate items found/);
+    assert.match(renderMarkdownDuplicates(summary), /_No likely duplicate items found._/);
+  });
+
+  test("exact-title pair is reported with the exact_title reason", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "Fix flaky auth test" }),
+      dupItem("pm-b", { title: "Fix flaky auth test" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 1, "exact_title")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
+    assert.equal(summary.count, 1);
+    assert.equal(summary.pairs[0].reason, "exact_title");
+    assert.equal(summary.pairs[0].score, 1);
+  });
+
+  test("token-jaccard pair is reported with the title_token_jaccard reason", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "Fix flaky auth test" }),
+      dupItem("pm-b", { title: "flaky auth test fails intermittently" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.565, "title_token_jaccard")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
+    assert.equal(summary.count, 1);
+    assert.equal(summary.pairs[0].reason, "title_token_jaccard");
+    assert.equal(summary.pairs[0].score, 0.565);
+  });
+
+  test("pair collapsing: A~B and B~A collapse to one pair keyed on the sorted id pair", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "Fix flaky auth test" }),
+      dupItem("pm-b", { title: "Fix flaky auth test" }),
+    ];
+    // Both directions report a match; the lower score should be overridden by the higher.
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.5, "title_token_jaccard")]],
+      ["pm-b", [match("pm-a", 0.9, "title_token_jaccard")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
+    assert.equal(summary.count, 1, "A~B and B~A collapse to a single pair");
+    assert.equal(summary.pairs[0].id, "pm-a|pm-b");
+    assert.equal(summary.pairs[0].score, 0.9, "the highest score is kept");
+  });
+
+  test("ranking is by score descending then pair id for stable output", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "x" }),
+      dupItem("pm-b", { title: "x" }),
+      dupItem("pm-c", { title: "y" }),
+      dupItem("pm-d", { title: "y" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.7)]],
+      ["pm-c", [match("pm-d", 0.9)]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
+    assert.deepEqual(
+      summary.pairs.map((p) => p.id),
+      ["pm-c|pm-d", "pm-a|pm-b"],
+      "higher score first",
+    );
+    // equal scores break ties by pair id ascending
+    const even = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.8)]],
+      ["pm-c", [match("pm-d", 0.8)]],
+    ]);
+    const tied = buildDuplicateSweep(items, even, { threshold: 0.6 });
+    assert.deepEqual(tied.pairs.map((p) => p.id), ["pm-a|pm-b", "pm-c|pm-d"]);
+  });
+
+  test("remediation: both open relates the newer item to the older (by created_at)", () => {
+    const older: DuplicatePairItem = { id: "pm-a", title: "A", status: "open", type: "Task", createdAt: "2026-07-01T00:00:00Z" };
+    const newer: DuplicatePairItem = { id: "pm-b", title: "B", status: "open", type: "Task", createdAt: "2026-07-10T00:00:00Z" };
+    assert.equal(
+      duplicateRemediationCommand(older, newer),
+      "pm update pm-b --dep id=pm-a,kind=related",
+    );
+    // argument order must not matter (unordered)
+    assert.equal(
+      duplicateRemediationCommand(newer, older),
+      "pm update pm-b --dep id=pm-a,kind=related",
+    );
+  });
+
+  test("remediation: exactly one closed links the open item to the closed one", () => {
+    const open: DuplicatePairItem = { id: "pm-a", title: "A", status: "open", type: "Task", createdAt: "2026-07-01T00:00:00Z" };
+    const closed: DuplicatePairItem = { id: "pm-b", title: "B", status: "closed", type: "Task", createdAt: "2026-07-10T00:00:00Z" };
+    assert.equal(
+      duplicateRemediationCommand(open, closed),
+      "pm update pm-a --dep id=pm-b,kind=related",
+    );
+    // swapped argument order keeps the same command (open relates to closed)
+    assert.equal(
+      duplicateRemediationCommand(closed, open),
+      "pm update pm-a --dep id=pm-b,kind=related",
+    );
+  });
+
+  test("--limit truncates the ranked pair list", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "x" }),
+      dupItem("pm-b", { title: "x" }),
+      dupItem("pm-c", { title: "y" }),
+      dupItem("pm-d", { title: "y" }),
+      dupItem("pm-e", { title: "z" }),
+      dupItem("pm-f", { title: "z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.9)]],
+      ["pm-c", [match("pm-d", 0.8)]],
+      ["pm-e", [match("pm-f", 0.7)]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6, limit: 2 });
+    assert.equal(summary.count, 2);
+    assert.deepEqual(summary.pairs.map((p) => p.id), ["pm-a|pm-b", "pm-c|pm-d"]);
+  });
+
+  test("text format renders both ids, titles, statuses, types, score, reason, and remediation", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "Fix flaky auth test", status: "open", type: "Task", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "Fix flaky auth test", status: "in_progress", type: "Issue", createdAt: "2026-07-10T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 1, "exact_title")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
+    const text = renderTextDuplicates(summary);
+    assert.match(text, /pm-a\|pm-b  score 1  exact_title/);
+    assert.match(text, /pm-a: Fix flaky auth test \(Task, open\)/);
+    assert.match(text, /pm-b: Fix flaky auth test \(Issue, in_progress\)/);
+    assert.match(text, /→ pm update pm-b --dep id=pm-a,kind=related/);
+  });
+
+  test("markdown format renders headers, score, reason, and remediation", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open" }),
+      dupItem("pm-b", { title: "A", status: "closed" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.65, "title_token_jaccard")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
+    const md = renderMarkdownDuplicates(summary);
+    assert.match(md, /# pm brief duplicates/);
+    assert.match(md, /## pm-a\|pm-b — score 0\.65 \(title_token_jaccard\)/);
+    assert.match(md, /`pm-a` A \(Task, open\)/);
+    assert.match(md, /`pm-b` A \(Task, closed\)/);
+    assert.match(md, /\*\*Suggested:\*\* `pm update pm-a --dep id=pm-b,kind=related`/);
+  });
+
+  test("json output is a bare object (not wrapped) with the expected shape", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "A", status: "open", createdAt: "2026-07-10T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.7, "title_token_jaccard")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6 });
+    const parsed = JSON.parse(JSON.stringify(summary)) as DuplicateSweepSummary;
+    // bare object: no envelope. `total`/`truncated` let a caller tell "1 pair found"
+    // apart from "1 of 40 shown", matching brief since / brief diverge.
+    assert.deepEqual(
+      Object.keys(parsed).sort(),
+      ["count", "generatedAt", "pairs", "scanned", "threshold", "total", "truncated"],
+    );
+    assert.equal(parsed.total, 1);
+    assert.equal(parsed.truncated, false);
+    assert.equal(parsed.count, 1);
+    assert.equal(parsed.threshold, 0.6);
+    assert.equal(parsed.scanned, 2);
+    const pair = parsed.pairs[0] as DuplicatePair;
+    assert.equal(pair.id, "pm-a|pm-b");
+    assert.equal(pair.score, 0.7);
+    assert.equal(pair.reason, "title_token_jaccard");
+    assert.equal(pair.items.length, 2);
+    assert.equal(pair.items[0].id, "pm-a");
+    assert.equal(pair.items[1].id, "pm-b");
+    assert.match(pair.remediation, /pm update pm-b --dep id=pm-a,kind=related/);
+  });
+
+  test("score is rounded to 3 decimals", () => {
+    const items: PmItem[] = [dupItem("pm-a"), dupItem("pm-b")];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.5652173913043478, "title_token_jaccard")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.3 });
+    assert.equal(summary.pairs[0].score, 0.565);
+  });
+
+  test("parseDuplicateThreshold rejects below 0, above 1, and non-numeric values", () => {
+    assert.equal(parseDuplicateThreshold(undefined, 0.6), 0.6);
+    assert.equal(parseDuplicateThreshold("0.5", 0.6), 0.5);
+    assert.equal(parseDuplicateThreshold("1", 0.6), 1);
+    assert.equal(parseDuplicateThreshold("0", 0.6), 0);
+    assert.throws(() => parseDuplicateThreshold("-0.1", 0.6), /between 0 and 1/);
+    assert.throws(() => parseDuplicateThreshold("1.1", 0.6), /between 0 and 1/);
+    assert.throws(() => parseDuplicateThreshold("abc", 0.6), /between 0 and 1/);
+  });
+
+  test("parseSinceTimestamp accepts ISO dates and full timestamps, rejects invalid formats", () => {
+    assert.equal(parseSinceTimestamp("2026-07-20"), "2026-07-20");
+    assert.equal(parseSinceTimestamp("2026-07-20T00:00:00Z"), "2026-07-20T00:00:00Z");
+    assert.equal(parseSinceTimestamp("2026-07-20T00:00:00+02:00"), "2026-07-20T00:00:00+02:00");
+    assert.throws(() => parseSinceTimestamp("7d"), /ISO 8601 timestamp/);
+    assert.throws(() => parseSinceTimestamp("not-a-date"), /ISO 8601 timestamp/);
+    assert.throws(() => parseSinceTimestamp("2026-13-40"), /ISO 8601 timestamp/);
+  });
+
+  test("brief duplicates command is registered with the expected flags", () => {
+    const commands: Array<Record<string, unknown>> = [];
+    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
+    const dup = commands.find((command) => command.name === "brief duplicates");
+    assert.ok(dup, "brief duplicates command should be registered");
+    const flags = (dup!.flags as Array<{ long?: string }>).map((flag) => flag.long);
+    for (const expected of ["--threshold", "--limit", "--status", "--since", "--format", "--output"]) {
+      assert.ok(flags.includes(expected), `flag ${expected} should be registered`);
+    }
+  });
+
+  test("command run rejects an out-of-range --threshold before touching the tracker", async () => {
+    const commands: Array<Record<string, unknown>> = [];
+    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
+    const dup = commands.find((command) => command.name === "brief duplicates");
+    const run = dup!.run as (ctx: Record<string, unknown>) => Promise<unknown>;
+    await assert.rejects(() => run({ args: [], options: { threshold: "1.5" }, pm_root: "/nonexistent-tracker" }), /between 0 and 1/);
+    await assert.rejects(() => run({ args: [], options: { threshold: "-0.2" }, pm_root: "/nonexistent-tracker" }), /between 0 and 1/);
+    await assert.rejects(() => run({ args: [], options: { threshold: "abc" }, pm_root: "/nonexistent-tracker" }), /between 0 and 1/);
+  });
+
+  test("command run rejects a non-ISO --since before touching the tracker", async () => {
+    const commands: Array<Record<string, unknown>> = [];
+    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
+    const dup = commands.find((command) => command.name === "brief duplicates");
+    const run = dup!.run as (ctx: Record<string, unknown>) => Promise<unknown>;
+    await assert.rejects(() => run({ args: [], options: { since: "7d" }, pm_root: "/nonexistent-tracker" }), /ISO 8601 timestamp/);
+  });
+
+  test("buildDuplicateSweep reports truncation instead of hiding it", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "Shared title", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "Shared title", status: "open", createdAt: "2026-07-02T00:00:00Z" }),
+      dupItem("pm-c", { title: "Shared title", status: "open", createdAt: "2026-07-03T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-b", 0.9, "exact_title"), match("pm-c", 0.8, "exact_title")]],
+      ["pm-b", [match("pm-c", 0.7, "exact_title")]],
+    ]);
+    const summary = buildDuplicateSweep(items, matches, { threshold: 0.6, limit: 1 });
+    assert.equal(summary.count, 1, "only one pair is shown");
+    assert.equal(summary.total, 3, "but three were found");
+    assert.equal(summary.truncated, true, "and the caller can tell");
+  });
+
+  test("buildDuplicateSweep rejects a non-positive limit instead of reporting a clean tracker", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "A", status: "open", createdAt: "2026-07-02T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([["pm-a", [match("pm-b", 0.9, "exact_title")]]]);
+    for (const limit of [0, -1, 1.5]) {
+      assert.throws(
+        () => buildDuplicateSweep(items, matches, { threshold: 0.6, limit }),
+        /limit must be a positive integer/,
+        `limit ${limit} must be rejected, not silently reported as no duplicates`,
+      );
+    }
+  });
+
+  test("selectDuplicateCandidates throws on an unparseable since instead of keeping everything", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+    ];
+    // Date.parse yields NaN and `created < NaN` is false, so a naive guard would let
+    // every item through and silently widen the sweep. This is the exported path a
+    // direct SDK caller uses, so it must fail loudly.
+    for (const bad of ["7d", "not-a-date", "totally bogus"]) {
+      assert.throws(
+        () => selectDuplicateCandidates(items, { since: bad }),
+        /since must be an ISO 8601 timestamp/,
+        `since ${JSON.stringify(bad)} must be rejected`,
+      );
+    }
+  });
+
+  test("selectDuplicateCandidates drops a since candidate that has no created_at", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-10T00:00:00Z" }),
+      dupItem("pm-b", { title: "B", status: "open" }),
+    ];
+    const kept = selectDuplicateCandidates(items, { since: "2026-07-01T00:00:00Z" });
+    assert.deepEqual(kept.map((i) => i.id), ["pm-a"], "an item with no created_at cannot be proven in-window");
+  });
+
+  test("collapseDuplicatePairs drops a pair whose matched id is absent from the loaded items", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+    ];
+    const itemsById = new Map(items.map((i) => [i.id, i]));
+    // The SDK returned a match for an id this sweep never loaded; it must be skipped
+    // rather than producing a pair with fabricated title/status/type.
+    const matches = new Map<string, SimilarItemMatch[]>([["pm-a", [match("pm-ghost", 0.95, "exact_title")]]]);
+    assert.deepEqual(collapseDuplicatePairs(items, matches, itemsById), []);
+  });
+
+  test("buildDuplicateSweep uses a caller-supplied candidate list without re-filtering", () => {
+    const items: PmItem[] = [
+      dupItem("pm-a", { title: "A", status: "open", createdAt: "2026-07-01T00:00:00Z" }),
+      dupItem("pm-b", { title: "A", status: "closed", createdAt: "2026-07-02T00:00:00Z" }),
+    ];
+    const matches = new Map<string, SimilarItemMatch[]>([["pm-a", [match("pm-b", 0.9, "exact_title")]]]);
+    // `statuses` would exclude pm-b, but an explicit candidate list is authoritative:
+    // one source of truth for what was scanned.
+    const summary = buildDuplicateSweep(items, matches, {
+      threshold: 0.6,
+      statuses: ["open"],
+      candidates: items,
+    });
+    assert.equal(summary.scanned, 2);
+    assert.equal(summary.count, 1);
+  });
+
+  test("command run rejects an invalid --format", async () => {
+    const commands: Array<Record<string, unknown>> = [];
+    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
+    const dup = commands.find((command) => command.name === "brief duplicates");
+    const run = dup!.run as (ctx: Record<string, unknown>) => Promise<unknown>;
+    await assert.rejects(() => run({ args: [], options: { format: "yaml" }, pm_root: "/nonexistent-tracker" }), /--format must be text, json, or markdown/);
   });
 });
