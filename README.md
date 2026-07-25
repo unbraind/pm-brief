@@ -223,6 +223,30 @@ Practical guidance:
 For comparison, create-time advisory mode uses `governance.duplicate_detection_threshold`,
 which defaults to `0.8` — this sweep is already the more sensitive of the two.
 
+**Cost, and why `--since` is the mode you usually want.** Scoring runs through the
+shared SDK primitive per candidate, so an unscoped sweep is inherently
+`candidates x tracker-scan`. Measured on a real 1,934-item tracker (pm-cli's own):
+
+| invocation | candidates | elapsed | peak RSS |
+| --- | --- | --- | --- |
+| `pm brief duplicates` (full sweep) | 1,934 | 39.1s | 526 MB |
+| `pm brief duplicates --since <merge-date>` | 42 | 2.7s | 271 MB |
+
+The full sweep is a whole-tracker audit — fine to run occasionally, but it is not
+what this command is for. **`--since <merge-timestamp>` is the post-merge mode**
+and the one that keeps the cost proportional to what the merge actually
+introduced. Trackers of a few hundred items complete quickly either way.
+
+The cost is not avoidable from outside the SDK today: `findSimilarItems` is a
+per-candidate query with no batch entry point, and the exported
+`scoreItemSimilarity` re-tokenizes both titles on every call, so precomputing
+tokens and pre-filtering on `jaccardSimilarity` would silently drop `issue_code`
+matches (two titles sharing an issue code score ~0.99 while their token overlap
+can sit well below any useful threshold). Reimplementing that signal locally would
+break the exact agreement with create-time advisory that this command depends on,
+so it is deliberately not done. Filed upstream as
+[pm-cli#709](https://github.com/unbraind/pm-cli/issues/709).
+
 Example output on a tracker where two agents each filed the same flaky test from
 different branches:
 

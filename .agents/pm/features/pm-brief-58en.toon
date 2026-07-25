@@ -6,14 +6,15 @@ status: closed
 priority: 2
 tags: []
 created_at: "2026-07-25T11:53:01.603Z"
-updated_at: "2026-07-25T11:54:49.176Z"
+updated_at: "2026-07-25T12:12:29.209Z"
 closed_at: "2026-07-25T11:54:49.171Z"
 author: pi-agent
 resolution: Implemented pm brief duplicates post-merge near-duplicate sweep using the shared SDK findSimilarItems primitive; registered the command with --threshold/--limit/--status/--since/--format flags; added 19 tests (115 pass/0 fail); bumped pm-cli to 2026.7.25; updated README.
 expected_result: "brief duplicates command registered, typecheck clean, npm test green, real-data proof on throwaway + repo tracker, no false positives, README updated, lockfile committed."
 actual_result: "All gates pass: typecheck clean, 115/0 tests, real throwaway workspace reports the one near-duplicate pair and not the unrelated item, repo tracker reports 5 pairs at threshold 0.3. Bumped to ^2026.7.25 in deps+devDeps, lockfile regenerated."
-notes[2]{created_at,author,text}:
+notes[3]{created_at,author,text}:
   "2026-07-25T11:53:43.728Z",pi-agent,"Real-data proof on throwaway workspace /tmp/dup-proof: created pm-plbh 'Fix flaky auth test' (agent-a), pm-p800 'flaky auth test fails intermittently' (agent-b), pm-yuvi 'Refactor the report renderer' (agent-c, unrelated). At default threshold 0.6: 'No likely duplicate items found (threshold 0.6, scanned 3).' exit 0. At threshold 0.3: found 1 pair pm-p800|pm-plbh score 0.5 title_token_jaccard with remediation 'pm update pm-p800 --dep id=pm-plbh,kind=related'. Unrelated pm-yuvi NOT reported (no false positive). JSON output is a bare object with pairs/count/threshold/scanned keys."
   "2026-07-25T11:53:51.935Z",pi-agent,"Also ran against this repo's own .agents/pm tracker (29 items): pm brief duplicates --threshold 0.3 found 5 likely duplicate pairs (all title_token_jaccard, scores 0.364/0.333/0.308/0.3/0.3), all both-closed so remediation relates newer to older. npm test: 115 pass / 0 fail (96 pre-existing + 19 new). npm run typecheck clean. Bumped @unbrained/pm-cli to ^2026.7.25 in deps+devDeps and ran npm install --package-lock-only. Used SDK findSimilarItems for all scoring; no custom similarity/tokenizer."
+  "2026-07-25T12:12:29.208Z",claude-code,"Orchestrator performance testing on a real 1,934-item tracker (copy of pm-cli's own .agents/pm, never mutated): unscoped full sweep = 39.1s / 526 MB peak RSS; --since scoped to 42 candidates = 2.7s / 271 MB. Confirmed the cost is inherent to the per-candidate SDK query (source=metadata_fallback re-reads tracker metadata on each of N calls). Measured the obvious alternative too: reading once and scoring 1,869,211 pairs in memory with the exported scoreItemSimilarity takes 29.1s because it re-tokenizes both titles per call. A tokenize-once + jaccard pre-filter is NOT sound: issue_code pairs score 0.99 with low token overlap (verified on two real pairs in that tracker) so a pre-filter silently drops the duplicates that matter most, and the issue-code extractor is not exported. Documented the cost table in README and filed upstream pm-cli#709 requesting a batch entry point / pre-tokenized scoring variant / exported issue-code extractor."
 close_reason: Implemented pm brief duplicates post-merge near-duplicate sweep using the shared SDK findSimilarItems primitive; registered the command with --threshold/--limit/--status/--since/--format flags; added 19 tests (115 pass/0 fail); bumped pm-cli to 2026.7.25; updated README.
 body: ""
