@@ -1,0 +1,25 @@
+id: pm-brief-gtiy
+title: Enforce genuine 100/100/100/100 source coverage in the release gate
+description: "The built-in Node coverage baseline for dist/index.js is 82.84% lines, 74.67% branches, and 92.19% functions. Add meaningful unit, integration, functional, and real-CLI tests for every reachable source path; exclude only generated or non-source artifacts with documented justification. Enforce 100% lines, branches, functions, and statements in release:check without ignore pragmas, artificial calls, or coverage manipulation."
+type: Issue
+status: open
+priority: 1
+tags: []
+created_at: "2026-07-26T13:52:29.218Z"
+updated_at: "2026-07-26T13:52:57.476Z"
+author: codex
+estimated_minutes: 720
+acceptance_criteria: "A deterministic coverage command reports 100% lines, branches, functions, and statements for all source files; release:check fails when any source coverage dimension drops below 100%; Tests exercise observable behavior and real failure paths without coverage-only branches, mocks that bypass production behavior, ignore pragmas, or generated-code inflation; Coverage execution uses the project-local latest pm CLI and is stable in npm and bun workflows"
+risk: high
+severity: high
+component: testing
+dependencies[1]{id,kind,created_at,author,source_kind}:
+  pm-brief-q325,related,"2026-07-26T13:52:29.218Z",codex,null
+notes[1]{created_at,author,text}:
+  "2026-07-26T13:52:41.808Z",codex,"Baseline measured 2026-07-26 with Node built-in coverage against the latest project-local pm CLI: dist/index.js 82.84% lines, 74.67% branches, 92.19% functions. The aggregate report is lower because it also observes a temporary installed extension copy; the source file row is the actionable baseline."
+files[2]{path,scope,note}:
+  index.ts,project,Source coverage target
+  test/brief.test.ts,project,Coverage test expansion
+tests[1]{command,path,scope,timeout_seconds}:
+  "npm run build && npm run build:test && node --experimental-test-coverage --test dist-test/*.js",test/brief.test.ts,project,1800
+body: ""

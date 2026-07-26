@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readSettings, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
 import { activateExtensionForTest, runRegisteredCommandForTest } from "@unbrained/pm-cli/sdk/testing";
 import type { ExtensionActivationResult, ExtensionCapability, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
 import extension, {
@@ -48,7 +52,6 @@ import extension, {
   renderMarkdownDuplicates,
   renderTextDuplicates,
   selectDuplicateCandidates,
-  collectGovernanceSignals,
   governanceIsEmpty,
   renderTextGovernance,
   renderMarkdownGovernance,
@@ -61,9 +64,6 @@ import extension, {
   type SimilarItemMatch,
   type GovernanceSummary,
   type GovernanceDuplicateCluster,
-  type GovernanceStaleItem,
-  type GovernanceStorageFinding,
-  type GovernanceSecretFinding,
 } from "../dist/index.js";
 
 /**
@@ -79,6 +79,11 @@ const MANIFEST_CAPABILITIES: readonly ExtensionCapability[] = (
     readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "manifest.json"), "utf8"),
   ) as { capabilities: ExtensionCapability[] }
 ).capabilities;
+
+/** Latest project-local pm CLI used by real-workspace integration tests. */
+const INSTALLED_PM_BIN = fileURLToPath(
+  new URL(process.platform === "win32" ? "../node_modules/.bin/pm.cmd" : "../node_modules/.bin/pm", import.meta.url),
+);
 
 /** Shape of the `brief diverge` command result asserted by the wiring test. */
 interface DivergeCommandResult {
@@ -1481,12 +1486,7 @@ describe("brief diverge / buildDivergence", () => {
     });
   });
 
-  test("checkAttrMerge resolves what git would actually apply, including a nested attributes file", async () => {
-    const { spawnSync } = await import("node:child_process");
-    const { mkdtempSync, rmSync, writeFileSync, mkdirSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-
+  test("checkAttrMerge resolves what git would actually apply, including a nested attributes file", () => {
     const dir = mkdtempSync(join(tmpdir(), "pm-brief-attr-"));
     try {
       spawnSync("git", ["init", "-q", "-b", "main", "."], { cwd: dir, stdio: "pipe", encoding: "utf-8" });
@@ -1578,11 +1578,7 @@ describe("brief diverge / buildDivergence", () => {
 
 describe("brief diverge end-to-end", () => {
   test("integration: real git repo with divergent branches", async (t) => {
-    const pmBin = process.env.PM_BIN ?? "pm";
-    const fs = await import("node:fs/promises");
-    const path = await import("node:path");
-    const os = await import("node:os");
-    const { spawnSync } = await import("node:child_process");
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
 
     // skip if pm is not on PATH — reported as a real skip, not a silent pass, so a
     // missing pm shows up as an E2E coverage gap instead of a green no-assertion test
@@ -1598,7 +1594,7 @@ describe("brief diverge end-to-end", () => {
       return;
     }
 
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pm-diverge-test-"));
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-diverge-test-"));
     try {
       const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
       const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
@@ -1607,7 +1603,7 @@ describe("brief diverge end-to-end", () => {
       git(["init"]);
       git(["config", "user.email", "test@test.com"]);
       git(["config", "user.name", "Test"]);
-      const pmPath = path.join(tmpDir, ".agents", "pm");
+      const pmPath = join(tmpDir, ".agents", "pm");
 
       // init pm tracker
       pm(["init", "--pm-path", pmPath]);
@@ -1663,7 +1659,7 @@ describe("brief diverge end-to-end", () => {
       const previousCwd = process.cwd();
       let jsonResult: DivergeCommandResult;
       let markdownResult: DivergeCommandResult;
-      const outFile = path.join(tmpDir, "diverge.json");
+      const outFile = join(tmpDir, "diverge.json");
       try {
         process.chdir(tmpDir);
         jsonResult = await runDiverge({ head: "branch-a", "include-clean": true, format: "json", output: outFile });
@@ -1678,7 +1674,7 @@ describe("brief diverge end-to-end", () => {
       assert.equal(jsonResult.output, outFile);
       assert.equal(jsonResult.verdict, "review-required");
 
-      const summary = JSON.parse(await fs.readFile(outFile, "utf-8")) as {
+      const summary = JSON.parse(await readFile(outFile, "utf-8")) as {
         verdict: string;
         workspace: string;
         base: string;
@@ -1713,7 +1709,7 @@ describe("brief diverge end-to-end", () => {
       assert.match(markdown, /review-required/);
       assert.ok(markdown.includes(item1!), "markdown render names the colliding item");
     } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true });
     }
   });
 });
@@ -1769,12 +1765,7 @@ describe("brief diverge / review round 2 hardening", () => {
     assert.throws(() => mergeBase(missing, "aaaa", "bbbb"), /git merge-base.*(failed|could not run)/);
   });
 
-  test("mergeBase returns undefined only for the legitimate no-merge-base case", async () => {
-    const { spawnSync } = await import("node:child_process");
-    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-
+  test("mergeBase returns undefined only for the legitimate no-merge-base case", () => {
     // Real repo, two orphan roots: git exits 1, which means "unrelated histories"
     // and must stay a non-throwing undefined rather than becoming an error.
     const dir = mkdtempSync(join(tmpdir(), "pm-brief-mb-"));
@@ -2399,11 +2390,7 @@ describe("brief governance", () => {
 
 describe("brief governance end-to-end", () => {
   test("integration: real pm workspace with duplicates, stale in-progress, and a secret", async (t) => {
-    const pmBin = process.env.PM_BIN ?? "pm";
-    const fs = await import("node:fs/promises");
-    const path = await import("node:path");
-    const os = await import("node:os");
-    const { spawnSync } = await import("node:child_process");
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
 
     let pmAvailable = false;
     try {
@@ -2417,7 +2404,7 @@ describe("brief governance end-to-end", () => {
       return;
     }
 
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pm-gov-e2e-"));
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-gov-e2e-"));
     try {
       const git = (args: string[]) => {
         const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
@@ -2433,7 +2420,7 @@ describe("brief governance end-to-end", () => {
       git(["init"]);
       git(["config", "user.email", "test@test.com"]);
       git(["config", "user.name", "Test"]);
-      const pmPath = path.join(tmpDir, ".agents", "pm");
+      const pmPath = join(tmpDir, ".agents", "pm");
       pm(["init", "--pm-path", pmPath]);
 
       // Seed near-duplicate items (exact title match → duplicate cluster)
@@ -2442,34 +2429,37 @@ describe("brief governance end-to-end", () => {
 
       // Seed a stale in-progress item: create, set to in_progress, then backdate it.
       const staleJson = pm(["--pm-path", pmPath, "create", "--title", "Old in-progress work", "--type", "Task", "--author", "agent-a", "--json"]);
-      const staleItem = JSON.parse(staleJson) as { id: string };
-      pm(["--pm-path", pmPath, "update", staleItem.id, "--status", "in_progress", "--author", "agent-a"]);
+      const staleCreate = JSON.parse(staleJson) as { id?: string; item?: { id?: string } };
+      const staleItemId = staleCreate.id ?? staleCreate.item?.id;
+      assert.ok(staleItemId, "pm create must return the created item id");
+      pm(["--pm-path", pmPath, "update", staleItemId, "--status", "in_progress", "--author", "agent-a"]);
       // Backdate the item's updated_at and history by editing the .toon and history files directly.
       const oldTimestamp = "2026-06-01T00:00:00.000Z";
-      const typeRegistry = await import("@unbrained/pm-cli/sdk");
-      const settings = await typeRegistry.readSettings(pmPath);
-      const registry = typeRegistry.resolveItemTypeRegistry(settings);
+      const settings = await readSettings(pmPath);
+      const registry = resolveItemTypeRegistry(settings);
       const folder = registry.type_to_folder["Task"] ?? "tasks";
-      const toonPath = path.join(pmPath, folder, `${staleItem.id}.toon`);
-      const toonContent = await fs.readFile(toonPath, "utf-8");
+      const toonPath = join(pmPath, folder, `${staleItemId}.toon`);
+      const toonContent = await readFile(toonPath, "utf-8");
       const backdated = toonContent
         .replace(/updated_at:\s*"[^"]*"/, `updated_at: "${oldTimestamp}"`)
         .replace(/status:\s*"in_progress"/, `status: "in_progress"`);
-      await fs.writeFile(toonPath, backdated, "utf-8");
+      await writeFile(toonPath, backdated, "utf-8");
       // Backdate history entries too
-      const historyPath = path.join(pmPath, "history", `${staleItem.id}.jsonl`);
+      const historyPath = join(pmPath, "history", `${staleItemId}.jsonl`);
       try {
-        const historyContent = await fs.readFile(historyPath, "utf-8");
+        const historyContent = await readFile(historyPath, "utf-8");
         const backdatedHistory = historyContent.replace(/"ts":\s*"[^"]*"/g, `"ts": "${oldTimestamp}"`);
-        await fs.writeFile(historyPath, backdatedHistory, "utf-8");
+        await writeFile(historyPath, backdatedHistory, "utf-8");
       } catch {
         // history file might not exist yet — that's OK
       }
 
       // Seed an item with a credential-shaped string in its description (fake but realistic)
       const secretJson = pm(["--pm-path", pmPath, "create", "--title", "Deploy with credentials", "--type", "Task", "--author", "agent-a", "--json"]);
-      const secretItem = JSON.parse(secretJson) as { id: string };
-      pm(["--pm-path", pmPath, "update", secretItem.id, "--description", "Use AWS key AKIAIOSFODNN7EXAMPLE for deployment", "--author", "agent-a"]);
+      const secretCreate = JSON.parse(secretJson) as { id?: string; item?: { id?: string } };
+      const secretItemId = secretCreate.id ?? secretCreate.item?.id;
+      assert.ok(secretItemId, "pm create must return the created item id");
+      pm(["--pm-path", pmPath, "update", secretItemId, "--description", "Use AWS key AKIAIOSFODNN7EXAMPLE for deployment", "--author", "agent-a"]);
 
       // Commit the seeded workspace
       git(["add", "-A"]);
@@ -2508,14 +2498,14 @@ describe("brief governance end-to-end", () => {
 
       // 2. Stale in-progress: the backdated item should be stale with a 1h threshold
       assert.ok(summary.staleInProgressTotal >= 1, `expected at least 1 stale in-progress item, got ${summary.staleInProgressTotal}`);
-      const staleFinding = summary.staleInProgress.find((s) => s.id === staleItem.id);
-      assert.ok(staleFinding, `stale item ${staleItem.id} should be present`);
+      const staleFinding = summary.staleInProgress.find((s) => s.id === staleItemId);
+      assert.ok(staleFinding, `stale item ${staleItemId} should be present`);
       assert.ok(staleFinding!.ageHours > 1, "age should exceed the 1h threshold");
 
       // 3. Secrets: the AWS key in the description should be detected
       assert.ok(summary.secretFindingsTotal >= 1, `expected at least 1 secret finding, got ${summary.secretFindingsTotal}`);
-      const secretFinding = summary.secretFindings.find((s) => s.itemId === secretItem.id);
-      assert.ok(secretFinding, `secret finding for ${secretItem.id} should be present`);
+      const secretFinding = summary.secretFindings.find((s) => s.itemId === secretItemId);
+      assert.ok(secretFinding, `secret finding for ${secretItemId} should be present`);
       assert.equal(secretFinding!.rule, "aws_access_key");
       // The secret VALUE must NEVER appear in the JSON output
       assert.doesNotMatch(jsonOutput, /AKIAIOSFODNN7EXAMPLE/);
@@ -2528,7 +2518,7 @@ describe("brief governance end-to-end", () => {
       // The detector rule SHOULD appear
       assert.match(textOutput, /aws_access_key/);
     } finally {
-      await fs.rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true });
     }
   });
 });

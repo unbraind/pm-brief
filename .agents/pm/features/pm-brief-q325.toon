@@ -6,12 +6,21 @@ status: closed
 priority: 2
 tags: []
 created_at: "2026-07-26T11:57:51.360Z"
-updated_at: "2026-07-26T12:20:04.221Z"
+updated_at: "2026-07-26T13:52:57.069Z"
 closed_at: "2026-07-26T12:20:04.220Z"
 author: pi-agent
-notes[3]{created_at,author,text}:
+resolution: Integrated sdk/governance scanners into token-budgeted briefs and hardened the PR against static-analysis and latest-CLI integration failures.
+expected_result: "Agent briefs surface safe, actionable duplicate, stale-work, storage-integrity, and secret findings without leaking secret values."
+actual_result: All four governance signal classes render with remediation commands; real latest-CLI workspaces and the 135-test release gate pass.
+notes[4]{created_at,author,text}:
   "2026-07-26T11:57:57.785Z",pi-agent,"SDK export surface confirmed: 31 exports from sdk/governance (findDuplicateClusters, scanStaleInProgressItems, scanStorageIntegrity, scanMutationSecrets, projectValidateCounts, runValidate, etc.). scanMutationSecrets(payload) returns SecretGuardFinding[] with rule + path only — secret value never returned. Verified: scanMutationSecrets({description:'AKIAIOSFODNN7EXAMPLE...'}) => [{rule:'aws_access_key',path:'$.description'}]."
   "2026-07-26T11:58:01.518Z",pi-agent,"findDuplicateClusters({pmRoot,threshold}) does a single metadata-read batch sweep — better than the per-candidate findSimilarItems loop the existing 'brief duplicates' command uses. scanStaleInProgressItems(pmRoot, items, {threshold_hours}) reads history for last_activity_at. scanStorageIntegrity needs typeToFolder from resolveItemTypeRegistry(readSettings(pmRoot)). ItemMetadata type exported from @unbrained/pm-cli/sdk — must map PmItem to ItemMetadata (required fields: id,title,description,type,status,priority,tags,created_at,updated_at)."
   "2026-07-26T12:20:03.575Z",claude,"Verified by orchestrator (claude): typecheck OK, 135/135 tests, build OK. Functional proof in a throwaway workspace seeded to trigger each finding — two exact-title items, one in_progress task, one item carrying a fake AWS key. 'pm brief' emitted a Governance section with: duplicate cluster (score 1, exact_title) plus the resolving command 'pm update br-nop2 --dep id=br-15gy,kind=related'; and a secrets finding reporting item id + field + detector name (aws_access_key) with the secret VALUE correctly withheld, plus a redaction command. Stale scan correctly reported nothing (the in_progress item was seconds old)."
+  "2026-07-26T13:52:04.224Z",codex,"Review hardening on PR #44: fixed all five DeepScan defects, replaced explicit any with SDK CommandHandlerContext/ExtensionApi/FlagDefinition types, removed dynamic imports, and made real-workspace E2E tests hermetically use the project-local pm CLI 2026.7.26 while accepting both documented create JSON envelopes. release:check passes 135/135 tests with zero production vulnerabilities; measured source coverage remains 82.84% lines, 74.67% branches, 92.19% functions and is tracked separately rather than claimed as complete."
+files[2]{path,scope,note}:
+  index.ts,project,Governance collection and rendering
+  test/brief.test.ts,project,Unit and real-workspace integration coverage
+tests[1]{command,path,scope,timeout_seconds}:
+  "NPM_CONFIG_USERCONFIG=/dev/null npm run release:check",test/brief.test.ts,project,1800
 close_reason: "Shipped: sdk/governance findings (duplicate clusters, stale work, storage integrity, secret scan) surfaced in the brief within the token budget, each with the exact pm command that resolves it. Verified functionally end-to-end."
 body: ""

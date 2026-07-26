@@ -2,9 +2,9 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { resolve as pathResolve, relative as pathRelative, sep as pathSep, isAbsolute as pathIsAbsolute } from "node:path";
 import { defineExtension } from "@unbrained/pm-cli/sdk/authoring";
-import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+import type { ExtensionApi, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
 import { findSimilarItems } from "@unbrained/pm-cli/sdk";
-import type { SimilarItemMatch, ItemMetadata } from "@unbrained/pm-cli/sdk";
+import type { CommandHandlerContext, SimilarItemMatch, ItemMetadata } from "@unbrained/pm-cli/sdk";
 import {
   findDuplicateClusters,
   scanStaleInProgressItems,
@@ -1042,7 +1042,6 @@ function secretFieldFromPath(path: string): string {
   return path
     .replace(/^\$\./, "")
     .replace(/\[\d+\]/g, "")
-    .replace(/\./g, ".")
     .trim() || "(unknown field)";
 }
 
@@ -3562,8 +3561,10 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
   lines.push(...renderGovernanceMarkdown(g));
   if (lines.length <= 4) lines.push("_No governance findings._");
   return `${lines.join("\n")}\n`;
-}function registerCommands(api: any): void {
-  const commonFlags = [
+}
+
+function registerCommands(api: ExtensionApi): void {
+  const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--focus", value_name: "id|type:Type", description: "Focus item id or 'type:Type' to highlight all items of a type (repeatable or comma-separated)", type: "string" },
@@ -3587,7 +3588,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
     intent: "turn pm state into compact next-work context for agents",
     examples: ["pm brief", "pm brief --focus pm-1234 --max-tokens 3000", "pm brief --dependency-order --format json"],
     flags: commonFlags,
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
       if (format !== "markdown" && format !== "json" && format !== "slack") throw new CommandError("--format must be markdown, json, or slack", EXIT_CODE.USAGE);
@@ -3643,7 +3644,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
     intent: "turn pm state into executable next-turn instructions for coding agents",
     examples: ["pm brief prompt", "pm brief prompt --focus pm-1234 --max-tokens 2000", "pm brief prompt --dependency-order --output HANDOFF.md"],
     flags: commonFlags.filter((flag) => flag.long !== "--format"),
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
       const includeHistory = readBool(options, "include-history", "includeHistory");
@@ -3695,7 +3696,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
       { long: "--confidence", description: "Include ranking confidence in text output", type: "boolean" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -3742,7 +3743,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
       { long: "--days", value_name: "n", description: "Days before an item is stale (default: 7)", type: "string" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -3765,7 +3766,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
       { long: "--days", value_name: "n", description: "Window in days for closed-item lookback (default: 7)", type: "string" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -3810,7 +3811,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
       { long: "--format", value_name: "format", description: "Output format: markdown, text, json, or slack (default markdown)", type: "string" },
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const rawCheckpoint = (ctx.args?.[0] ?? "").trim();
       if (!rawCheckpoint) throw new CommandError("pm brief since requires a <checkpoint> (ISO timestamp or relative window like 7d)", EXIT_CODE.USAGE);
@@ -3872,7 +3873,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
       { long: "--format", value_name: "format", description: "Output format: markdown, text, json, or slack (default markdown)", type: "string" },
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const positionalBase = (ctx.args?.[0] ?? "").trim() || undefined;
       const explicitBase = readString(options, "base");
@@ -4017,7 +4018,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
       { long: "--format", value_name: "format", description: "Output format: text, json, or markdown (default: text)", type: "string" },
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "text")).toLowerCase();
       if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
@@ -4079,7 +4080,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
       { long: "--format", value_name: "format", description: "Output format: text, json, or markdown (default: text)", type: "string" },
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "text")).toLowerCase();
       if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
