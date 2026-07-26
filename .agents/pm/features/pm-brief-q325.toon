@@ -1,0 +1,17 @@
+id: pm-brief-q325
+title: Surface governance findings in agent briefs via sdk/governance
+description: "Adopt the pm-cli sdk/governance scanners (findDuplicateClusters, scanStaleInProgressItems, scanStorageIntegrity, scanMutationSecrets) in the brief to surface duplicate clusters, stale in-progress work, storage integrity problems, and committed secrets — token-budget-aware with actionable pm remediation commands and a governance-only mode."
+type: Feature
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-26T11:57:51.360Z"
+updated_at: "2026-07-26T12:20:04.221Z"
+closed_at: "2026-07-26T12:20:04.220Z"
+author: pi-agent
+notes[3]{created_at,author,text}:
+  "2026-07-26T11:57:57.785Z",pi-agent,"SDK export surface confirmed: 31 exports from sdk/governance (findDuplicateClusters, scanStaleInProgressItems, scanStorageIntegrity, scanMutationSecrets, projectValidateCounts, runValidate, etc.). scanMutationSecrets(payload) returns SecretGuardFinding[] with rule + path only — secret value never returned. Verified: scanMutationSecrets({description:'AKIAIOSFODNN7EXAMPLE...'}) => [{rule:'aws_access_key',path:'$.description'}]."
+  "2026-07-26T11:58:01.518Z",pi-agent,"findDuplicateClusters({pmRoot,threshold}) does a single metadata-read batch sweep — better than the per-candidate findSimilarItems loop the existing 'brief duplicates' command uses. scanStaleInProgressItems(pmRoot, items, {threshold_hours}) reads history for last_activity_at. scanStorageIntegrity needs typeToFolder from resolveItemTypeRegistry(readSettings(pmRoot)). ItemMetadata type exported from @unbrained/pm-cli/sdk — must map PmItem to ItemMetadata (required fields: id,title,description,type,status,priority,tags,created_at,updated_at)."
+  "2026-07-26T12:20:03.575Z",claude,"Verified by orchestrator (claude): typecheck OK, 135/135 tests, build OK. Functional proof in a throwaway workspace seeded to trigger each finding — two exact-title items, one in_progress task, one item carrying a fake AWS key. 'pm brief' emitted a Governance section with: duplicate cluster (score 1, exact_title) plus the resolving command 'pm update br-nop2 --dep id=br-15gy,kind=related'; and a secrets finding reporting item id + field + detector name (aws_access_key) with the secret VALUE correctly withheld, plus a redaction command. Stale scan correctly reported nothing (the in_progress item was seconds old)."
+close_reason: "Shipped: sdk/governance findings (duplicate clusters, stale work, storage integrity, secret scan) surfaced in the brief within the token budget, each with the exact pm command that resolves it. Verified functionally end-to-end."
+body: ""

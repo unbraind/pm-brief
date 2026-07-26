@@ -48,6 +48,10 @@ import extension, {
   renderMarkdownDuplicates,
   renderTextDuplicates,
   selectDuplicateCandidates,
+  collectGovernanceSignals,
+  governanceIsEmpty,
+  renderTextGovernance,
+  renderMarkdownGovernance,
   type DeltaActivityEntry,
   type DivergeEvent,
   type PmItem,
@@ -55,6 +59,11 @@ import extension, {
   type DuplicatePairItem,
   type DuplicateSweepSummary,
   type SimilarItemMatch,
+  type GovernanceSummary,
+  type GovernanceDuplicateCluster,
+  type GovernanceStaleItem,
+  type GovernanceStorageFinding,
+  type GovernanceSecretFinding,
 } from "../dist/index.js";
 
 /**
@@ -162,7 +171,7 @@ const items: PmItem[] = [
 ];
 
 test("extension registers brief commands", async () => {
-  assert.deepEqual(await registeredCommandPaths(), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates"]);
+  assert.deepEqual(await registeredCommandPaths(), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates", "brief governance"]);
   const nextFlags = await registeredFlagLongs("brief next");
   assert.ok(nextFlags.includes("--explain"));
   assert.ok(nextFlags.includes("--confidence"));
@@ -2163,5 +2172,363 @@ describe("brief duplicates", () => {
     const run = (options: Record<string, unknown>) =>
       runRegisteredCommandForTest(commands, { command: "brief duplicates", options, pmRoot: "/nonexistent-tracker" });
     await assert.rejects(() => run({ format: "yaml" }), /--format must be text, json, or markdown/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief governance — sdk/governance scanner integration
+// ---------------------------------------------------------------------------
+
+/** Helper: build a synthetic GovernanceSummary with sane defaults for render tests. */
+function govSummary(overrides: Partial<GovernanceSummary> = {}): GovernanceSummary {
+  return {
+    duplicateClusters: [],
+    duplicateClustersTotal: 0,
+    staleInProgress: [],
+    staleInProgressTotal: 0,
+    storageFindings: [],
+    storageFindingsTotal: 0,
+    secretFindings: [],
+    secretFindingsTotal: 0,
+    threshold: 0.6,
+    staleThresholdHours: 72,
+    generatedAt: "2026-07-26T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("brief governance", () => {
+  test("governanceIsEmpty returns true for undefined and an all-empty summary", () => {
+    assert.equal(governanceIsEmpty(undefined), true);
+    assert.equal(governanceIsEmpty(govSummary()), true);
+    assert.equal(
+      governanceIsEmpty(govSummary({ duplicateClusters: [{ clusterId: "pm-a", items: [], maxScore: 1, reason: "exact_title", remediation: "pm update pm-b --dep id=pm-a,kind=related" }] })),
+      false,
+    );
+  });
+
+  test("buildBrief includes the governance section when provided and non-empty", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const governance = govSummary({
+      staleInProgress: [{ id: "pm-a", lastActivityAt: "2026-07-20T00:00:00Z", ageHours: 200, remediation: "pm update pm-a --status open" }],
+      staleInProgressTotal: 1,
+    });
+    const brief = buildBrief(items, { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    assert.ok(brief.governance, "governance section should be present");
+    assert.equal(brief.governance!.staleInProgress.length, 1);
+    assert.equal(brief.governance!.staleInProgress[0].id, "pm-a");
+  });
+
+  test("buildBrief omits the governance section when all findings are empty", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { governance: govSummary(), generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    assert.equal(brief.governance, undefined, "empty governance should not appear in the brief");
+  });
+
+  test("renderMarkdownBrief includes a Governance section with actionable commands", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Fix flaky auth test", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const governance = govSummary({
+      duplicateClusters: [{
+        clusterId: "pm-a",
+        items: [
+          { id: "pm-a", title: "Fix flaky auth test", status: "open", type: "Task" },
+          { id: "pm-b", title: "Fix flaky auth test", status: "open", type: "Task" },
+        ],
+        maxScore: 1.0,
+        reason: "exact_title",
+        remediation: "pm update pm-b --dep id=pm-a,kind=related",
+      }],
+      duplicateClustersTotal: 1,
+    });
+    const brief = buildBrief(items, { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    const md = renderMarkdownBrief(brief);
+    assert.match(md, /## Governance/);
+    assert.match(md, /Duplicate clusters/);
+    assert.match(md, /pm-a.*Fix flaky auth test/);
+    assert.match(md, /pm update pm-b --dep id=pm-a,kind=related/);
+  });
+
+  test("renderAgentPrompt includes governance findings as compact actionable lines", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const governance = govSummary({
+      secretFindings: [{ itemId: "pm-a", field: "description", rule: "github_token", remediation: "pm update pm-a --description \"<redacted>\"" }],
+      secretFindingsTotal: 1,
+    });
+    const brief = buildBrief(items, { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    const prompt = renderAgentPrompt(brief);
+    assert.match(prompt, /Governance findings/);
+    assert.match(prompt, /secret in pm-a field `description`.*github_token/);
+    // The secret VALUE must never appear in the output
+    assert.doesNotMatch(prompt, /ghp_[A-Za-z0-9]/);
+  });
+
+  test("renderSlackBrief includes governance section", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const governance = govSummary({
+      staleInProgress: [{ id: "pm-a", lastActivityAt: "2026-07-20T00:00:00Z", ageHours: 100, remediation: "pm update pm-a --status open" }],
+      staleInProgressTotal: 1,
+    });
+    const brief = buildBrief(items, { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    const slack = renderSlackBrief(brief);
+    assert.match(slack, /\*Governance\*/);
+    assert.match(slack, /Stale in-progress/);
+    assert.match(slack, /pm-a.*100h/);
+  });
+
+  test("renderTextGovernance renders a standalone summary with +N more rollup", () => {
+    const summary = govSummary({
+      duplicateClusters: [{
+        clusterId: "pm-a",
+        items: [{ id: "pm-a", title: "A", status: "open", type: "Task" }, { id: "pm-b", title: "A", status: "open", type: "Task" }],
+        maxScore: 1.0,
+        reason: "exact_title",
+        remediation: "pm update pm-b --dep id=pm-a,kind=related",
+      }],
+      duplicateClustersTotal: 5,
+    });
+    const text = renderTextGovernance(summary);
+    assert.match(text, /Duplicate clusters/);
+    assert.match(text, /\(\+4 more\)/);
+    assert.match(text, /pm update pm-b --dep id=pm-a,kind=related/);
+  });
+
+  test("renderTextGovernance renders no-findings case cleanly", () => {
+    const text = renderTextGovernance(govSummary());
+    assert.match(text, /No governance findings/);
+  });
+
+  test("renderMarkdownGovernance renders a markdown header and findings", () => {
+    const summary = govSummary({
+      storageFindings: [{
+        kind: "history_conflict_marker",
+        id: "pm-x",
+        path: "history/pm-x.jsonl",
+        detail: "unresolved merge-conflict markers at line 3",
+        remediation: "pm history-repair pm-x",
+      }],
+      storageFindingsTotal: 1,
+    });
+    const md = renderMarkdownGovernance(summary);
+    assert.match(md, /# pm brief governance/);
+    assert.match(md, /Storage integrity/);
+    assert.match(md, /pm history-repair pm-x/);
+  });
+
+  test("secret findings NEVER include the secret value in any render format", () => {
+    const governance = govSummary({
+      secretFindings: [
+        { itemId: "pm-a", field: "description", rule: "aws_access_key", remediation: "pm update pm-a --description \"<redacted: remove the aws_access_key>\"" },
+        { itemId: "pm-b", field: "body", rule: "github_token", remediation: "pm update pm-b --body \"<redacted: remove the github_token>\"" },
+      ],
+      secretFindingsTotal: 2,
+    });
+    const items: PmItem[] = [
+      { id: "pm-a", title: "A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    const md = renderMarkdownBrief(brief);
+    const slack = renderSlackBrief(brief);
+    const prompt = renderAgentPrompt(brief);
+    const govText = renderTextGovernance(governance);
+    const govMd = renderMarkdownGovernance(governance);
+    for (const output of [md, slack, prompt, govText, govMd]) {
+      // The detector RULE name is fine to print, but the matched secret value must never appear.
+      assert.doesNotMatch(output, /AKIA[A-Z0-9]{16}/);
+      assert.doesNotMatch(output, /ghp_[A-Za-z0-9]{36}/);
+      // The rule names and fields SHOULD appear
+      assert.match(output, /aws_access_key|github_token/);
+    }
+  });
+
+  test("compactToBudget trims governance sections when over budget", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    // Build a governance summary with many findings so compaction kicks in
+    const clusters: GovernanceDuplicateCluster[] = Array.from({ length: 5 }, (_, i) => ({
+      clusterId: `pm-cluster-${i}`,
+      items: [{ id: `pm-${i}a`, title: `Dup ${i}`, status: "open", type: "Task" }, { id: `pm-${i}b`, title: `Dup ${i}`, status: "open", type: "Task" }],
+      maxScore: 0.9,
+      reason: "exact_title" as const,
+      remediation: `pm update pm-${i}b --dep id=pm-${i}a,kind=related`,
+    }));
+    const governance = govSummary({
+      duplicateClusters: clusters.slice(0, 3),
+      duplicateClustersTotal: 5,
+    });
+    // Use a very small token budget to force compaction
+    const brief = buildBrief(items, { governance, tokenBudget: 500, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    assert.equal(brief.budget.truncated, true);
+    // The governance section should still be present but trimmed
+    if (brief.governance) {
+      assert.ok(brief.governance.duplicateClusters.length <= 3, "governance should be trimmed under budget pressure");
+      // The total count should be preserved so the agent knows there are more
+      assert.equal(brief.governance.duplicateClustersTotal, 5);
+    }
+  });
+
+  test("brief governance command is registered with the expected flags", async () => {
+    assert.ok((await registeredCommandPaths()).includes("brief governance"), "brief governance command should be registered");
+    const flags = await registeredFlagLongs("brief governance");
+    assert.ok(flags.includes("--threshold"), "--threshold flag should be registered");
+    assert.ok(flags.includes("--stale-hours"), "--stale-hours flag should be registered");
+    assert.ok(flags.includes("--format"), "--format flag should be registered");
+  });
+
+  test("brief command registers --no-governance and --governance-threshold flags", async () => {
+    const flags = await registeredFlagLongs("brief");
+    assert.ok(flags.includes("--no-governance"), "--no-governance flag should be registered");
+    assert.ok(flags.includes("--governance-threshold"), "--governance-threshold flag should be registered");
+    assert.ok(flags.includes("--stale-hours"), "--stale-hours flag should be registered");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief governance end-to-end — real pm workspace with seeded findings
+// ---------------------------------------------------------------------------
+
+describe("brief governance end-to-end", () => {
+  test("integration: real pm workspace with duplicates, stale in-progress, and a secret", async (t) => {
+    const pmBin = process.env.PM_BIN ?? "pm";
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const os = await import("node:os");
+    const { spawnSync } = await import("node:child_process");
+
+    let pmAvailable = false;
+    try {
+      const r = spawnSync(pmBin, ["--version"], { stdio: "pipe", encoding: "utf-8" });
+      pmAvailable = r.status === 0;
+    } catch {
+      pmAvailable = false;
+    }
+    if (!pmAvailable) {
+      t.skip("pm not on PATH");
+      return;
+    }
+
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pm-gov-e2e-"));
+    try {
+      const git = (args: string[]) => {
+        const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+        if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+        return r.stdout.trim();
+      };
+      const pm = (args: string[]) => {
+        const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+        if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`);
+        return r.stdout.trim();
+      };
+
+      git(["init"]);
+      git(["config", "user.email", "test@test.com"]);
+      git(["config", "user.name", "Test"]);
+      const pmPath = path.join(tmpDir, ".agents", "pm");
+      pm(["init", "--pm-path", pmPath]);
+
+      // Seed near-duplicate items (exact title match → duplicate cluster)
+      pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-a", "--json"]);
+      pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-b", "--json"]);
+
+      // Seed a stale in-progress item: create, set to in_progress, then backdate it.
+      const staleJson = pm(["--pm-path", pmPath, "create", "--title", "Old in-progress work", "--type", "Task", "--author", "agent-a", "--json"]);
+      const staleItem = JSON.parse(staleJson) as { id: string };
+      pm(["--pm-path", pmPath, "update", staleItem.id, "--status", "in_progress", "--author", "agent-a"]);
+      // Backdate the item's updated_at and history by editing the .toon and history files directly.
+      const oldTimestamp = "2026-06-01T00:00:00.000Z";
+      const typeRegistry = await import("@unbrained/pm-cli/sdk");
+      const settings = await typeRegistry.readSettings(pmPath);
+      const registry = typeRegistry.resolveItemTypeRegistry(settings);
+      const folder = registry.type_to_folder["Task"] ?? "tasks";
+      const toonPath = path.join(pmPath, folder, `${staleItem.id}.toon`);
+      const toonContent = await fs.readFile(toonPath, "utf-8");
+      const backdated = toonContent
+        .replace(/updated_at:\s*"[^"]*"/, `updated_at: "${oldTimestamp}"`)
+        .replace(/status:\s*"in_progress"/, `status: "in_progress"`);
+      await fs.writeFile(toonPath, backdated, "utf-8");
+      // Backdate history entries too
+      const historyPath = path.join(pmPath, "history", `${staleItem.id}.jsonl`);
+      try {
+        const historyContent = await fs.readFile(historyPath, "utf-8");
+        const backdatedHistory = historyContent.replace(/"ts":\s*"[^"]*"/g, `"ts": "${oldTimestamp}"`);
+        await fs.writeFile(historyPath, backdatedHistory, "utf-8");
+      } catch {
+        // history file might not exist yet — that's OK
+      }
+
+      // Seed an item with a credential-shaped string in its description (fake but realistic)
+      const secretJson = pm(["--pm-path", pmPath, "create", "--title", "Deploy with credentials", "--type", "Task", "--author", "agent-a", "--json"]);
+      const secretItem = JSON.parse(secretJson) as { id: string };
+      pm(["--pm-path", pmPath, "update", secretItem.id, "--description", "Use AWS key AKIAIOSFODNN7EXAMPLE for deployment", "--author", "agent-a"]);
+
+      // Commit the seeded workspace
+      git(["add", "-A"]);
+      git(["commit", "-m", "seed governance test workspace"]);
+
+      // Now run the REAL brief governance command through the registered command
+      const { commands } = await activateBrief();
+      const runGov = async (options: Record<string, unknown>): Promise<{ pmBriefRendered?: boolean; output?: string }> =>
+        (await runRegisteredCommandForTest(commands, {
+          command: "brief governance",
+          options,
+          pmRoot: ".agents/pm",
+        })).result as { pmBriefRendered?: boolean; output?: string };
+
+      const previousCwd = process.cwd();
+      let jsonOutput: string;
+      let textOutput: string;
+      try {
+        process.chdir(tmpDir);
+        jsonOutput = (await runGov({ format: "json", threshold: 0.5, "stale-hours": 1 })).output ?? "";
+        textOutput = (await runGov({ threshold: 0.5, "stale-hours": 1 })).output ?? "";
+      } finally {
+        process.chdir(previousCwd);
+      }
+
+
+      // Parse the JSON output
+      const summary = JSON.parse(jsonOutput) as GovernanceSummary;
+
+      // 1. Duplicate clusters: the two "Fix flaky auth test" items should form a cluster
+      assert.ok(summary.duplicateClustersTotal >= 1, `expected at least 1 duplicate cluster, got ${summary.duplicateClustersTotal}`);
+      const dupCluster = summary.duplicateClusters.find((c) => c.items.some((i) => i.title === "Fix flaky auth test"));
+      assert.ok(dupCluster, "duplicate cluster for 'Fix flaky auth test' should be present");
+      assert.equal(dupCluster!.items.length, 2);
+      assert.ok(dupCluster!.remediation.includes("pm update"), "remediation should be a pm update command");
+
+      // 2. Stale in-progress: the backdated item should be stale with a 1h threshold
+      assert.ok(summary.staleInProgressTotal >= 1, `expected at least 1 stale in-progress item, got ${summary.staleInProgressTotal}`);
+      const staleFinding = summary.staleInProgress.find((s) => s.id === staleItem.id);
+      assert.ok(staleFinding, `stale item ${staleItem.id} should be present`);
+      assert.ok(staleFinding!.ageHours > 1, "age should exceed the 1h threshold");
+
+      // 3. Secrets: the AWS key in the description should be detected
+      assert.ok(summary.secretFindingsTotal >= 1, `expected at least 1 secret finding, got ${summary.secretFindingsTotal}`);
+      const secretFinding = summary.secretFindings.find((s) => s.itemId === secretItem.id);
+      assert.ok(secretFinding, `secret finding for ${secretItem.id} should be present`);
+      assert.equal(secretFinding!.rule, "aws_access_key");
+      // The secret VALUE must NEVER appear in the JSON output
+      assert.doesNotMatch(jsonOutput, /AKIAIOSFODNN7EXAMPLE/);
+
+      // 4. Text output: also verify no secret value leaks, and findings are present
+      assert.match(textOutput, /Duplicate clusters/);
+      assert.match(textOutput, /Stale in-progress/);
+      assert.match(textOutput, /Secrets in item text/);
+      assert.doesNotMatch(textOutput, /AKIAIOSFODNN7EXAMPLE/);
+      // The detector rule SHOULD appear
+      assert.match(textOutput, /aws_access_key/);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });

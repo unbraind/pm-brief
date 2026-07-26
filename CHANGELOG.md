@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Surface governance findings in agent briefs via sdk/governance ([pm-brief-q325](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-q325.toon))
+
 ### Other
 
 - Adopt pm-cli 2026.7.26 typed authoring SDK: drop the any-cast defineExtension shim and move tests onto the real activation harness ([pm-brief-iapt](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-iapt.toon))
