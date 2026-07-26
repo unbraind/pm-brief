@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { activateExtensionForTest, runRegisteredCommandForTest } from "@unbrained/pm-cli/sdk/testing";
+import type { ExtensionActivationResult, ExtensionCapability, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
 import extension, {
   buildBrief,
   buildDelta,
@@ -52,6 +57,70 @@ import extension, {
   type SimilarItemMatch,
 } from "../dist/index.js";
 
+/**
+ * Capabilities the on-disk `manifest.json` declares.
+ *
+ * Read from the manifest rather than hard-coded so the tests activate under the
+ * exact capability grant the published package ships with: a surface registered
+ * without a matching manifest capability fails activation here the same way it
+ * would in the CLI, instead of passing against a permissive stub.
+ */
+const MANIFEST_CAPABILITIES: readonly ExtensionCapability[] = (
+  JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "manifest.json"), "utf8"),
+  ) as { capabilities: ExtensionCapability[] }
+).capabilities;
+
+/** Shape of the `brief diverge` command result asserted by the wiring test. */
+interface DivergeCommandResult {
+  ok?: boolean;
+  format?: string;
+  output?: string;
+  verdict?: string;
+  pmBriefRendered?: boolean;
+}
+
+let cachedActivation: Promise<ExtensionActivationResult> | undefined;
+
+/**
+ * Activate pm-brief through pm's real extension loader, once per test process.
+ *
+ * Replaces the previous hand-built `api` doubles: those could not satisfy the
+ * real `ExtensionApi` contract without casting, and silently skipped the
+ * capability governance the host applies. Activation is deterministic and has no
+ * side effects, so the result is memoized and shared across tests.
+ */
+function activateBrief(): Promise<ExtensionActivationResult> {
+  cachedActivation ??= (async () => {
+    const activation = await activateExtensionForTest(extension, {
+      name: "pm-brief",
+      capabilities: MANIFEST_CAPABILITIES,
+    });
+    assert.deepEqual(activation.failed, [], "extension activation must not fail");
+    return activation;
+  })();
+  return cachedActivation;
+}
+
+/** Command paths registered by the extension, in registration order. */
+async function registeredCommandPaths(): Promise<string[]> {
+  return (await activateBrief()).registrations.commands.map((entry) => entry.command);
+}
+
+/** Flag definitions registered against one command path. */
+async function registeredFlags(command: string): Promise<readonly FlagDefinition[]> {
+  const entry = (await activateBrief()).registrations.flags.find(
+    (candidate) => candidate.target_command === command,
+  );
+  assert.ok(entry, `flags should be registered for "${command}"`);
+  return entry.flags;
+}
+
+/** Long-form flag names registered against one command path. */
+async function registeredFlagLongs(command: string): Promise<(string | undefined)[]> {
+  return (await registeredFlags(command)).map((flag) => flag.long);
+}
+
 const items: PmItem[] = [
   {
     id: "pm-a",
@@ -92,22 +161,16 @@ const items: PmItem[] = [
   },
 ];
 
-test("extension registers brief commands", () => {
-  const commands: Array<Record<string, unknown>> = [];
-  extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  assert.deepEqual(commands.map((command) => command.name), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates"]);
-  const nextFlags = commands.find((command) => command.name === "brief next")?.flags as Array<Record<string, unknown>>;
-  assert.ok(nextFlags.some((flag) => flag.long === "--explain"));
-  assert.ok(nextFlags.some((flag) => flag.long === "--confidence"));
+test("extension registers brief commands", async () => {
+  assert.deepEqual(await registeredCommandPaths(), ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates"]);
+  const nextFlags = await registeredFlagLongs("brief next");
+  assert.ok(nextFlags.includes("--explain"));
+  assert.ok(nextFlags.includes("--confidence"));
 });
 
-test("brief next command exposes explain flag", () => {
-  const commands: Array<Record<string, unknown>> = [];
-  extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  const nextCommand = commands.find((command) => command.name === "brief next");
-  assert.ok(nextCommand, "brief next command should be registered");
-  const flags = (nextCommand.flags as Array<{ long?: string }>).map((flag) => flag.long);
-  assert.ok(flags.includes("--explain"));
+test("brief next command exposes explain flag", async () => {
+  assert.ok((await registeredCommandPaths()).includes("brief next"), "brief next command should be registered");
+  assert.ok((await registeredFlagLongs("brief next")).includes("--explain"));
 });
 
 test("extractRelationships normalizes dependency fields", () => {
@@ -462,14 +525,11 @@ test("renderAgentPrompt emits copy-pasteable next-turn instructions", () => {
   assert.equal(deduped.match(/docs\/context\.md/g)?.length, 1);
 });
 
-test("extension registers --include-history, --history-limit, and --format slack flags", () => {
-  const commands: Array<Record<string, unknown>> = [];
-  extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  const briefCommand = commands.find((command) => command.name === "brief");
-  const flags = (briefCommand?.flags as Array<{ long?: string }>).map((flag) => flag.long);
+test("extension registers --include-history, --history-limit, and --format slack flags", async () => {
+  const flags = await registeredFlagLongs("brief");
   assert.ok(flags.includes("--include-history"));
   assert.ok(flags.includes("--history-limit"));
-  const formatFlag = (briefCommand?.flags as Array<{ long?: string; description?: string }>).find((flag) => flag.long === "--format");
+  const formatFlag = (await registeredFlags("brief")).find((flag) => flag.long === "--format");
   assert.match(formatFlag?.description ?? "", /slack/);
 });
 
@@ -687,14 +747,10 @@ test("renderAgentPrompt surfaces momentum when items closed recently", () => {
   assert.match(prompt, /Closed 3 item\(s\) in the last 7 day\(s\); throughput 0.43\/day, median cycle 5d/);
 });
 
-test("brief command registers a --completed-days flag and brief momentum exposes --days", () => {
-  const commands: Array<Record<string, unknown>> = [];
-  extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-  const briefFlags = (commands.find((command) => command.name === "brief")?.flags as Array<{ long?: string }>).map((flag) => flag.long);
-  assert.ok(briefFlags.includes("--completed-days"));
-  const momentumCommand = commands.find((command) => command.name === "brief momentum");
-  assert.ok(momentumCommand, "brief momentum command should be registered");
-  const momentumFlags = (momentumCommand.flags as Array<{ long?: string }>).map((flag) => flag.long);
+test("brief command registers a --completed-days flag and brief momentum exposes --days", async () => {
+  assert.ok((await registeredFlagLongs("brief")).includes("--completed-days"));
+  assert.ok((await registeredCommandPaths()).includes("brief momentum"), "brief momentum command should be registered");
+  const momentumFlags = await registeredFlagLongs("brief momentum");
   assert.ok(momentumFlags.includes("--days"));
   assert.ok(momentumFlags.includes("--format"));
 });
@@ -1585,29 +1641,24 @@ describe("brief diverge end-to-end", () => {
       // This is what covers the wiring the unit tests cannot reach: ref resolution,
       // pmRootRelFromCtx, listChangedPaths, classifyPaths, the check-attr fence probe,
       // renderer selection and --output.
-      const commands: Array<Record<string, unknown>> = [];
-      extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-      const diverge = commands.find((command) => command.name === "brief diverge");
-      assert.ok(diverge, "brief diverge command should be registered");
-      const run = diverge!.run as (ctx: Record<string, unknown>) => Promise<any>;
+      const { commands } = await activateBrief();
+      const runDiverge = async (options: Record<string, unknown>): Promise<DivergeCommandResult> =>
+        (await runRegisteredCommandForTest(commands, {
+          command: "brief diverge",
+          args: ["branch-b"],
+          options,
+          pmRoot: ".agents/pm",
+        })).result as DivergeCommandResult;
 
       // the command resolves the repo from process.cwd(), so run it inside the fixture
       const previousCwd = process.cwd();
-      let jsonResult: any;
-      let markdownResult: any;
+      let jsonResult: DivergeCommandResult;
+      let markdownResult: DivergeCommandResult;
       const outFile = path.join(tmpDir, "diverge.json");
       try {
         process.chdir(tmpDir);
-        jsonResult = await run({
-          args: ["branch-b"],
-          options: { head: "branch-a", "include-clean": true, format: "json", output: outFile },
-          pm_root: ".agents/pm",
-        });
-        markdownResult = await run({
-          args: ["branch-b"],
-          options: { head: "branch-a", "include-clean": true },
-          pm_root: ".agents/pm",
-        });
+        jsonResult = await runDiverge({ head: "branch-a", "include-clean": true, format: "json", output: outFile });
+        markdownResult = await runDiverge({ head: "branch-a", "include-clean": true });
       } finally {
         process.chdir(previousCwd);
       }
@@ -1999,33 +2050,28 @@ describe("brief duplicates", () => {
     assert.throws(() => parseSinceTimestamp("2026-13-40"), /ISO 8601 timestamp/);
   });
 
-  test("brief duplicates command is registered with the expected flags", () => {
-    const commands: Array<Record<string, unknown>> = [];
-    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-    const dup = commands.find((command) => command.name === "brief duplicates");
-    assert.ok(dup, "brief duplicates command should be registered");
-    const flags = (dup!.flags as Array<{ long?: string }>).map((flag) => flag.long);
+  test("brief duplicates command is registered with the expected flags", async () => {
+    assert.ok((await registeredCommandPaths()).includes("brief duplicates"), "brief duplicates command should be registered");
+    const flags = await registeredFlagLongs("brief duplicates");
     for (const expected of ["--threshold", "--limit", "--status", "--since", "--format", "--output"]) {
       assert.ok(flags.includes(expected), `flag ${expected} should be registered`);
     }
   });
 
   test("command run rejects an out-of-range --threshold before touching the tracker", async () => {
-    const commands: Array<Record<string, unknown>> = [];
-    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-    const dup = commands.find((command) => command.name === "brief duplicates");
-    const run = dup!.run as (ctx: Record<string, unknown>) => Promise<unknown>;
-    await assert.rejects(() => run({ args: [], options: { threshold: "1.5" }, pm_root: "/nonexistent-tracker" }), /between 0 and 1/);
-    await assert.rejects(() => run({ args: [], options: { threshold: "-0.2" }, pm_root: "/nonexistent-tracker" }), /between 0 and 1/);
-    await assert.rejects(() => run({ args: [], options: { threshold: "abc" }, pm_root: "/nonexistent-tracker" }), /between 0 and 1/);
+    const { commands } = await activateBrief();
+    const run = (options: Record<string, unknown>) =>
+      runRegisteredCommandForTest(commands, { command: "brief duplicates", options, pmRoot: "/nonexistent-tracker" });
+    await assert.rejects(() => run({ threshold: "1.5" }), /between 0 and 1/);
+    await assert.rejects(() => run({ threshold: "-0.2" }), /between 0 and 1/);
+    await assert.rejects(() => run({ threshold: "abc" }), /between 0 and 1/);
   });
 
   test("command run rejects a non-ISO --since before touching the tracker", async () => {
-    const commands: Array<Record<string, unknown>> = [];
-    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-    const dup = commands.find((command) => command.name === "brief duplicates");
-    const run = dup!.run as (ctx: Record<string, unknown>) => Promise<unknown>;
-    await assert.rejects(() => run({ args: [], options: { since: "7d" }, pm_root: "/nonexistent-tracker" }), /ISO 8601 timestamp/);
+    const { commands } = await activateBrief();
+    const run = (options: Record<string, unknown>) =>
+      runRegisteredCommandForTest(commands, { command: "brief duplicates", options, pmRoot: "/nonexistent-tracker" });
+    await assert.rejects(() => run({ since: "7d" }), /ISO 8601 timestamp/);
   });
 
   test("buildDuplicateSweep reports truncation instead of hiding it", () => {
@@ -2113,10 +2159,9 @@ describe("brief duplicates", () => {
   });
 
   test("command run rejects an invalid --format", async () => {
-    const commands: Array<Record<string, unknown>> = [];
-    extension.activate({ registerCommand(command: Record<string, unknown>) { commands.push(command); } });
-    const dup = commands.find((command) => command.name === "brief duplicates");
-    const run = dup!.run as (ctx: Record<string, unknown>) => Promise<unknown>;
-    await assert.rejects(() => run({ args: [], options: { format: "yaml" }, pm_root: "/nonexistent-tracker" }), /--format must be text, json, or markdown/);
+    const { commands } = await activateBrief();
+    const run = (options: Record<string, unknown>) =>
+      runRegisteredCommandForTest(commands, { command: "brief duplicates", options, pmRoot: "/nonexistent-tracker" });
+    await assert.rejects(() => run({ format: "yaml" }), /--format must be text, json, or markdown/);
   });
 });
