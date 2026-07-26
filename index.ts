@@ -1,13 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { resolve as pathResolve, relative as pathRelative, sep as pathSep, isAbsolute as pathIsAbsolute } from "node:path";
-import type { defineExtension as defineExtensionType } from "@unbrained/pm-cli/sdk";
+import { defineExtension } from "@unbrained/pm-cli/sdk/authoring";
+import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { findSimilarItems } from "@unbrained/pm-cli/sdk";
 import type { SimilarItemMatch } from "@unbrained/pm-cli/sdk";
 
 export type { SimilarItemMatch } from "@unbrained/pm-cli/sdk";
-
-const defineExtension: typeof defineExtensionType = ((extension: any) => extension) as any;
 
 const PM_EXECUTABLE = process.platform === "win32" ? "pm.cmd" : "pm";
 const PM_PATH_OPTION = "--pm-path";
@@ -3482,7 +3481,7 @@ export default defineExtension({
   name: "pm-brief",
   version: "2026.7.26",
   description: "Token-budgeted agent briefs and next-work plans for pm workspaces",
-  activate(api: any) {
+  activate(api: ExtensionApi) {
     registerCommands(api);
     if (typeof api.registerRenderer === "function") {
       api.registerRenderer("toon", renderCommandResult);

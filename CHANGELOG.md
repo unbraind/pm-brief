@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Adopt pm-cli 2026.7.26 typed authoring SDK: drop the any-cast defineExtension shim and move tests onto the real activation harness ([pm-brief-iapt](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-iapt.toon))
+
 ## 2026.7.26 - 2026-07-26
 
 ### Added

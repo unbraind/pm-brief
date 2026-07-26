@@ -1,0 +1,19 @@
+id: pm-brief-iapt
+title: "Adopt pm-cli 2026.7.26 typed authoring SDK: drop the any-cast defineExtension shim and move tests onto the real activation harness"
+description: "Replace the forced-any defineExtension shim with the real defineExtension and ExtensionApi from the new sdk/authoring subpath, and migrate the nine hand-built api doubles in the test suite to activateExtensionForTest/runRegisteredCommandForTest so registration is verified under the manifest capability grant rather than a permissive stub."
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-26T06:05:33.362Z"
+updated_at: "2026-07-26T06:24:13.317Z"
+closed_at: "2026-07-26T06:24:13.316Z"
+author: "harness:claude-code"
+acceptance_criteria: index.ts imports defineExtension and ExtensionApi from @unbrained/pm-cli/sdk/authoring with no any casts; No hand-built ExtensionApi doubles remain in test/brief.test.ts; Activation capabilities are read from manifest.json so an undeclared surface fails the test; npm test passes and pm brief/duplicates/next run in a real installed workspace
+resolution: "Replaced the any-cast defineExtension shim with the real defineExtension and ExtensionApi from @unbrained/pm-cli/sdk/authoring, and migrated all nine hand-built api doubles onto activateExtensionForTest/runRegisteredCommandForTest with the capability grant read from manifest.json."
+expected_result: "Extension definition path free of any casts, tests exercising the real activation contract under manifest capability governance, and no behavior change."
+actual_result: "121/121 tests pass; typecheck, build and pack:dry-run clean; functional install into a throwaway workspace confirmed pm brief, pm brief duplicates, pm brief next --explain and pm brief momentum all run."
+notes[1]{created_at,author,text}:
+  "2026-07-26T06:05:40.074Z","harness:claude-code","Verified upstream: value imports from @unbrained/pm-cli/sdk/authoring resolve at extension runtime once the package's node_modules is populated (npm install of the declared peer dep). Confirmed by installing the built extension into a throwaway workspace: pm brief, pm brief duplicates (SDK findSimilarItems), pm brief next --explain and pm brief momentum all run. Corrected upstream pm-cli#717 in-thread accordingly."
+close_reason: Implemented and verified in PR #43
+body: ""
