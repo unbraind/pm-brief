@@ -174,6 +174,22 @@ Each report ends with an ordered `Recommended next steps` block containing only
 the commands that apply, including `pm history <id> --verify` per high-severity
 item and a `pm brief since <merge-base-date>` for post-merge re-orientation.
 
+### Default governance scan cost
+
+`pm brief` and `pm brief prompt` run the shared SDK governance scanners by
+default: duplicate clusters, stale in-progress history, storage integrity, and
+credential-shaped item text. The independent asynchronous scans run
+concurrently and fail independently, so an advisory scanner cannot suppress the
+core brief. Use `--no-governance` for latency-sensitive calls that do not need
+these signals.
+
+Measured on a real 481-item tracker with pm CLI 2026.7.26, loading item bodies
+and collecting the complete governance summary took **1.48 seconds** with
+**137 MB peak RSS**. The report remains bounded to 3/5/5/5 findings before the
+normal token-budget compaction tightens it further. Runtime depends on tracker
+size and history volume; use the governance-free flag when sub-second context is
+more important than the audit signals.
+
 ### Post-merge duplicate sweep (`pm brief duplicates`)
 
 `pm brief diverge` closes the *pre*-merge gap. There is still one hole it cannot

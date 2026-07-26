@@ -1030,6 +1030,8 @@ const GOVERNANCE_MAX_CLUSTERS = 3;
 const GOVERNANCE_MAX_STALE = 5;
 const GOVERNANCE_MAX_STORAGE = 5;
 const GOVERNANCE_MAX_SECRETS = 5;
+/** Top-level item fields that `pm update` accepts as direct value flags. */
+const SECRET_REMEDIABLE_FIELDS = new Set(["title", "description", "body"]);
 
 /**
  * Map a `scanMutationSecrets` JSON-path (e.g. `$.description`) to a short field
@@ -1050,20 +1052,34 @@ function secretFieldFromPath(path: string): string {
  * canonical member (oldest by `created_at`, falling back to id order) and
  * relates every other member to it. The command is output only.
  */
-function duplicateClusterRemediation(cluster: DuplicateCluster): string {
+function duplicateClusterRemediation(
+  cluster: DuplicateCluster,
+  itemsById: ReadonlyMap<string, PmItem>,
+): string {
   if (cluster.items.length < 2) return "";
-  const sorted = [...cluster.items].sort((a, b) => (a.id <= b.id ? -1 : 1));
-  // Keep the lexically first item as canonical; relate the rest to it.
+  const sorted = [...cluster.items].sort((a, b) => {
+    const aCreated = Date.parse(itemsById.get(a.id)?.created_at ?? "");
+    const bCreated = Date.parse(itemsById.get(b.id)?.created_at ?? "");
+    if (Number.isFinite(aCreated) && Number.isFinite(bCreated) && aCreated !== bCreated) {
+      return aCreated - bCreated;
+    }
+    return a.id.localeCompare(b.id);
+  });
   const canonical = sorted[0];
-  const other = sorted[1];
-  return `pm update ${other.id} --dep id=${canonical.id},kind=related`;
+  return sorted
+    .slice(1)
+    .map((other) => `pm update ${other.id} --dep id=${canonical.id},kind=related`)
+    .join(" && ");
 }
 
 /**
  * Convert a raw SDK `DuplicateCluster` into the brief's budget-friendly shape
  * with an actionable remediation command.
  */
-function toGovernanceDuplicateCluster(cluster: DuplicateCluster): GovernanceDuplicateCluster {
+function toGovernanceDuplicateCluster(
+  cluster: DuplicateCluster,
+  itemsById: ReadonlyMap<string, PmItem>,
+): GovernanceDuplicateCluster {
   const reason = cluster.matches[0]?.reason ?? "title_token_jaccard";
   return {
     clusterId: cluster.id,
@@ -1075,7 +1091,7 @@ function toGovernanceDuplicateCluster(cluster: DuplicateCluster): GovernanceDupl
     })),
     maxScore: Math.round(cluster.max_score * 1000) / 1000,
     reason,
-    remediation: duplicateClusterRemediation(cluster),
+    remediation: duplicateClusterRemediation(cluster, itemsById),
   };
 }
 
@@ -1167,11 +1183,14 @@ function scanItemSecrets(items: readonly PmItem[]): GovernanceSecretFinding[] {
     // (title, description, body, and any custom string field).
     const raw: SecretGuardFinding[] = scanMutationSecrets(item);
     for (const finding of raw) {
+      const field = secretFieldFromPath(finding.path);
       findings.push({
         itemId: item.id,
-        field: secretFieldFromPath(finding.path),
+        field,
         rule: finding.rule,
-        remediation: `pm update ${item.id} --${secretFieldFromPath(finding.path)} "<redacted: remove the ${finding.rule}>"`,
+        remediation: SECRET_REMEDIABLE_FIELDS.has(field)
+          ? `pm update ${item.id} --${field} "<redacted: remove the ${finding.rule}>"`
+          : `pm get ${item.id}  # inspect and remove the detected secret from its unsupported field`,
       });
     }
   }
@@ -1215,9 +1234,10 @@ export interface GovernanceScanOptions {
 /**
  * Collect governance findings from the sdk/governance scanners: duplicate
  * clusters, stale in-progress items, storage-integrity problems, and
- * credential-shaped secrets in item text. All four scanners run; the returned
- * summary is pre-capped per section so the brief's budget machinery never sees
- * an unbounded dump. The secret value is NEVER returned or printed.
+ * credential-shaped secrets in item text. Independent asynchronous scans run
+ * concurrently and each scanner degrades to an empty section on failure, so an
+ * advisory cannot suppress the core brief. The returned summary is pre-capped
+ * per section. The secret value is NEVER returned or printed.
  */
 export async function collectGovernanceSignals(
   items: readonly PmItem[],
@@ -1228,30 +1248,38 @@ export async function collectGovernanceSignals(
   const staleHours = options.staleHours ?? GOVERNANCE_STALE_HOURS;
   const generatedAt = options.generatedAt ?? new Date().toISOString();
 
-  // Duplicate clusters — one bounded metadata-read sweep via the SDK.
-  const duplicateResult = await findDuplicateClusters({ pmRoot, threshold });
-  const allClusters = duplicateResult.clusters
-    .map(toGovernanceDuplicateCluster)
-    .sort((a, b) => b.maxScore - a.maxScore);
-
-  // Stale in-progress items — history-aware scan via the SDK.
   const metadata = items.map(toItemMetadata);
-  const staleScan = await scanStaleInProgressItems(pmRoot, metadata, {
-    threshold_hours: staleHours,
-    // Inject `now` so the brief is deterministic for the generated-at timestamp.
-    now: new Date(generatedAt),
-  });
-  const allStale = toGovernanceStaleItems(staleScan);
-
-  // Storage integrity — needs the type-to-folder registry resolved from settings.
-  const settings = await readSettings(pmRoot);
-  const typeRegistry = resolveItemTypeRegistry(settings);
   const parsedItemIds = new Set(items.map((item) => item.id));
-  const storageScan = await scanStorageIntegrity(pmRoot, parsedItemIds, typeRegistry.type_to_folder);
-  const allStorage = toGovernanceStorageFindings(storageScan);
-
-  // Secrets — sync scan of every item's text fields. Value never returned.
-  const allSecrets = scanItemSecrets(items);
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const [duplicateResult, staleResult, storageResult] = await Promise.allSettled([
+    findDuplicateClusters({ pmRoot, threshold }),
+    scanStaleInProgressItems(pmRoot, metadata, {
+      threshold_hours: staleHours,
+      now: new Date(generatedAt),
+    }),
+    (async (): Promise<GovernanceStorageFinding[]> => {
+      const settings = await readSettings(pmRoot);
+      const typeRegistry = resolveItemTypeRegistry(settings);
+      return toGovernanceStorageFindings(
+        await scanStorageIntegrity(pmRoot, parsedItemIds, typeRegistry.type_to_folder),
+      );
+    })(),
+  ]);
+  const allClusters = duplicateResult.status === "fulfilled"
+    ? duplicateResult.value.clusters
+      .map((cluster) => toGovernanceDuplicateCluster(cluster, itemsById))
+      .sort((a, b) => b.maxScore - a.maxScore)
+    : [];
+  const allStale = staleResult.status === "fulfilled"
+    ? toGovernanceStaleItems(staleResult.value)
+    : [];
+  const allStorage = storageResult.status === "fulfilled" ? storageResult.value : [];
+  let allSecrets: GovernanceSecretFinding[] = [];
+  try {
+    allSecrets = scanItemSecrets(items);
+  } catch {
+    // Secret scanning is advisory; malformed custom data must not suppress the brief.
+  }
 
   return {
     duplicateClusters: allClusters.slice(0, GOVERNANCE_MAX_CLUSTERS),
@@ -1284,7 +1312,7 @@ function compactGovernance(g: GovernanceSummary, clusters: number, stale: number
 }
 
 /** True when every governance section is empty (nothing to surface). */
-export function governanceIsEmpty(g: GovernanceSummary | undefined): g is undefined {
+export function governanceIsEmpty(g: GovernanceSummary | undefined): boolean {
   if (!g) return true;
   return (
     g.duplicateClusters.length === 0 &&
@@ -1416,42 +1444,42 @@ function renderNextExplanationLine(entry: NextItemExplanation): string {
  * empty array when there is no governance section or every subsection is empty.
  */
 function renderGovernanceMarkdown(g: GovernanceSummary | undefined): string[] {
-  if (governanceIsEmpty(g)) return [];
+  if (!g || governanceIsEmpty(g)) return [];
   const lines: string[] = ["## Governance", ""];
-  if (g!.duplicateClusters.length > 0) {
-    const more = g!.duplicateClustersTotal > g!.duplicateClusters.length ? ` (+${g!.duplicateClustersTotal - g!.duplicateClusters.length} more)` : "";
-    lines.push(`### Duplicate clusters (threshold ${g!.threshold})${more}`, "");
-    for (const cluster of g!.duplicateClusters) {
+  if (g.duplicateClusters.length > 0) {
+    const more = g.duplicateClustersTotal > g.duplicateClusters.length ? ` (+${g.duplicateClustersTotal - g.duplicateClusters.length} more)` : "";
+    lines.push(`### Duplicate clusters (threshold ${g.threshold})${more}`, "");
+    for (const cluster of g.duplicateClusters) {
       lines.push(`- **${cluster.clusterId}** — score ${cluster.maxScore} (${cluster.reason})`);
       for (const item of cluster.items) lines.push(`  - \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status})`);
       if (cluster.remediation) lines.push(`  - → \`${cluster.remediation}\``);
     }
     lines.push("");
   }
-  if (g!.staleInProgress.length > 0) {
-    const more = g!.staleInProgressTotal > g!.staleInProgress.length ? ` (+${g!.staleInProgressTotal - g!.staleInProgress.length} more)` : "";
-    lines.push(`### Stale in-progress (${g!.staleThresholdHours}h threshold)${more}`, "");
-    for (const item of g!.staleInProgress) {
+  if (g.staleInProgress.length > 0) {
+    const more = g.staleInProgressTotal > g.staleInProgress.length ? ` (+${g.staleInProgressTotal - g.staleInProgress.length} more)` : "";
+    lines.push(`### Stale in-progress (${g.staleThresholdHours}h threshold)${more}`, "");
+    for (const item of g.staleInProgress) {
       lines.push(`- \`${item.id}\` — ${item.ageHours}h since last activity (${item.lastActivityAt})`);
       if (item.remediation) lines.push(`  - → \`${item.remediation}\``);
     }
     lines.push("");
   }
-  if (g!.storageFindings.length > 0) {
-    const more = g!.storageFindingsTotal > g!.storageFindings.length ? ` (+${g!.storageFindingsTotal - g!.storageFindings.length} more)` : "";
+  if (g.storageFindings.length > 0) {
+    const more = g.storageFindingsTotal > g.storageFindings.length ? ` (+${g.storageFindingsTotal - g.storageFindings.length} more)` : "";
     lines.push(`### Storage integrity${more}`, "");
-    for (const finding of g!.storageFindings) {
+    for (const finding of g.storageFindings) {
       const idPart = finding.id ? ` \`${finding.id}\`` : "";
       lines.push(`- ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
       if (finding.remediation) lines.push(`  - → \`${finding.remediation}\``);
     }
     lines.push("");
   }
-  if (g!.secretFindings.length > 0) {
-    const more = g!.secretFindingsTotal > g!.secretFindings.length ? ` (+${g!.secretFindingsTotal - g!.secretFindings.length} more)` : "";
+  if (g.secretFindings.length > 0) {
+    const more = g.secretFindingsTotal > g.secretFindings.length ? ` (+${g.secretFindingsTotal - g.secretFindings.length} more)` : "";
     // ⚠ Secret values are NEVER printed — only the item id, field, and detector rule.
     lines.push(`### ⚠ Secrets in item text${more}`, "");
-    for (const finding of g!.secretFindings) {
+    for (const finding of g.secretFindings) {
       lines.push(`- \`${finding.itemId}\` field \`${finding.field}\` — detector: ${finding.rule}`);
       if (finding.remediation) lines.push(`  - → \`${finding.remediation}\``);
     }
@@ -1465,41 +1493,41 @@ function renderGovernanceMarkdown(g: GovernanceSummary | undefined): string[] {
  * array when there is no governance section or every subsection is empty.
  */
 function renderGovernanceSlack(g: GovernanceSummary | undefined): string[] {
-  if (governanceIsEmpty(g)) return [];
+  if (!g || governanceIsEmpty(g)) return [];
   const lines: string[] = ["*Governance*", ""];
-  if (g!.duplicateClusters.length > 0) {
-    const more = g!.duplicateClustersTotal > g!.duplicateClusters.length ? ` (+${g!.duplicateClustersTotal - g!.duplicateClusters.length} more)` : "";
-    lines.push(`_Duplicate clusters (threshold ${g!.threshold})${more}_`);
-    for (const cluster of g!.duplicateClusters) {
-      lines.push(`• **${cluster.clusterId}** — score ${cluster.maxScore} (${cluster.reason})`);
+  if (g.duplicateClusters.length > 0) {
+    const more = g.duplicateClustersTotal > g.duplicateClusters.length ? ` (+${g.duplicateClustersTotal - g.duplicateClusters.length} more)` : "";
+    lines.push(`_Duplicate clusters (threshold ${g.threshold})${more}_`);
+    for (const cluster of g.duplicateClusters) {
+      lines.push(`• *${cluster.clusterId}* — score ${cluster.maxScore} (${cluster.reason})`);
       for (const item of cluster.items) lines.push(`  • \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status})`);
       if (cluster.remediation) lines.push(`  • → \`${cluster.remediation}\``);
     }
     lines.push("");
   }
-  if (g!.staleInProgress.length > 0) {
-    const more = g!.staleInProgressTotal > g!.staleInProgress.length ? ` (+${g!.staleInProgressTotal - g!.staleInProgress.length} more)` : "";
-    lines.push(`_Stale in-progress (${g!.staleThresholdHours}h)${more}_`);
-    for (const item of g!.staleInProgress) {
+  if (g.staleInProgress.length > 0) {
+    const more = g.staleInProgressTotal > g.staleInProgress.length ? ` (+${g.staleInProgressTotal - g.staleInProgress.length} more)` : "";
+    lines.push(`_Stale in-progress (${g.staleThresholdHours}h)${more}_`);
+    for (const item of g.staleInProgress) {
       lines.push(`• \`${item.id}\` — ${item.ageHours}h since last activity`);
       if (item.remediation) lines.push(`  • → \`${item.remediation}\``);
     }
     lines.push("");
   }
-  if (g!.storageFindings.length > 0) {
-    const more = g!.storageFindingsTotal > g!.storageFindings.length ? ` (+${g!.storageFindingsTotal - g!.storageFindings.length} more)` : "";
+  if (g.storageFindings.length > 0) {
+    const more = g.storageFindingsTotal > g.storageFindings.length ? ` (+${g.storageFindingsTotal - g.storageFindings.length} more)` : "";
     lines.push(`_Storage integrity${more}_`);
-    for (const finding of g!.storageFindings) {
+    for (const finding of g.storageFindings) {
       const idPart = finding.id ? ` \`${finding.id}\`` : "";
       lines.push(`• ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
       if (finding.remediation) lines.push(`  • → \`${finding.remediation}\``);
     }
     lines.push("");
   }
-  if (g!.secretFindings.length > 0) {
-    const more = g!.secretFindingsTotal > g!.secretFindings.length ? ` (+${g!.secretFindingsTotal - g!.secretFindings.length} more)` : "";
+  if (g.secretFindings.length > 0) {
+    const more = g.secretFindingsTotal > g.secretFindings.length ? ` (+${g.secretFindingsTotal - g.secretFindings.length} more)` : "";
     lines.push(`_⚠ Secrets in item text${more}_`);
-    for (const finding of g!.secretFindings) {
+    for (const finding of g.secretFindings) {
       lines.push(`• \`${finding.itemId}\` field \`${finding.field}\` — detector: ${finding.rule}`);
       if (finding.remediation) lines.push(`  • → \`${finding.remediation}\``);
     }
@@ -1513,23 +1541,23 @@ function renderGovernanceSlack(g: GovernanceSummary | undefined): string[] {
  * array when there is no governance section or every subsection is empty.
  */
 function renderGovernanceAgentPrompt(g: GovernanceSummary | undefined): string[] {
-  if (governanceIsEmpty(g)) return [];
+  if (!g || governanceIsEmpty(g)) return [];
   const lines: string[] = ["Governance findings (act before starting new work):"];
-  for (const cluster of g!.duplicateClusters) {
+  for (const cluster of g.duplicateClusters) {
     const members = cluster.items.map((i) => `${i.id}:${escapeLine(i.title)}`).join(", ");
     lines.push(`- duplicate cluster ${cluster.clusterId} (score ${cluster.maxScore}, ${cluster.reason}): ${members}`);
     if (cluster.remediation) lines.push(`  - ${cluster.remediation}`);
   }
-  for (const item of g!.staleInProgress) {
+  for (const item of g.staleInProgress) {
     lines.push(`- stale in-progress ${item.id}: ${item.ageHours}h since last activity`);
     if (item.remediation) lines.push(`  - ${item.remediation}`);
   }
-  for (const finding of g!.storageFindings) {
+  for (const finding of g.storageFindings) {
     const idPart = finding.id ? ` ${finding.id}` : "";
     lines.push(`- storage ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
     if (finding.remediation) lines.push(`  - ${finding.remediation}`);
   }
-  for (const finding of g!.secretFindings) {
+  for (const finding of g.secretFindings) {
     // ⚠ Never print the secret value — only the item id, field, and detector rule.
     lines.push(`- ⚠ secret in ${finding.itemId} field \`${finding.field}\` (detector: ${finding.rule}) — remove before publishing`);
     if (finding.remediation) lines.push(`  - ${finding.remediation}`);
@@ -3558,8 +3586,9 @@ export function renderTextGovernance(g: GovernanceSummary): string {
 /** Render a standalone governance summary as markdown. */
 export function renderMarkdownGovernance(g: GovernanceSummary): string {
   const lines = ["# pm brief governance", "", `Generated: ${g.generatedAt}`, ""];
-  lines.push(...renderGovernanceMarkdown(g));
-  if (lines.length <= 4) lines.push("_No governance findings._");
+  const body = renderGovernanceMarkdown(g);
+  if (body.length === 0) lines.push("_No governance findings._");
+  else lines.push(...body);
   return `${lines.join("\n")}\n`;
 }
 
