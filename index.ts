@@ -2,11 +2,30 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { resolve as pathResolve, relative as pathRelative, sep as pathSep, isAbsolute as pathIsAbsolute } from "node:path";
 import { defineExtension } from "@unbrained/pm-cli/sdk/authoring";
-import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
+import type { ExtensionApi, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
 import { findSimilarItems } from "@unbrained/pm-cli/sdk";
-import type { SimilarItemMatch } from "@unbrained/pm-cli/sdk";
+import type { CommandHandlerContext, SimilarItemMatch, ItemMetadata } from "@unbrained/pm-cli/sdk";
+import {
+  findDuplicateClusters,
+  scanStaleInProgressItems,
+  scanStorageIntegrity,
+  scanMutationSecrets,
+} from "@unbrained/pm-cli/sdk/governance";
+import type {
+  DuplicateCluster,
+  SecretGuardFinding,
+  StorageIntegrityScanResult,
+  StaleInProgressScan,
+} from "@unbrained/pm-cli/sdk/governance";
+import { readSettings, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
 
 export type { SimilarItemMatch } from "@unbrained/pm-cli/sdk";
+export type {
+  DuplicateCluster,
+  SecretGuardFinding,
+  StorageIntegrityScanResult,
+  StaleInProgressScan,
+} from "@unbrained/pm-cli/sdk/governance";
 
 const PM_EXECUTABLE = process.platform === "win32" ? "pm.cmd" : "pm";
 const PM_PATH_OPTION = "--pm-path";
@@ -76,6 +95,8 @@ export interface BriefOptions {
    * deterministic tiebreak for any candidate `pm next` did not rank.
    */
   nextOrder?: string[];
+  /** Pre-collected governance findings from sdk/governance scanners; when omitted the brief carries no governance section. */
+  governance?: GovernanceSummary;
 }
 
 export interface BriefItem {
@@ -204,6 +225,96 @@ export interface AgentBrief {
   decisionsNeeded: BriefItem[];
   recommendedPmUpdates: RecommendedPmUpdate[];
   insights?: BriefInsight[];
+  /** Governance findings from sdk/governance scanners; present when the brief collected them. */
+  governance?: GovernanceSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Governance — sdk/governance findings surfaced in the brief
+// ---------------------------------------------------------------------------
+
+/** One duplicate cluster found by `findDuplicateClusters`, with an actionable remediation command. */
+export interface GovernanceDuplicateCluster {
+  /** Stable cluster key from the SDK (derived from the lexically first item id). */
+  clusterId: string;
+  /** Member items, ordered by id, with the fields a brief needs. */
+  items: Array<{ id: string; title: string; status: string; type: string }>;
+  /** Strongest pair score in the cluster on the 0..1 scale. */
+  maxScore: number;
+  /** Strongest deterministic match signal (`exact_title`, `issue_code`, or `title_token_jaccard`). */
+  reason: "exact_title" | "issue_code" | "title_token_jaccard";
+  /** Advisory remediation command string; never executed by the brief. */
+  remediation: string;
+}
+
+/** One stale unclaimed in-progress item found by `scanStaleInProgressItems`. */
+export interface GovernanceStaleItem {
+  /** Stable item identifier. */
+  id: string;
+  /** ISO timestamp of the most recent recorded activity. */
+  lastActivityAt: string;
+  /** Whole hours elapsed at scan time. */
+  ageHours: number;
+  /** Advisory remediation command string. */
+  remediation: string;
+}
+
+/** One storage-integrity finding from `scanStorageIntegrity`, classified by kind. */
+export interface GovernanceStorageFinding {
+  /** Finding category derived from the SDK scan result. */
+  kind:
+    | "unreadable_item_file"
+    | "duplicate_item_id"
+    | "history_conflict_marker"
+    | "history_unparseable"
+    | "resurrected_item"
+    | "unparseable_config";
+  /** Item id when the finding is item-scoped; undefined for config findings. */
+  id?: string;
+  /** Tracker-relative path of the affected file. */
+  path: string;
+  /** Human-readable detail (conflict marker text, parse failure reason, etc.). */
+  detail: string;
+  /** Advisory remediation command string. */
+  remediation: string;
+}
+
+/** One credential-shaped match from `scanMutationSecrets`. The secret value is NEVER included. */
+export interface GovernanceSecretFinding {
+  /** Item whose text contained the match. */
+  itemId: string;
+  /** Object path of the match (e.g. `$.description`), mapped to a field name for display. */
+  field: string;
+  /** Stable detector identifier (`github_token`, `npm_token`, `slack_token`, `private_key`, `aws_access_key`, `high_entropy_assignment`). */
+  rule: SecretGuardFinding["rule"];
+  /** Advisory remediation command string. */
+  remediation: string;
+}
+
+/** Token-budgeted governance findings attached to the brief. */
+export interface GovernanceSummary {
+  /** Duplicate clusters, capped for the budget; see `duplicateClustersTotal` for the real count. */
+  duplicateClusters: GovernanceDuplicateCluster[];
+  /** Total duplicate clusters found before budget truncation. */
+  duplicateClustersTotal: number;
+  /** Stale in-progress items, capped for the budget. */
+  staleInProgress: GovernanceStaleItem[];
+  /** Total stale in-progress items before budget truncation. */
+  staleInProgressTotal: number;
+  /** Storage-integrity findings, capped for the budget. */
+  storageFindings: GovernanceStorageFinding[];
+  /** Total storage-integrity findings before budget truncation. */
+  storageFindingsTotal: number;
+  /** Credential-shaped matches (item id + field + rule only, never the value), capped for the budget. */
+  secretFindings: GovernanceSecretFinding[];
+  /** Total secret findings before budget truncation. */
+  secretFindingsTotal: number;
+  /** Effective similarity threshold applied to the duplicate scan. */
+  threshold: number;
+  /** Effective stale-in-progress threshold in hours. */
+  staleThresholdHours: number;
+  /** ISO timestamp the governance summary was generated. */
+  generatedAt: string;
 }
 
 export interface DeltaActivityEntry {
@@ -906,6 +1017,311 @@ function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: F
   return insights;
 }
 
+// ---------------------------------------------------------------------------
+// Governance collection — sdk/governance scanner wrappers
+// ---------------------------------------------------------------------------
+
+/** Default similarity threshold for the brief's duplicate-cluster scan. */
+const GOVERNANCE_DUPLICATE_THRESHOLD = 0.6;
+/** Default stale-in-progress threshold in hours (mirrors the pm workspace default). */
+const GOVERNANCE_STALE_HOURS = 72;
+/** Per-section caps applied before budget compaction; the brief never dumps an unbounded list. */
+const GOVERNANCE_MAX_CLUSTERS = 3;
+const GOVERNANCE_MAX_STALE = 5;
+const GOVERNANCE_MAX_STORAGE = 5;
+const GOVERNANCE_MAX_SECRETS = 5;
+/** Top-level item fields that `pm update` accepts as direct value flags. */
+const SECRET_REMEDIABLE_FIELDS = new Set(["title", "description", "body"]);
+
+/**
+ * Map a `scanMutationSecrets` JSON-path (e.g. `$.description`) to a short field
+ * name for display. The path is the only location information the SDK returns —
+ * the matched secret value is never present, so the field name is the safest
+ * identifier we can give an agent.
+ */
+function secretFieldFromPath(path: string): string {
+  // `$.description` → `description`; `$.nested[0].body` → `nested.body`
+  return path
+    .replace(/^\$\./, "")
+    .replace(/\[\d+\]/g, "")
+    .trim() || "(unknown field)";
+}
+
+/**
+ * Build the advisory remediation command for a duplicate cluster. Picks the
+ * canonical member (oldest by `created_at`, falling back to id order) and
+ * relates every other member to it. The command is output only.
+ */
+function duplicateClusterRemediation(
+  cluster: DuplicateCluster,
+  itemsById: ReadonlyMap<string, PmItem>,
+): string {
+  if (cluster.items.length < 2) return "";
+  const sorted = [...cluster.items].sort((a, b) => {
+    const aCreated = Date.parse(itemsById.get(a.id)?.created_at ?? "");
+    const bCreated = Date.parse(itemsById.get(b.id)?.created_at ?? "");
+    if (Number.isFinite(aCreated) && Number.isFinite(bCreated) && aCreated !== bCreated) {
+      return aCreated - bCreated;
+    }
+    return a.id.localeCompare(b.id);
+  });
+  const canonical = sorted[0];
+  return sorted
+    .slice(1)
+    .map((other) => `pm update ${other.id} --dep id=${canonical.id},kind=related`)
+    .join(" && ");
+}
+
+/**
+ * Convert a raw SDK `DuplicateCluster` into the brief's budget-friendly shape
+ * with an actionable remediation command.
+ */
+function toGovernanceDuplicateCluster(
+  cluster: DuplicateCluster,
+  itemsById: ReadonlyMap<string, PmItem>,
+): GovernanceDuplicateCluster {
+  const reason = cluster.matches[0]?.reason ?? "title_token_jaccard";
+  return {
+    clusterId: cluster.id,
+    items: cluster.items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      type: item.type,
+    })),
+    maxScore: Math.round(cluster.max_score * 1000) / 1000,
+    reason,
+    remediation: duplicateClusterRemediation(cluster, itemsById),
+  };
+}
+
+/**
+ * Convert a raw SDK `StaleInProgressScan` into the brief's governance shape with
+ * the remediation command the SDK already provides.
+ */
+function toGovernanceStaleItems(scan: StaleInProgressScan): GovernanceStaleItem[] {
+  return scan.items.map((item) => ({
+    id: item.id,
+    lastActivityAt: item.last_activity_at,
+    ageHours: item.age_hours,
+    remediation: `pm update ${item.id} --status open  # or pm claim ${item.id} if still active`,
+  }));
+}
+
+/**
+ * Convert a raw SDK `StorageIntegrityScanResult` into the brief's classified
+ * governance findings with actionable remediation commands.
+ */
+function toGovernanceStorageFindings(scan: StorageIntegrityScanResult): GovernanceStorageFinding[] {
+  const findings: GovernanceStorageFinding[] = [];
+  for (const row of scan.unreadable_item_files) {
+    findings.push({
+      kind: "unreadable_item_file",
+      id: row.id,
+      path: row.path,
+      detail: "item file could not be parsed by the standard read path",
+      remediation: `pm get ${row.id}  # inspect the parse failure`,
+    });
+  }
+  for (const row of scan.duplicate_item_ids) {
+    findings.push({
+      kind: "duplicate_item_id",
+      id: row.id,
+      path: row.paths.join(", "),
+      detail: `id ${row.id} claimed by ${row.paths.length} item documents (cross-branch add/add collision)`,
+      remediation: `pm get ${row.id}  # resolve the add/add collision, then delete the loser`,
+    });
+  }
+  for (const row of scan.history_conflict_marker_streams) {
+    findings.push({
+      kind: "history_conflict_marker",
+      id: row.id,
+      path: row.path,
+      detail: `unresolved merge-conflict markers${row.line !== undefined ? ` at line ${row.line}` : ""}`,
+      remediation: `pm history-repair ${row.id}`,
+    });
+  }
+  for (const row of scan.history_unparseable_streams) {
+    findings.push({
+      kind: "history_unparseable",
+      id: row.id,
+      path: row.path,
+      detail: row.detail,
+      remediation: `pm history-repair ${row.id}`,
+    });
+  }
+  for (const row of scan.resurrected_items) {
+    findings.push({
+      kind: "resurrected_item",
+      id: row.id,
+      path: `history/${row.id}.jsonl`,
+      detail: `live item whose newest history operation is a delete (by ${row.deleted_by} at ${row.deleted_at})`,
+      remediation: `pm delete ${row.id}  # or remove the stale delete event`,
+    });
+  }
+  for (const row of scan.unparseable_config_files) {
+    findings.push({
+      kind: "unparseable_config",
+      path: row.path,
+      detail: row.detail,
+      remediation: `pm validate  # config parse failure at ${row.path}`,
+    });
+  }
+  return findings;
+}
+
+/**
+ * Scan every item's text fields for credential-shaped content using the shared
+ * `scanMutationSecrets` primitive. Only the item id, the field path, and the
+ * detector rule are reported — the matched secret value is NEVER returned by the
+ * SDK and is NEVER printed by the brief.
+ */
+function scanItemSecrets(items: readonly PmItem[]): GovernanceSecretFinding[] {
+  const findings: GovernanceSecretFinding[] = [];
+  for (const item of items) {
+    // Pass the whole item as the payload so the SDK inspects every string leaf
+    // (title, description, body, and any custom string field).
+    const raw: SecretGuardFinding[] = scanMutationSecrets(item);
+    for (const finding of raw) {
+      const field = secretFieldFromPath(finding.path);
+      findings.push({
+        itemId: item.id,
+        field,
+        rule: finding.rule,
+        remediation: SECRET_REMEDIABLE_FIELDS.has(field)
+          ? `pm update ${item.id} --${field} "<redacted: remove the ${finding.rule}>"`
+          : `pm get ${item.id}  # inspect and remove the detected secret from its unsupported field`,
+      });
+    }
+  }
+  return findings;
+}
+
+/**
+ * Map a `PmItem` (the brief's loose, all-optional shape from `pm list-all`) into
+ * the `ItemMetadata` the stale-work scanner requires. The brief reads items via
+ * `pm list-all --json --include-body`, which always includes the `ItemMetadata`
+ * required fields, so missing values default to safe empties rather than
+ * `any`-casting the array.
+ */
+function toItemMetadata(item: PmItem): ItemMetadata {
+  const priority = item.priority;
+  return {
+    id: item.id,
+    title: text(item.title) || "(untitled)",
+    description: text(item.description),
+    type: (text(item.type) || "Task") as ItemMetadata["type"],
+    status: (text(item.status) || "open") as ItemMetadata["status"],
+    priority: (priority === 0 || priority === 1 || priority === 2 || priority === 3 || priority === 4 ? priority : 2) as ItemMetadata["priority"],
+    tags: Array.isArray(item.tags) ? item.tags.filter((t): t is string => typeof t === "string") : [],
+    created_at: item.created_at ?? new Date(0).toISOString(),
+    updated_at: item.updated_at ?? item.created_at ?? new Date(0).toISOString(),
+  };
+}
+
+/** Options controlling the governance scan. */
+export interface GovernanceScanOptions {
+  /** Similarity threshold on the 0..1 scale (default 0.6). */
+  threshold?: number;
+  /** Stale-in-progress threshold in hours (default 72). */
+  staleHours?: number;
+  /** Timestamp used for the report header; defaults to now. */
+  generatedAt?: string;
+  /** Explicit pm workspace root. */
+  pmRoot?: string;
+}
+
+/**
+ * Collect governance findings from the sdk/governance scanners: duplicate
+ * clusters, stale in-progress items, storage-integrity problems, and
+ * credential-shaped secrets in item text. Independent asynchronous scans run
+ * concurrently and each scanner degrades to an empty section on failure, so an
+ * advisory cannot suppress the core brief. The returned summary is pre-capped
+ * per section. The secret value is NEVER returned or printed.
+ */
+export async function collectGovernanceSignals(
+  items: readonly PmItem[],
+  options: GovernanceScanOptions = {},
+): Promise<GovernanceSummary> {
+  const pmRoot = options.pmRoot ?? ".agents/pm";
+  const threshold = options.threshold ?? GOVERNANCE_DUPLICATE_THRESHOLD;
+  const staleHours = options.staleHours ?? GOVERNANCE_STALE_HOURS;
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+
+  const metadata = items.map(toItemMetadata);
+  const parsedItemIds = new Set(items.map((item) => item.id));
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const [duplicateResult, staleResult, storageResult] = await Promise.allSettled([
+    findDuplicateClusters({ pmRoot, threshold }),
+    scanStaleInProgressItems(pmRoot, metadata, {
+      threshold_hours: staleHours,
+      now: new Date(generatedAt),
+    }),
+    (async (): Promise<GovernanceStorageFinding[]> => {
+      const settings = await readSettings(pmRoot);
+      const typeRegistry = resolveItemTypeRegistry(settings);
+      return toGovernanceStorageFindings(
+        await scanStorageIntegrity(pmRoot, parsedItemIds, typeRegistry.type_to_folder),
+      );
+    })(),
+  ]);
+  const allClusters = duplicateResult.status === "fulfilled"
+    ? duplicateResult.value.clusters
+      .map((cluster) => toGovernanceDuplicateCluster(cluster, itemsById))
+      .sort((a, b) => b.maxScore - a.maxScore)
+    : [];
+  const allStale = staleResult.status === "fulfilled"
+    ? toGovernanceStaleItems(staleResult.value)
+    : [];
+  const allStorage = storageResult.status === "fulfilled" ? storageResult.value : [];
+  let allSecrets: GovernanceSecretFinding[] = [];
+  try {
+    allSecrets = scanItemSecrets(items);
+  } catch {
+    // Secret scanning is advisory; malformed custom data must not suppress the brief.
+  }
+
+  return {
+    duplicateClusters: allClusters.slice(0, GOVERNANCE_MAX_CLUSTERS),
+    duplicateClustersTotal: allClusters.length,
+    staleInProgress: allStale.slice(0, GOVERNANCE_MAX_STALE),
+    staleInProgressTotal: allStale.length,
+    storageFindings: allStorage.slice(0, GOVERNANCE_MAX_STORAGE),
+    storageFindingsTotal: allStorage.length,
+    secretFindings: allSecrets.slice(0, GOVERNANCE_MAX_SECRETS),
+    secretFindingsTotal: allSecrets.length,
+    threshold,
+    staleThresholdHours: staleHours,
+    generatedAt,
+  };
+}
+
+/**
+ * Apply per-section budget caps to a governance summary. Called by
+ * `compactToBudget` when the brief is over its token budget; the `Total` fields
+ * preserve the real finding count so an agent still knows how many were hidden.
+ */
+function compactGovernance(g: GovernanceSummary, clusters: number, stale: number, storage: number, secrets: number): GovernanceSummary {
+  return {
+    ...g,
+    duplicateClusters: g.duplicateClusters.slice(0, clusters),
+    staleInProgress: g.staleInProgress.slice(0, stale),
+    storageFindings: g.storageFindings.slice(0, storage),
+    secretFindings: g.secretFindings.slice(0, secrets),
+  };
+}
+
+/** True when every governance section is empty (nothing to surface). */
+export function governanceIsEmpty(g: GovernanceSummary | undefined): boolean {
+  if (!g) return true;
+  return (
+    g.duplicateClusters.length === 0 &&
+    g.staleInProgress.length === 0 &&
+    g.storageFindings.length === 0 &&
+    g.secretFindings.length === 0
+  );
+}
+
 function compactToBudget(brief: AgentBrief): AgentBrief {
   const budget = brief.budget.requestedTokens;
   let estimated = estimateTokens(brief);
@@ -918,6 +1334,9 @@ function compactToBudget(brief: AgentBrief): AgentBrief {
     risks: brief.risks.slice(0, 8),
     momentum: { ...brief.momentum, recent: brief.momentum.recent.slice(0, 3) },
     recentActivity: brief.recentActivity?.slice(0, 8),
+    // Trim governance from the default caps (3/5/5/5) to the tight caps (2/3/3/3)
+    // at the first compaction step so it competes fairly with the other sections.
+    governance: brief.governance ? compactGovernance(brief.governance, 2, 3, 3, 3) : undefined,
   };
   estimated = estimateTokens(next);
   if (estimated <= budget) return { ...next, budget: { ...next.budget, estimatedTokens: estimated, truncated: true } };
@@ -930,6 +1349,9 @@ function compactToBudget(brief: AgentBrief): AgentBrief {
     decisionsNeeded: next.decisionsNeeded.slice(0, 3),
     momentum: { ...next.momentum, recent: next.momentum.recent.slice(0, 2) },
     recentActivity: next.recentActivity?.slice(0, 5),
+    // At the tightest level, drop governance to 1/2/2/2 — the Total fields keep
+    // the real finding count visible so an agent still knows there is more.
+    governance: next.governance ? compactGovernance(next.governance, 1, 2, 2, 2) : undefined,
   };
   estimated = estimateTokens(tighter);
   return { ...tighter, budget: { ...tighter.budget, estimatedTokens: estimated, truncated: true } };
@@ -994,6 +1416,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     decisionsNeeded,
     recommendedPmUpdates,
     insights,
+    governance: governanceIsEmpty(options.governance) ? undefined : options.governance,
   });
 }
 
@@ -1013,6 +1436,133 @@ function formatSignedScoreValue(value: number): string {
 
 function renderNextExplanationLine(entry: NextItemExplanation): string {
   return `${entry.rank}. ${entry.item.id}: ${escapeLine(entry.item.title)} - ${entry.item.whyNow} [score ${formatScoreValue(entry.item.rankingScore)}; confidence ${entry.item.confidence}; evidence ${entry.item.rankingReasons.join(", ")}; deps ${entry.activeDependencies}, dependents ${entry.activeDependents}]`;
+}
+
+/**
+ * Render the governance section as markdown lines. Shared by the markdown and
+ * agent-prompt renderers so the governance output stays consistent. Returns an
+ * empty array when there is no governance section or every subsection is empty.
+ */
+function renderGovernanceMarkdown(g: GovernanceSummary | undefined): string[] {
+  if (!g || governanceIsEmpty(g)) return [];
+  const lines: string[] = ["## Governance", ""];
+  if (g.duplicateClusters.length > 0) {
+    const more = g.duplicateClustersTotal > g.duplicateClusters.length ? ` (+${g.duplicateClustersTotal - g.duplicateClusters.length} more)` : "";
+    lines.push(`### Duplicate clusters (threshold ${g.threshold})${more}`, "");
+    for (const cluster of g.duplicateClusters) {
+      lines.push(`- **${cluster.clusterId}** — score ${cluster.maxScore} (${cluster.reason})`);
+      for (const item of cluster.items) lines.push(`  - \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status})`);
+      if (cluster.remediation) lines.push(`  - → \`${cluster.remediation}\``);
+    }
+    lines.push("");
+  }
+  if (g.staleInProgress.length > 0) {
+    const more = g.staleInProgressTotal > g.staleInProgress.length ? ` (+${g.staleInProgressTotal - g.staleInProgress.length} more)` : "";
+    lines.push(`### Stale in-progress (${g.staleThresholdHours}h threshold)${more}`, "");
+    for (const item of g.staleInProgress) {
+      lines.push(`- \`${item.id}\` — ${item.ageHours}h since last activity (${item.lastActivityAt})`);
+      if (item.remediation) lines.push(`  - → \`${item.remediation}\``);
+    }
+    lines.push("");
+  }
+  if (g.storageFindings.length > 0) {
+    const more = g.storageFindingsTotal > g.storageFindings.length ? ` (+${g.storageFindingsTotal - g.storageFindings.length} more)` : "";
+    lines.push(`### Storage integrity${more}`, "");
+    for (const finding of g.storageFindings) {
+      const idPart = finding.id ? ` \`${finding.id}\`` : "";
+      lines.push(`- ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
+      if (finding.remediation) lines.push(`  - → \`${finding.remediation}\``);
+    }
+    lines.push("");
+  }
+  if (g.secretFindings.length > 0) {
+    const more = g.secretFindingsTotal > g.secretFindings.length ? ` (+${g.secretFindingsTotal - g.secretFindings.length} more)` : "";
+    // ⚠ Secret values are NEVER printed — only the item id, field, and detector rule.
+    lines.push(`### ⚠ Secrets in item text${more}`, "");
+    for (const finding of g.secretFindings) {
+      lines.push(`- \`${finding.itemId}\` field \`${finding.field}\` — detector: ${finding.rule}`);
+      if (finding.remediation) lines.push(`  - → \`${finding.remediation}\``);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+
+/**
+ * Render the governance section as Slack-formatted lines. Returns an empty
+ * array when there is no governance section or every subsection is empty.
+ */
+function renderGovernanceSlack(g: GovernanceSummary | undefined): string[] {
+  if (!g || governanceIsEmpty(g)) return [];
+  const lines: string[] = ["*Governance*", ""];
+  if (g.duplicateClusters.length > 0) {
+    const more = g.duplicateClustersTotal > g.duplicateClusters.length ? ` (+${g.duplicateClustersTotal - g.duplicateClusters.length} more)` : "";
+    lines.push(`_Duplicate clusters (threshold ${g.threshold})${more}_`);
+    for (const cluster of g.duplicateClusters) {
+      lines.push(`• *${cluster.clusterId}* — score ${cluster.maxScore} (${cluster.reason})`);
+      for (const item of cluster.items) lines.push(`  • \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status})`);
+      if (cluster.remediation) lines.push(`  • → \`${cluster.remediation}\``);
+    }
+    lines.push("");
+  }
+  if (g.staleInProgress.length > 0) {
+    const more = g.staleInProgressTotal > g.staleInProgress.length ? ` (+${g.staleInProgressTotal - g.staleInProgress.length} more)` : "";
+    lines.push(`_Stale in-progress (${g.staleThresholdHours}h)${more}_`);
+    for (const item of g.staleInProgress) {
+      lines.push(`• \`${item.id}\` — ${item.ageHours}h since last activity`);
+      if (item.remediation) lines.push(`  • → \`${item.remediation}\``);
+    }
+    lines.push("");
+  }
+  if (g.storageFindings.length > 0) {
+    const more = g.storageFindingsTotal > g.storageFindings.length ? ` (+${g.storageFindingsTotal - g.storageFindings.length} more)` : "";
+    lines.push(`_Storage integrity${more}_`);
+    for (const finding of g.storageFindings) {
+      const idPart = finding.id ? ` \`${finding.id}\`` : "";
+      lines.push(`• ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
+      if (finding.remediation) lines.push(`  • → \`${finding.remediation}\``);
+    }
+    lines.push("");
+  }
+  if (g.secretFindings.length > 0) {
+    const more = g.secretFindingsTotal > g.secretFindings.length ? ` (+${g.secretFindingsTotal - g.secretFindings.length} more)` : "";
+    lines.push(`_⚠ Secrets in item text${more}_`);
+    for (const finding of g.secretFindings) {
+      lines.push(`• \`${finding.itemId}\` field \`${finding.field}\` — detector: ${finding.rule}`);
+      if (finding.remediation) lines.push(`  • → \`${finding.remediation}\``);
+    }
+    lines.push("");
+  }
+  return lines;
+}
+
+/**
+ * Render the governance section as compact agent-prompt lines. Returns an empty
+ * array when there is no governance section or every subsection is empty.
+ */
+function renderGovernanceAgentPrompt(g: GovernanceSummary | undefined): string[] {
+  if (!g || governanceIsEmpty(g)) return [];
+  const lines: string[] = ["Governance findings (act before starting new work):"];
+  for (const cluster of g.duplicateClusters) {
+    const members = cluster.items.map((i) => `${i.id}:${escapeLine(i.title)}`).join(", ");
+    lines.push(`- duplicate cluster ${cluster.clusterId} (score ${cluster.maxScore}, ${cluster.reason}): ${members}`);
+    if (cluster.remediation) lines.push(`  - ${cluster.remediation}`);
+  }
+  for (const item of g.staleInProgress) {
+    lines.push(`- stale in-progress ${item.id}: ${item.ageHours}h since last activity`);
+    if (item.remediation) lines.push(`  - ${item.remediation}`);
+  }
+  for (const finding of g.storageFindings) {
+    const idPart = finding.id ? ` ${finding.id}` : "";
+    lines.push(`- storage ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
+    if (finding.remediation) lines.push(`  - ${finding.remediation}`);
+  }
+  for (const finding of g.secretFindings) {
+    // ⚠ Never print the secret value — only the item id, field, and detector rule.
+    lines.push(`- ⚠ secret in ${finding.itemId} field \`${finding.field}\` (detector: ${finding.rule}) — remove before publishing`);
+    if (finding.remediation) lines.push(`  - ${finding.remediation}`);
+  }
+  return lines;
 }
 
 export function renderMarkdownBrief(brief: AgentBrief): string {
@@ -1079,6 +1629,7 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
       lines.push(`- ${entry.timestamp}${who} ${entry.operation}${itemPart}${msg}`);
     }
   }
+  lines.push(...renderGovernanceMarkdown(brief.governance));
   lines.push("", "## Recommended PM Updates", "");
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`- ${update.itemId}: \`${update.command}\` - ${update.reason}`);
@@ -1147,6 +1698,7 @@ export function renderSlackBrief(brief: AgentBrief): string {
       lines.push(`• ${entry.timestamp}${who} ${entry.operation}${itemPart}${msg}`);
     }
   }
+  lines.push(...renderGovernanceSlack(brief.governance));
   lines.push("", "*Recommended PM Updates*");
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`• \`${update.itemId}\` \`${update.command}\` — ${update.reason}`);
@@ -1184,6 +1736,11 @@ export function renderAgentPrompt(brief: AgentBrief): string {
   }
   for (const risk of brief.risks.slice(0, 5)) {
     lines.push(`- ${risk.severity} risk: ${risk.itemId} ${risk.reason}`);
+  }
+  const govLines = renderGovernanceAgentPrompt(brief.governance);
+  if (govLines.length > 0) {
+    lines.push("");
+    lines.push(...govLines);
   }
   lines.push("", "Suggested pm commands:");
   if (brief.recommendedPmUpdates.length === 0) lines.push("- No suggested pm updates.");
@@ -2975,8 +3532,68 @@ export function renderMarkdownDuplicates(summary: DuplicateSweepSummary): string
 }
 
 
-function registerCommands(api: any): void {
-  const commonFlags = [
+/** Render a standalone governance summary as plain text (the `brief governance` default format). */
+export function renderTextGovernance(g: GovernanceSummary): string {
+  const lines: string[] = [`pm brief governance — generated ${g.generatedAt}`, ""];
+  let any = false;
+  if (g.duplicateClusters.length > 0) {
+    any = true;
+    const more = g.duplicateClustersTotal > g.duplicateClusters.length ? ` (+${g.duplicateClustersTotal - g.duplicateClusters.length} more)` : "";
+    lines.push(`Duplicate clusters (threshold ${g.threshold})${more}:`);
+    for (const cluster of g.duplicateClusters) {
+      lines.push(`  ${cluster.clusterId}  score ${cluster.maxScore}  ${cluster.reason}`);
+      for (const item of cluster.items) lines.push(`    ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status})`);
+      if (cluster.remediation) lines.push(`    \u2192 ${cluster.remediation}`);
+    }
+    lines.push("");
+  }
+  if (g.staleInProgress.length > 0) {
+    any = true;
+    const more = g.staleInProgressTotal > g.staleInProgress.length ? ` (+${g.staleInProgressTotal - g.staleInProgress.length} more)` : "";
+    lines.push(`Stale in-progress (${g.staleThresholdHours}h threshold)${more}:`);
+    for (const item of g.staleInProgress) {
+      lines.push(`  ${item.id}: ${item.ageHours}h since last activity (${item.lastActivityAt})`);
+      if (item.remediation) lines.push(`    \u2192 ${item.remediation}`);
+    }
+    lines.push("");
+  }
+  if (g.storageFindings.length > 0) {
+    any = true;
+    const more = g.storageFindingsTotal > g.storageFindings.length ? ` (+${g.storageFindingsTotal - g.storageFindings.length} more)` : "";
+    lines.push(`Storage integrity${more}:`);
+    for (const finding of g.storageFindings) {
+      const idPart = finding.id ? ` ${finding.id}` : "";
+      lines.push(`  ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
+      if (finding.remediation) lines.push(`    \u2192 ${finding.remediation}`);
+    }
+    lines.push("");
+  }
+  if (g.secretFindings.length > 0) {
+    any = true;
+    const more = g.secretFindingsTotal > g.secretFindings.length ? ` (+${g.secretFindingsTotal - g.secretFindings.length} more)` : "";
+    // \u26a0 Secret values are NEVER printed \u2014 only item id, field, and detector rule.
+    lines.push(`\u26a0 Secrets in item text${more}:`);
+    for (const finding of g.secretFindings) {
+      lines.push(`  ${finding.itemId} field ${finding.field} \u2014 detector: ${finding.rule}`);
+      if (finding.remediation) lines.push(`    \u2192 ${finding.remediation}`);
+    }
+    lines.push("");
+  }
+  if (!any) lines.push("No governance findings.");
+  return `${lines.join("\n")}\n`;
+}
+
+/** Render a standalone governance summary as markdown. */
+export function renderMarkdownGovernance(g: GovernanceSummary): string {
+  const lines = ["# pm brief governance", "", `Generated: ${g.generatedAt}`, ""];
+  const body = renderGovernanceMarkdown(g);
+  if (body.length === 0) lines.push("_No governance findings._");
+  else lines.push(...body);
+  return `${lines.join("\n")}\n`;
+}
+
+function registerCommands(api: ExtensionApi): void {
+  const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--focus", value_name: "id|type:Type", description: "Focus item id or 'type:Type' to highlight all items of a type (repeatable or comma-separated)", type: "string" },
@@ -2990,6 +3607,9 @@ function registerCommands(api: any): void {
     { long: "--include-closed", description: "Allow closed focus items in the brief", type: "boolean" },
     { long: "--include-history", description: "Include recent pm activity in the brief", type: "boolean" },
     { long: "--history-limit", value_name: "n", description: "Number of recent activity entries to include (default: 10)", type: "string" },
+    { long: "--no-governance", description: "Skip the sdk/governance scan (duplicate clusters, stale in-progress, storage integrity, secrets) for a faster brief", type: "boolean" },
+    { long: "--governance-threshold", value_name: "0..1", description: "Similarity threshold for the governance duplicate-cluster scan (default: 0.6)", type: "string" },
+    { long: "--stale-hours", value_name: "n", description: "Stale in-progress threshold in hours for the governance scan (default: 72)", type: "string" },
   ];
   api.registerCommand({
     name: "brief",
@@ -2997,7 +3617,7 @@ function registerCommands(api: any): void {
     intent: "turn pm state into compact next-work context for agents",
     examples: ["pm brief", "pm brief --focus pm-1234 --max-tokens 3000", "pm brief --dependency-order --format json"],
     flags: commonFlags,
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
       if (format !== "markdown" && format !== "json" && format !== "slack") throw new CommandError("--format must be markdown, json, or slack", EXIT_CODE.USAGE);
@@ -3005,7 +3625,20 @@ function registerCommands(api: any): void {
       const includeHistory = readBool(options, "include-history", "includeHistory");
       const historyLimit = readInt(options, ["history-limit", "historyLimit"], 10);
       const briefDependencyOrder = readBool(options, "dependency-order", "dependencyOrder");
-      const brief = buildBrief(readPmItems(ctx.pm_root), {
+      const skipGovernance = readBool(options, "no-governance", "noGovernance");
+      const generatedAt = new Date().toISOString();
+      const items = readPmItems(ctx.pm_root);
+      // Collect governance findings unless explicitly skipped. The scanners run
+      // concurrently with no dependency on the brief's ranking, so they do not
+      // block the build — but they are awaited here so the JSON/text output is
+      // complete in one pass.
+      const governance = skipGovernance ? undefined : await collectGovernanceSignals(items, {
+        threshold: parseDuplicateThreshold(readString(options, "governance-threshold"), 0.6),
+        staleHours: readNonNegativeInt(options, ["stale-hours", "staleHours"], 72),
+        generatedAt,
+        pmRoot: ctx.pm_root,
+      });
+      const brief = buildBrief(items, {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
         dependencyOrder: briefDependencyOrder,
         focusIds,
@@ -3017,9 +3650,10 @@ function registerCommands(api: any): void {
         historyLimit,
         staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
         completedDays: readInt(options, ["completed-days", "completedDays"], 7),
-        generatedAt: new Date().toISOString(),
+        generatedAt,
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
+        governance,
         // Keep the brief's next-work section aligned with `pm next` (companion gyi1).
         // Skipped under `--dependency-order` so the explicit prerequisite-first sort wins.
         nextOrder: briefDependencyOrder ? undefined : readNextOrderedIds(ctx.pm_root, { limit: 200, assignee: readString(options, "assignee") }),
@@ -3039,12 +3673,21 @@ function registerCommands(api: any): void {
     intent: "turn pm state into executable next-turn instructions for coding agents",
     examples: ["pm brief prompt", "pm brief prompt --focus pm-1234 --max-tokens 2000", "pm brief prompt --dependency-order --output HANDOFF.md"],
     flags: commonFlags.filter((flag) => flag.long !== "--format"),
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
       const includeHistory = readBool(options, "include-history", "includeHistory");
       const historyLimit = readInt(options, ["history-limit", "historyLimit"], 10);
-      const brief = buildBrief(readPmItems(ctx.pm_root), {
+      const skipGovernance = readBool(options, "no-governance", "noGovernance");
+      const generatedAt = new Date().toISOString();
+      const items = readPmItems(ctx.pm_root);
+      const governance = skipGovernance ? undefined : await collectGovernanceSignals(items, {
+        threshold: parseDuplicateThreshold(readString(options, "governance-threshold"), 0.6),
+        staleHours: readNonNegativeInt(options, ["stale-hours", "staleHours"], 72),
+        generatedAt,
+        pmRoot: ctx.pm_root,
+      });
+      const brief = buildBrief(items, {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 2500),
         dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
         focusIds,
@@ -3056,9 +3699,10 @@ function registerCommands(api: any): void {
         historyLimit,
         staleDays: readNonNegativeInt(options, ["stale-days", "staleDays"], 7),
         completedDays: readInt(options, ["completed-days", "completedDays"], 7),
-        generatedAt: new Date().toISOString(),
+        generatedAt,
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
+        governance,
       });
       const output = renderAgentPrompt(brief);
       const outputPath = readString(options, "output");
@@ -3081,7 +3725,7 @@ function registerCommands(api: any): void {
       { long: "--confidence", description: "Include ranking confidence in text output", type: "boolean" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -3128,7 +3772,7 @@ function registerCommands(api: any): void {
       { long: "--days", value_name: "n", description: "Days before an item is stale (default: 7)", type: "string" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -3151,7 +3795,7 @@ function registerCommands(api: any): void {
       { long: "--days", value_name: "n", description: "Window in days for closed-item lookback (default: 7)", type: "string" },
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? "text").toLowerCase();
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -3196,7 +3840,7 @@ function registerCommands(api: any): void {
       { long: "--format", value_name: "format", description: "Output format: markdown, text, json, or slack (default markdown)", type: "string" },
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const rawCheckpoint = (ctx.args?.[0] ?? "").trim();
       if (!rawCheckpoint) throw new CommandError("pm brief since requires a <checkpoint> (ISO timestamp or relative window like 7d)", EXIT_CODE.USAGE);
@@ -3258,7 +3902,7 @@ function registerCommands(api: any): void {
       { long: "--format", value_name: "format", description: "Output format: markdown, text, json, or slack (default markdown)", type: "string" },
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const positionalBase = (ctx.args?.[0] ?? "").trim() || undefined;
       const explicitBase = readString(options, "base");
@@ -3403,7 +4047,7 @@ function registerCommands(api: any): void {
       { long: "--format", value_name: "format", description: "Output format: text, json, or markdown (default: text)", type: "string" },
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
-    async run(ctx: any) {
+    async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "text")).toLowerCase();
       if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
@@ -3450,6 +4094,49 @@ function registerCommands(api: any): void {
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
         return { ok: true, format, output: outputPath, count: summary.count, scanned: summary.scanned };
+      }
+      return renderedCommandResult(output);
+    },
+  });
+  api.registerCommand({
+    name: "brief governance",
+    description: "Surface governance findings (duplicate clusters, stale in-progress, storage integrity, secrets) from sdk/governance scanners.",
+    intent: "give an agent or CI a cheap, token-budgeted view of the things that will waste its time: duplicates, dead in-progress work, storage corruption, and committed secrets",
+    examples: ["pm brief governance", "pm brief governance --threshold 0.5 --format json", "pm brief governance --stale-hours 168"],
+    flags: [
+      { long: "--threshold", value_name: "0..1", description: "Similarity threshold for the duplicate-cluster scan (default: 0.6)", type: "string" },
+      { long: "--stale-hours", value_name: "n", description: "Stale in-progress threshold in hours (default: 72)", type: "string" },
+      { long: "--format", value_name: "format", description: "Output format: text, json, or markdown (default: text)", type: "string" },
+      { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
+    ],
+    async run(ctx: CommandHandlerContext) {
+      const options = ctx.options as Record<string, unknown>;
+      const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "text")).toLowerCase();
+      if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
+      const threshold = parseDuplicateThreshold(readString(options, "threshold"), 0.6);
+      const staleHours = readNonNegativeInt(options, ["stale-hours", "staleHours"], 72);
+      const workspace = ctx.pm_root ?? ".agents/pm";
+      const items = readPmItems(workspace);
+      const summary = await collectGovernanceSignals(items, {
+        threshold,
+        staleHours,
+        generatedAt: new Date().toISOString(),
+        pmRoot: workspace,
+      });
+      if (format === "json") {
+        const output = `${JSON.stringify(summary, null, 2)}\n`;
+        const outputPath = readString(options, "output");
+        if (outputPath) {
+          writeFileSync(outputPath, output, "utf-8");
+          return { ok: true, format, output: outputPath, duplicates: summary.duplicateClustersTotal, stale: summary.staleInProgressTotal, storage: summary.storageFindingsTotal, secrets: summary.secretFindingsTotal };
+        }
+        return renderedCommandResult(output);
+      }
+      const output = format === "markdown" ? renderMarkdownGovernance(summary) : renderTextGovernance(summary);
+      const outputPath = readString(options, "output");
+      if (outputPath) {
+        writeFileSync(outputPath, output, "utf-8");
+        return { ok: true, format, output: outputPath, duplicates: summary.duplicateClustersTotal, stale: summary.staleInProgressTotal, storage: summary.storageFindingsTotal, secrets: summary.secretFindingsTotal };
       }
       return renderedCommandResult(output);
     },
