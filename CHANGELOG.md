@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Surface pending field-aware merge-decision receipts in pm brief ([pm-brief-nd0k](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nd0k.toon))
+
+### Fixed
+
+- Merge-receipt display cap silently drops item warning markers past the tenth receipt ([pm-brief-8up0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-8up0.toon))
+- Merge-receipt read failures hard-fail every brief command ([pm-brief-a007](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-a007.toon))
+
 ## 2026.7.27 - 2026-07-27
 
 ### Added

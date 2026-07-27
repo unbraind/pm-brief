@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readSettings, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
 import { activateExtensionForTest, runRegisteredCommandForTest } from "@unbrained/pm-cli/sdk/testing";
+import { listMergeReceipts } from "@unbrained/pm-cli/sdk/merge";
 import type { ExtensionActivationResult, ExtensionCapability, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
 import extension, {
   buildBrief,
@@ -56,6 +57,8 @@ import extension, {
   governanceIsEmpty,
   renderTextGovernance,
   renderMarkdownGovernance,
+  collectPendingMergeDecisions,
+  mergeDecisionsIsEmpty,
   type DeltaActivityEntry,
   type DivergeEvent,
   type PmItem,
@@ -65,6 +68,8 @@ import extension, {
   type SimilarItemMatch,
   type GovernanceSummary,
   type GovernanceDuplicateCluster,
+  type MergeDecisionsSummary,
+  type MergeDecisionEntry,
 } from "../dist/index.js";
 
 /**
@@ -2639,6 +2644,666 @@ describe("brief since author filtering", () => {
       assert.doesNotMatch(onlyBeta, /Alpha work item/, "--by must exclude other authors' changes");
     } finally {
       process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief merge-decisions — pending field-aware merge receipts surfaced in the brief
+// ---------------------------------------------------------------------------
+
+/** Helper: build a synthetic MergeDecisionEntry with sane defaults for unit tests. */
+function mergeDecisionEntry(overrides: Partial<MergeDecisionEntry> = {}): MergeDecisionEntry {
+  return {
+    receiptId: "rec-1",
+    itemId: "pm-a",
+    itemPath: ".agents/pm/tasks/pm-a.toon",
+    preferred: "ours",
+    conflicts: [{ field: "description", discarded: "peer value" }],
+    ...overrides,
+  };
+}
+
+/** Helper: build a synthetic MergeDecisionsSummary with sane defaults for unit tests. */
+function mergeSummary(overrides: Partial<MergeDecisionsSummary> = {}): MergeDecisionsSummary {
+  return {
+    pendingCount: 1,
+    compromisedItemIds: ["pm-a"],
+    receipts: [mergeDecisionEntry()],
+    ...overrides,
+  };
+}
+
+describe("brief merge-decisions (unit)", () => {
+  test("mergeDecisionsIsEmpty returns true for undefined and empty receipts", () => {
+    assert.equal(mergeDecisionsIsEmpty(undefined), true);
+    assert.equal(mergeDecisionsIsEmpty(mergeSummary({ receipts: [] })), true);
+    assert.equal(mergeDecisionsIsEmpty(mergeSummary({ pendingCount: 0, receipts: [] })), true);
+    assert.equal(mergeDecisionsIsEmpty(mergeSummary()), false, "a summary with a receipt is not empty");
+  });
+
+  test("buildBrief includes the mergeDecisions section when provided and non-empty", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { mergeDecisions: mergeSummary(), generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    assert.ok(brief.mergeDecisions, "mergeDecisions section should be present");
+    assert.equal(brief.mergeDecisions!.pendingCount, 1);
+    assert.equal(brief.mergeDecisions!.receipts[0]!.itemId, "pm-a");
+  });
+
+  test("buildBrief omits the mergeDecisions section when there are no receipts", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    assert.equal(buildBrief(items, { mergeDecisions: undefined, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" }).mergeDecisions, undefined);
+    assert.equal(buildBrief(items, { mergeDecisions: mergeSummary({ receipts: [] }), generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" }).mergeDecisions, undefined, "empty receipts must be omitted");
+  });
+
+  test("buildBrief cross-references pending receipts as mergeCompromised markers on focus/next/decision items", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Compromised task", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+      { id: "pm-b", title: "Clean task", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { mergeDecisions: mergeSummary(), generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    const compromised = brief.next.find((i) => i.id === "pm-a");
+    const clean = brief.next.find((i) => i.id === "pm-b");
+    assert.ok(compromised, "pm-a should be in next work");
+    assert.equal(compromised!.mergeCompromised, true, "the receipt's item must be marked compromised");
+    assert.ok(clean, "pm-b should be in next work");
+    assert.equal(clean!.mergeCompromised, undefined, "an item with no receipt must not be marked");
+
+    const md = renderMarkdownBrief(brief);
+    assert.match(md, /⚠ merge pm-a:/, "markdown focus/next line for the compromised item must carry the ⚠ merge marker");
+    assert.doesNotMatch(md, /⚠ merge pm-b:/, "the clean item must not get the marker");
+
+    const prompt = renderAgentPrompt(brief);
+    assert.match(prompt, /- ⚠ pm-a \(kept ours\): discarded description=peer value/);
+
+    const slack = renderSlackBrief(brief);
+    assert.match(slack, /⚠ merge `pm-a`/);
+    assert.match(slack, /\*⚠ Pending Merge Decisions\*/);
+  });
+
+  test("a clean workspace renders no merge-decision noise in any format", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { mergeDecisions: undefined, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    for (const item of [...brief.next, ...brief.focus]) assert.equal(item.mergeCompromised, undefined);
+    for (const output of [renderMarkdownBrief(brief), renderSlackBrief(brief), renderAgentPrompt(brief)]) {
+      assert.doesNotMatch(output, /Pending Merge Decisions/);
+      assert.doesNotMatch(output, /⚠ merge/);
+      assert.doesNotMatch(output, /merge reconcile/);
+    }
+  });
+
+  test("buildDivergence surfaces merge decisions and recommends `pm merge reconcile` even for a clean divergence", () => {
+    const base = {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    };
+    // A pending receipt can linger even when the diverged branches touched
+    // disjoint items (clean verdict). The pre-existing both-sided reconcile
+    // recommendation (`hasBothSided`) does NOT cover that case, so the merge-
+    // decisions integration is what adds `pm merge reconcile` here — the whole
+    // point of surfacing receipts in divergence.
+    const cleanWithReceipts = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
+    assert.equal(cleanWithReceipts.verdict, "clean");
+    assert.ok(cleanWithReceipts.mergeDecisions, "divergence summary must carry the merge decisions");
+    assert.ok(cleanWithReceipts.recommendedCommands.includes("pm merge reconcile"), "a pending receipt must recommend reconcile even on a clean divergence");
+
+    const cleanNoReceipts = buildDivergence([], { ...base });
+    assert.equal(cleanNoReceipts.verdict, "clean");
+    assert.equal(cleanNoReceipts.mergeDecisions, undefined, "divergence with no receipts must not carry merge decisions");
+    assert.ok(!cleanNoReceipts.recommendedCommands.includes("pm merge reconcile"), "a clean divergence with no receipts must not recommend reconcile");
+  });
+
+  test("buildDivergence renders the merge-decisions section only when receipts are present", () => {
+    const base = {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    };
+    // A real field-collision so the divergence is `review-required` and the
+    // renderers do not short-circuit on the clean verdict, which would skip
+    // the merge section before it could be asserted.
+    const collisionItem = classifyItemDivergence({
+      id: "pm-coll",
+      ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+      base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: true, malformedLines: 0 },
+      head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true, malformedLines: 0 },
+    });
+    assert.equal(collisionItem.kind, "field-collision");
+
+    const withMerge = buildDivergence([collisionItem], { ...base, mergeDecisions: mergeSummary() });
+    assert.equal(withMerge.verdict, "review-required");
+    assert.ok(withMerge.mergeDecisions, "divergence summary must carry the merge decisions");
+    assert.match(renderTextDivergence(withMerge), /pending merge decision/);
+    assert.match(renderMarkdownDivergence(withMerge), /## ⚠ Pending Merge Decisions/);
+    assert.match(renderSlackDivergence(withMerge), /\*⚠ Pending Merge Decisions\*/);
+
+    const withoutMerge = buildDivergence([collisionItem], { ...base });
+    assert.equal(withoutMerge.verdict, "review-required");
+    assert.equal(withoutMerge.mergeDecisions, undefined, "divergence with no receipts must not carry merge decisions");
+    assert.doesNotMatch(renderTextDivergence(withoutMerge), /pending merge decision/);
+    assert.doesNotMatch(renderMarkdownDivergence(withoutMerge), /Pending Merge Decisions/);
+    assert.doesNotMatch(renderSlackDivergence(withoutMerge), /Pending Merge Decisions/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief merge-decisions end-to-end — real conflicting git merge
+// ---------------------------------------------------------------------------
+
+describe("brief merge-decisions end-to-end", () => {
+  /** Skip guard shared by every real-merge E2E test: a missing pm is a real skip. */
+  function pmOnPath(pmBin: string): boolean {
+    try {
+      return spawnSync(pmBin, ["--version"], { stdio: "pipe", encoding: "utf-8" }).status === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Build a real two-branch conflicting merge in a temp git repo. The base item
+   * is shared; agent-a and agent-b both rewrite the same scalar (`description`)
+   * and each append a `notes` entry (a union collection). Merging agent-a into
+   * agent-b exits 1 and lands a pending field-aware merge receipt.
+   *
+   * Returns the workspace + the conflicting item id so the caller can drive the
+   * real registered `brief`/`brief diverge` commands and assert against reality.
+   */
+  async function buildConflictingMerge(tmpDir: string, pmBin: string, override: { aDesc: string; bDesc: string }): Promise<string> {
+    const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+    const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+    const pmPath = join(tmpDir, ".agents", "pm");
+    git(["init"]);
+    git(["config", "user.email", "t@t.t"]);
+    git(["config", "user.name", "t"]);
+    pm(["init", "--pm-path", pmPath]);
+    pm(["merge", "install", "--pm-path", pmPath]);
+    const createOut = JSON.parse(pm(["--pm-path", pmPath, "create", "--title", "Shared item", "--type", "Task", "--author", "agent-a", "--json"])) as { id?: string; item?: { id?: string } };
+    const itemId = createOut.id ?? createOut.item?.id ?? "";
+    assert.ok(itemId, "pm create must return the created item id");
+    git(["add", "-A"]); git(["commit", "-m", "base"]);
+    const base = git(["rev-parse", "HEAD"]);
+    git(["checkout", "-b", "agent-a"]);
+    pm(["--pm-path", pmPath, "update", itemId, "--description", override.aDesc, "--author", "agent-a"]);
+    pm(["--pm-path", pmPath, "notes", itemId, "--add", "note from A", "--author", "agent-a", "--json"]);
+    git(["add", "-A"]); git(["commit", "-m", "agent-a"]);
+    git(["checkout", base]);
+    git(["checkout", "-b", "agent-b"]);
+    pm(["--pm-path", pmPath, "update", itemId, "--description", override.bDesc, "--author", "agent-b"]);
+    pm(["--pm-path", pmPath, "notes", itemId, "--add", "note from B", "--author", "agent-b", "--json"]);
+    git(["add", "-A"]); git(["commit", "-m", "agent-b"]);
+    // The field-aware driver resolves toward `ours` (agent-b) and records a receipt;
+    // git still exits 1 because the .toon has a content conflict needing commit.
+    const merge = spawnSync("git", ["merge", "agent-a", "-m", "merge"], { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" });
+    assert.notEqual(merge.status, 0, "the conflicting merge must exit non-zero");
+    return itemId;
+  }
+
+  test("integration: collectPendingMergeDecisions reads a real pending receipt with normalized item_path", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-conflict-"));
+    try {
+      const itemId = await buildConflictingMerge(tmpDir, pmBin, { aDesc: "Agent A description", bDesc: "Agent B description" });
+      const summary = await collectPendingMergeDecisions(join(tmpDir, ".agents", "pm"));
+      assert.ok(summary, "a pending merge should produce a summary");
+      assert.equal(summary!.pendingCount, 1);
+      assert.equal(summary!.receipts.length, 1);
+      const entry = summary!.receipts[0]!;
+      assert.equal(entry.itemId, itemId);
+      // Upstream unbraind/pm-cli#771: Git wraps the `%P` path in a stray quote
+      // layer; the brief must strip it so the path is readable.
+      assert.equal(entry.itemPath, ".agents/pm/tasks/" + itemId + ".toon");
+      assert.doesNotMatch(entry.itemPath, /^'/, "no leading wrapping quote");
+      assert.equal(entry.preferred, "ours");
+      // Only the LOSSY scalar conflict is surfaced — the `notes` union collection
+      // merged without loss and must NOT appear as a conflict.
+      assert.deepEqual(entry.conflicts.map((c) => c.field), ["description"]);
+      assert.equal(entry.conflicts[0]!.discarded, "Agent A description", "the peer agent's discarded value must be captured");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: registered `brief` and `brief diverge` surface pending receipts via the real command pipeline", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-brief-e2e-"));
+    const previousCwd = process.cwd();
+    try {
+      const itemId = await buildConflictingMerge(tmpDir, pmBin, { aDesc: "Agent A description", bDesc: "Agent B description" });
+      const { commands } = await activateBrief();
+      // `global: { json: false }` is explicit rather than incidental: the SDK test
+      // harness defaults globals to `{ json: true, quiet: true, noPager: true }`,
+      // and `brief` now honours the host-owned `--json` global (it previously read
+      // `--json` from ctx.options, where the host never puts it, so `pm brief --json`
+      // returned markdown). This case asserts the MARKDOWN rendering, so it must ask
+      // for markdown instead of relying on the handler ignoring the global.
+      const run = async (command: string, options: Record<string, unknown>, args: string[] = []): Promise<{ pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string; verdict?: string }> =>
+        (await runRegisteredCommandForTest(commands, { command, args, options, global: { json: false }, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string; verdict?: string };
+
+      process.chdir(tmpDir);
+      const briefMd = await run("brief", {});
+      const briefJson = await run("brief", { json: true });
+      const divergeMd = await run("brief diverge", { head: "agent-a" }, ["agent-b"]);
+      const divergeJson = await run("brief diverge", { head: "agent-a", format: "json" }, ["agent-b"]);
+
+      // brief (markdown): inline marker + dedicated section naming the discarded value.
+      assert.equal(briefMd.pmBriefRendered, true);
+      const md = String(briefMd.output);
+      assert.match(md, new RegExp("⚠ merge " + itemId + ":"));
+      assert.match(md, /## ⚠ Pending Merge Decisions/);
+      assert.match(md, new RegExp("`" + itemId + "` \\(kept ours\\) — fields: description"));
+      assert.match(md, /`description` discarded: Agent A description/);
+      assert.match(md, /reconcile with `pm merge reconcile`/);
+
+      // brief --json: compromised flag on the item + a mergeDecisions block.
+      const brief = JSON.parse(String(briefJson.output)) as { focus: Array<{ id: string; mergeCompromised?: boolean }>; next: Array<{ id: string; mergeCompromised?: boolean }>; mergeDecisions?: { pendingCount: number; receipts: Array<{ itemPath: string; preferred: string; conflicts: Array<{ field: string; discarded: string }> }> } };
+      const compromisedFocus = brief.focus.find((i) => i.id === itemId);
+      const compromisedNext = brief.next.find((i) => i.id === itemId);
+      assert.ok(compromisedFocus?.mergeCompromised, "focus item must be flagged");
+      assert.ok(compromisedNext?.mergeCompromised, "next item must be flagged");
+      assert.ok(brief.mergeDecisions, "json brief must carry the mergeDecisions section");
+      assert.equal(brief.mergeDecisions!.pendingCount, 1);
+      const entry = brief.mergeDecisions!.receipts[0]!;
+      assert.equal(entry.itemPath, ".agents/pm/tasks/" + itemId + ".toon");
+      assert.equal(entry.preferred, "ours");
+      assert.equal(entry.conflicts[0]!.field, "description");
+      assert.equal(entry.conflicts[0]!.discarded, "Agent A description");
+
+      // brief diverge (markdown): the section + a recommended reconcile step.
+      assert.equal(divergeMd.pmBriefRendered, true);
+      const dMd = String(divergeMd.output);
+      assert.match(dMd, /## ⚠ Pending Merge Decisions/);
+      assert.match(dMd, /pm merge reconcile/);
+
+      // brief diverge --json (no --output): a rendered result wrapping the JSON string.
+      assert.equal(divergeJson.pmBriefRendered, true);
+      const divergence = JSON.parse(String(divergeJson.output)) as { mergeDecisions?: { pendingCount: number }; recommendedCommands: string[]; items: Array<{ id: string; kind: string }> };
+      assert.ok(divergence.mergeDecisions, "divergence json must carry mergeDecisions");
+      assert.equal(divergence.mergeDecisions!.pendingCount, 1);
+      assert.ok(divergence.recommendedCommands.includes("pm merge reconcile"));
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: a long discarded value is truncated so it cannot blow the token budget", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-trunc-"));
+    try {
+      const longPeerValue = "x".repeat(200);
+      await buildConflictingMerge(tmpDir, pmBin, { aDesc: longPeerValue, bDesc: "short B value" });
+      const summary = await collectPendingMergeDecisions(join(tmpDir, ".agents", "pm"));
+      assert.ok(summary);
+      const discarded = summary!.receipts[0]!.conflicts[0]!.discarded;
+      assert.equal(discarded.length, 121, "a 200-char discarded value must be capped to 120 + ellipsis");
+      assert.ok(discarded.endsWith("\u2026"), "the truncated value must end with an ellipsis");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: a clean workspace adds no merge-decision noise to `brief`", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-quiet-"));
+    const previousCwd = process.cwd();
+    try {
+      const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pmPath = join(tmpDir, ".agents", "pm");
+      git(["init"]); git(["config", "user.email", "t@t.t"]); git(["config", "user.name", "t"]);
+      pm(["init", "--pm-path", pmPath]);
+      pm(["--pm-path", pmPath, "create", "--title", "Solo item", "--type", "Task", "--author", "agent-a", "--json"]);
+      git(["add", "-A"]); git(["commit", "-m", "base"]);
+
+      // No conflicting merge ever happens — collectPendingMergeDecisions stays silent.
+      assert.equal(await collectPendingMergeDecisions(pmPath), undefined);
+
+      const { commands } = await activateBrief();
+      process.chdir(tmpDir);
+      const briefMd = (await runRegisteredCommandForTest(commands, { command: "brief", options: {}, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      const md = String(briefMd.output);
+      assert.doesNotMatch(md, /Pending Merge Decisions/);
+      assert.doesNotMatch(md, /⚠ merge/);
+      const briefJson = (await runRegisteredCommandForTest(commands, { command: "brief", options: { json: true }, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      const brief = JSON.parse(String(briefJson.output)) as { mergeDecisions?: unknown };
+      assert.equal(brief.mergeDecisions, undefined, "the quiet path must add no mergeDecisions section");
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: a corrupt receipt store degrades `brief` to no pending decisions instead of failing", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-corrupt-"));
+    const previousCwd = process.cwd();
+    try {
+      const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pmPath = join(tmpDir, ".agents", "pm");
+      git(["init"]); git(["config", "user.email", "t@t.t"]); git(["config", "user.name", "t"]);
+      pm(["init", "--pm-path", pmPath]);
+      pm(["--pm-path", pmPath, "create", "--title", "Solo item", "--type", "Task", "--author", "agent-a", "--json"]);
+      git(["add", "-A"]); git(["commit", "-m", "base"]);
+
+      // Two structurally valid but incomplete pending receipts: the SDK pushes
+      // them (version 1 + pending passes its per-file guard), then its final
+      // created_at sort dereferences the missing field and throws. That is the
+      // SDK-side throw the brief must survive; one receipt would not do (the
+      // comparator is never invoked on a single-element array).
+      const receiptsDir = join(tmpDir, ".git", "pm-merge-receipts");
+      await mkdir(receiptsDir, { recursive: true });
+      for (const name of ["aaaa-corrupt.json", "bbbb-corrupt.json"]) {
+        await writeFile(join(receiptsDir, name), JSON.stringify({ version: 1, state: "pending" }) + "\n");
+      }
+
+      // Fixture sanity: the raw SDK read really does throw on this store, so the
+      // degradation assertions below cannot go vacuously green if the SDK is
+      // later hardened to tolerate this exact corruption.
+      await assert.rejects(listMergeReceipts(tmpDir), TypeError);
+
+      // The collector must degrade to undefined rather than reject.
+      assert.equal(await collectPendingMergeDecisions(pmPath), undefined);
+
+      // The registered `brief` command must still succeed and simply omit the
+      // pending-decisions section in every format.
+      const { commands } = await activateBrief();
+      process.chdir(tmpDir);
+      const briefMd = (await runRegisteredCommandForTest(commands, { command: "brief", options: {}, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      assert.equal(briefMd.pmBriefRendered, true, "the brief must render despite the broken receipt store");
+      const md = String(briefMd.output);
+      assert.doesNotMatch(md, /Pending Merge Decisions/);
+      assert.doesNotMatch(md, /⚠ merge/);
+      const briefJson = (await runRegisteredCommandForTest(commands, { command: "brief", options: { json: true }, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      const brief = JSON.parse(String(briefJson.output)) as { mergeDecisions?: unknown };
+      assert.equal(brief.mergeDecisions, undefined, "a broken receipt store must add no mergeDecisions section");
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: `brief` must honour the HOST-OWNED `--json` global.
+//
+// `--json` is a host-owned global: the CLI consumes it into `ctx.global`, never
+// into `ctx.options`. `brief` used to read it from `options`, where it never
+// appears, so `pm brief --json` emitted markdown and `pm brief --json | jq .`
+// failed with a JSON parse error on `# pm brief`. An explicit `--format` still
+// wins, so an author who asks for markdown gets markdown.
+// ---------------------------------------------------------------------------
+
+describe("brief output format contract", () => {
+  test("the host-owned --json global selects structured output, and an explicit --format still wins", async () => {
+    const { commands } = await activateBrief();
+    const run = async (options: Record<string, unknown>, global: Record<string, unknown>): Promise<{ pmBriefRendered?: boolean; output?: string }> =>
+      (await runRegisteredCommandForTest(commands, { command: "brief", args: [], options, global, pmRoot: ".agents/pm" }))
+        .result as { pmBriefRendered?: boolean; output?: string };
+
+    // pm-brief returns BOTH formats through its rendered-string wrapper
+    // (`pmBriefRendered: true` + `output`) so it fully controls stdout, so the
+    // contract that matters is the CONTENT of `output`: valid JSON under `--json`,
+    // the markdown heading otherwise.
+    const viaJsonGlobal = await run({}, { json: true });
+    assert.doesNotThrow(
+      () => JSON.parse(String(viaJsonGlobal.output)),
+      "the host-owned --json global must make `brief` emit parseable JSON (pm brief --json | jq . must work)",
+    );
+
+    const viaMarkdown = await run({}, { json: false });
+    assert.match(String(viaMarkdown.output), /^# pm brief/, "without --json the brief renders markdown");
+
+    // An explicit --format must beat the global in BOTH directions.
+    const explicitMarkdown = await run({ format: "markdown" }, { json: true });
+    assert.match(String(explicitMarkdown.output), /^# pm brief/, "--format markdown must win over the --json global");
+    const explicitJson = await run({ format: "json" }, { json: false });
+    assert.doesNotThrow(
+      () => JSON.parse(String(explicitJson.output)),
+      "--format json must win over a false --json global",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: a CLEAN divergence must still SHOW pending merge decisions in every
+// non-JSON renderer.
+//
+// The builder retained the receipts (asserted above) but all three renderers
+// early-returned on `items.length === 0 && totals.itemsChanged === 0`, so the
+// pending decision was visible only in `--format json`. That inverts the priority:
+// a clean divergence is exactly when a discarded peer value is the ONLY thing
+// worth reporting, and markdown is the default output. Caught in review by
+// Greptile's T-Rex run against the divergence harness.
+// ---------------------------------------------------------------------------
+
+describe("clean divergence still reports pending merge decisions", () => {
+  const base = {
+    base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+    workspace: ".agents/pm", pmVersion: "test",
+    fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+  };
+
+  test("markdown, text and slack all surface the discarded value and the reconcile command", () => {
+    const withReceipts = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
+    assert.equal(withReceipts.verdict, "clean", "the fixture must be a clean divergence");
+
+    const rendered = {
+      markdown: renderMarkdownDivergence(withReceipts),
+      text: renderTextDivergence(withReceipts),
+      slack: renderSlackDivergence(withReceipts),
+    };
+    for (const [format, output] of Object.entries(rendered)) {
+      assert.match(output, /No pm item divergence/, `${format}: the clean verdict is still stated`);
+      assert.match(output, /pm-a/, `${format}: the affected item id must be reported`);
+      assert.match(output, /pm merge reconcile/, `${format}: the reconcile command must be recommended`);
+      assert.match(output, /⚠/, `${format}: the warning glyph marks the compromised context`);
+    }
+  });
+
+  test("a clean divergence with NO receipts stays completely quiet in every renderer", () => {
+    const clean = buildDivergence([], { ...base, mergeDecisions: mergeSummary({ pendingCount: 0, receipts: [] }) });
+    for (const [format, output] of Object.entries({
+      markdown: renderMarkdownDivergence(clean),
+      text: renderTextDivergence(clean),
+      slack: renderSlackDivergence(clean),
+    })) {
+      assert.doesNotMatch(output, /Pending merge decisions/i, `${format}: no receipts must add no section`);
+      assert.doesNotMatch(output, /⚠/, `${format}: no receipts must add no warning glyph`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: receipts omitted by the display cap must be NAMED, not silently
+// dropped.
+//
+// `pendingCount` carries the TRUE number of pending receipts while `receipts` is
+// capped at MERGE_DECISION_MAX_RECEIPTS (10) for token cost. A renderer that
+// iterates `receipts` alone therefore drops the remainder without a word — the
+// exact silent loss this whole section exists to surface. Caught in review by
+// Greptile after the clean-divergence renderer fix.
+// ---------------------------------------------------------------------------
+
+describe("merge-decision display cap is disclosed", () => {
+  const base = {
+    base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+    workspace: ".agents/pm", pmVersion: "test",
+    fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+  };
+  // 12 pending, only 10 renderable — mirrors what collectPendingMergeDecisions
+  // produces when a merge discards more than the cap.
+  const overCap = mergeSummary({ pendingCount: 12, receipts: [mergeDecisionEntry()] });
+
+  test("every clean-divergence renderer names the omitted receipts", () => {
+    const summary = buildDivergence([], { ...base, mergeDecisions: overCap });
+    for (const [format, output] of Object.entries({
+      markdown: renderMarkdownDivergence(summary),
+      text: renderTextDivergence(summary),
+      slack: renderSlackDivergence(summary),
+    })) {
+      assert.match(output, /11 further pending decision\(s\) not shown/, `${format}: the omitted count must be stated`);
+      assert.match(output, /pm merge report/, `${format}: must point at the command that lists them all`);
+    }
+  });
+
+  test("the brief's markdown and slack sections disclose the omitted count", () => {
+    const brief = buildBrief(
+      [{ id: "pm-a", type: "Task", status: "open", title: "Shared", priority: 2 } as never],
+      { mergeDecisions: overCap, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" },
+    );
+    // These two sections already disclosed the remainder as `(+N more)` before this
+    // change; the assertion pins that contract rather than the newer wording, since
+    // what matters is that the true count is never hidden.
+    assert.match(renderMarkdownBrief(brief), /\(\+11 more\)/, "markdown must disclose the 11 omitted receipts");
+    assert.match(renderSlackBrief(brief), /\(\+11 more\)/, "slack must disclose the 11 omitted receipts");
+    assert.match(renderMarkdownBrief(brief), /12 pending receipt\(s\)/, "the TRUE pending count must be stated");
+  });
+
+  test("the agent-prompt section names the omitted receipts", () => {
+    const brief = buildBrief(
+      [{ id: "pm-a", type: "Task", status: "open", title: "Shared", priority: 2 } as never],
+      { mergeDecisions: overCap, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" },
+    );
+    // This path (used by `brief prompt` and the clean-divergence markdown) had NO
+    // disclosure before this change — it iterated the capped list only.
+    assert.match(renderAgentPrompt(brief), /11 further pending decision\(s\) not shown/);
+    assert.match(renderAgentPrompt(brief), /pm merge report/);
+  });
+
+  test("a NON-clean divergence also names the omitted receipts in every renderer", () => {
+    // The prior fix covered the clean-divergence early-return only. When there ARE
+    // changed items the renderers take their main path, and the bespoke text block
+    // there printed pendingCount then looped the CAPPED list with no omission line.
+    // Greptile's T-Rex reproduced it: 12 pending, 10 rendered, 2 unaccounted for.
+    // A real field collision, built the same way the divergence tests above do, so
+    // buildDivergence classifies it review-required rather than clean.
+    const collided = classifyItemDivergence({
+      id: "pm-coll",
+      ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+      base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: true },
+      head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    const summary = buildDivergence([collided], { ...base, mergeDecisions: overCap });
+    assert.notEqual(summary.verdict, "clean", "the fixture must exercise the NON-clean path");
+    for (const [format, output] of Object.entries({
+      markdown: renderMarkdownDivergence(summary),
+      text: renderTextDivergence(summary),
+      slack: renderSlackDivergence(summary),
+    })) {
+      const disclosesCount = /11 further pending decision\(s\) not shown/.test(output) || /\(\+11 more\)/.test(output);
+      assert.ok(disclosesCount, `${format}: a non-clean divergence must still disclose the 11 omitted receipts`);
+    }
+  });
+
+  test("nothing is claimed omitted when the cap is not exceeded", () => {
+    const summary = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
+    for (const output of [renderMarkdownDivergence(summary), renderTextDivergence(summary), renderSlackDivergence(summary)]) {
+      assert.doesNotMatch(output, /further pending decision/, "an uncapped list must not claim omissions");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the receipt DISPLAY cap must never constrain the compromised-id set.
+//
+// `receipts` is capped at MERGE_DECISION_MAX_RECEIPTS (10) for token cost, but the
+// `⚠ merge ` item markers were derived from that ALREADY-CAPPED list — so with
+// 11+ pending receipts, an item whose only receipt fell past the cap rendered with
+// NO warning marker: presented as trustworthy context while its scalar value had
+// in fact been discarded by a merge. Silent false confidence, the exact failure
+// this feature exists to prevent — and it only manifests past ten receipts, so it
+// could have sat undetected indefinitely. Caught in review by Greptile.
+//
+// This pins the whole chain on RENDERED output — a real receipt store read by the
+// real collector, through buildBrief, into the renderers — because the earlier
+// model-only assertions are precisely why this class of bug shipped.
+// ---------------------------------------------------------------------------
+
+describe("merge-decision display cap never constrains the compromised-id set", () => {
+  test("an item represented ONLY by a receipt past the cap still renders its ⚠ merge marker", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-cap-"));
+    try {
+      // A real (if minimal) git workspace: collectPendingMergeDecisions resolves
+      // the receipt store via `git rev-parse` from the pm root, and silently falls
+      // back to process.cwd() when the pm root is not inside a worktree — so both
+      // the repo and the pm root directory must really exist.
+      const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); };
+      git(["init"]);
+      const pmRoot = join(tmpDir, ".agents", "pm");
+      await mkdir(pmRoot, { recursive: true });
+
+      // 12 pending receipts for 12 distinct items — two more than the display cap.
+      // listMergeReceipts sorts by created_at, so pm-r11/pm-r12 deterministically
+      // fall past the cap: pm-r12 is represented ONLY by a receipt the renderers
+      // never show.
+      const receiptsDir = join(tmpDir, ".git", "pm-merge-receipts");
+      await mkdir(receiptsDir, { recursive: true });
+      for (let i = 1; i <= 12; i++) {
+        const n = String(i).padStart(2, "0");
+        const itemId = `pm-r${n}`;
+        const receipt = {
+          version: 1,
+          id: `receipt-${n}`,
+          item_path: `.agents/pm/tasks/${itemId}.toon`,
+          item_id: itemId,
+          preferred: "ours",
+          fields_from_theirs: [],
+          union_fields: [],
+          decisions: [{ field: "description", base: "base", ours: "ours", theirs: `peer value ${n}`, retained: "ours", discarded: `peer value ${n}` }],
+          state: "pending",
+          created_at: `2026-07-20T00:00:${n}Z`,
+        };
+        await writeFile(join(receiptsDir, `receipt-${n}.json`), JSON.stringify(receipt) + "\n");
+      }
+
+      const summary = await collectPendingMergeDecisions(pmRoot);
+      assert.ok(summary, "12 pending receipts must produce a summary");
+      assert.equal(summary!.pendingCount, 12, "pendingCount is the TRUE total");
+      assert.equal(summary!.receipts.length, 10, "the display cap still caps the rendered receipt list");
+      assert.equal(summary!.compromisedItemIds.length, 12, "the compromised-id set is computed from ALL receipts");
+      assert.ok(summary!.compromisedItemIds.includes("pm-r12"), "an item past the cap is still in the compromised-id set");
+
+      // pm-r01 is inside the cap; pm-r12 is represented ONLY past it; pm-clean has
+      // no receipt at all and must stay unmarked.
+      const items: PmItem[] = ["pm-r01", "pm-r12", "pm-clean"].map((id) => ({ id, title: `Task ${id}`, type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" }));
+      const brief = buildBrief(items, { mergeDecisions: summary, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+
+      // THE regression assertion, on rendered output: the past-cap item must still
+      // carry the warning marker on its item lines.
+      const md = renderMarkdownBrief(brief);
+      assert.match(md, /⚠ merge pm-r12:/, "an item past the receipt cap must still be marked compromised");
+      assert.match(md, /⚠ merge pm-r01:/, "an in-cap item must still be marked compromised");
+      assert.doesNotMatch(md, /⚠ merge pm-clean:/, "an item with no receipt must not be marked");
+      assert.match(renderSlackBrief(brief), /⚠ merge `pm-r12`/, "slack item lines mark the past-cap item too");
+
+      // The display cap itself must not regress: receipts stay capped and the
+      // omitted remainder is still disclosed by both disclosure wordings.
+      assert.match(md, /12 pending receipt\(s\)/, "the TRUE pending count is still stated");
+      assert.match(md, /\(\+2 more\)/, "markdown still discloses the 2 capped receipts");
+      const prompt = renderAgentPrompt(brief);
+      assert.match(prompt, /2 further pending decision\(s\) not shown/, "agent prompt still names the omitted receipts");
+      assert.match(prompt, /pm merge report/);
+    } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
