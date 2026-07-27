@@ -17,6 +17,8 @@ import type {
   StorageIntegrityScanResult,
   StaleInProgressScan,
 } from "@unbrained/pm-cli/sdk/governance";
+import { listMergeReceipts, findGitWorkspaceRoot } from "@unbrained/pm-cli/sdk/merge";
+import type { MergeDecisionReceipt, MergePreferredSide } from "@unbrained/pm-cli/sdk/merge";
 import { readSettings, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
 
 export type { SimilarItemMatch } from "@unbrained/pm-cli/sdk";
@@ -26,6 +28,7 @@ export type {
   StorageIntegrityScanResult,
   StaleInProgressScan,
 } from "@unbrained/pm-cli/sdk/governance";
+export type { MergeDecisionReceipt, MergePreferredSide } from "@unbrained/pm-cli/sdk/merge";
 
 const PM_EXECUTABLE = process.platform === "win32" ? "pm.cmd" : "pm";
 const PM_PATH_OPTION = "--pm-path";
@@ -97,6 +100,8 @@ export interface BriefOptions {
   nextOrder?: string[];
   /** Pre-collected governance findings from sdk/governance scanners; when omitted the brief carries no governance section. */
   governance?: GovernanceSummary;
+  /** Pre-collected pending merge-decision receipts; when omitted or empty the brief carries no merge-decisions section. */
+  mergeDecisions?: MergeDecisionsSummary;
 }
 
 export interface BriefItem {
@@ -115,6 +120,13 @@ export interface BriefItem {
   dependencyIds: string[];
   dependentIds: string[];
   tokenCostEstimate: number;
+  /**
+   * True when this item has a pending merge-decision receipt in this clone — a
+   * peer agent's scalar edit was discarded by the field-aware merge driver and
+   * is not yet represented in committed history, so the item's context is
+   * compromised. Rendered as an inline `\u26a0 merge` marker.
+   */
+  mergeCompromised?: boolean;
 }
 
 export interface NextItemScoreBreakdown {
@@ -227,11 +239,48 @@ export interface AgentBrief {
   insights?: BriefInsight[];
   /** Governance findings from sdk/governance scanners; present when the brief collected them. */
   governance?: GovernanceSummary;
+  /** Pending merge-decision receipts; present only when there is at least one pending receipt. */
+  mergeDecisions?: MergeDecisionsSummary;
 }
 
 // ---------------------------------------------------------------------------
-// Governance — sdk/governance findings surfaced in the brief
+// Merge decisions — pending field-aware merge receipts surfaced in the brief
 // ---------------------------------------------------------------------------
+
+/**
+ * One scalar conflict recorded by the field-aware merge driver, kept compact for
+ * the brief. The discarded value is collapsed to one line and length-capped so a
+ * multi-kilobyte description cannot blow the token budget.
+ */
+export interface MergeDecisionConflict {
+  /** Metadata field name (or `body`) that collided between the two branches. */
+  field: string;
+  /** Value the merge discarded, collapsed to one line and truncated for display. */
+  discarded: string;
+}
+
+/** One pending merge-decision receipt surfaced in the brief. */
+export interface MergeDecisionEntry {
+  /** Clone-local receipt identity (opaque). */
+  receiptId: string;
+  /** Item whose merge produced the receipt. */
+  itemId: string;
+  /** Item path with one matched layer of surrounding quotes stripped (upstream #771). */
+  itemPath: string;
+  /** Side the driver kept for scalar conflicts. */
+  preferred: MergePreferredSide;
+  /** Scalar conflicts, each with its discarded value truncated for display. */
+  conflicts: MergeDecisionConflict[];
+}
+
+/** Pending merge-decision receipts attached to the brief; omitted when there are none. */
+export interface MergeDecisionsSummary {
+  /** Total pending receipts found in this clone. */
+  pendingCount: number;
+  /** Per-receipt compact entries, capped for the token budget. */
+  receipts: MergeDecisionEntry[];
+}
+
 
 /** One duplicate cluster found by `findDuplicateClusters`, with an actionable remediation command. */
 export interface GovernanceDuplicateCluster {
@@ -456,6 +505,28 @@ function parseFocus(values: string[]): { focusIds: string[]; focusTypes: string[
 
 function readBool(options: Record<string, unknown>, ...keys: string[]): boolean {
   return keys.some((key) => options[key] === true || options[key] === "true" || options[key] === "1");
+}
+
+/**
+ * Resolve the effective output format for a brief command.
+ *
+ * `--json` is a host-owned global: the CLI consumes it into `ctx.global`, never
+ * into `ctx.options`. Reading it from `options` therefore silently never matched,
+ * so `pm brief --json` returned markdown and `pm brief --json | jq .` failed on a
+ * parse error rather than producing the documented JSON. An explicit `--format`
+ * still wins, so `--format markdown --json` stays markdown by the author's
+ * intent; `options` is consulted as a fallback for direct handler callers in
+ * tests.
+ */
+function resolveBriefFormat(
+  options: Record<string, unknown>,
+  global: { json?: boolean } | undefined,
+  fallback: string,
+): string {
+  const explicit = readString(options, "format");
+  if (explicit) return explicit.toLowerCase();
+  const wantsJson = global?.json === true || readBool(options, "json");
+  return wantsJson ? "json" : fallback;
 }
 
 function readString(options: Record<string, unknown>, ...keys: string[]): string | undefined {
@@ -1033,6 +1104,99 @@ const GOVERNANCE_MAX_SECRETS = 5;
 /** Top-level item fields that `pm update` accepts as direct value flags. */
 const SECRET_REMEDIABLE_FIELDS = new Set(["title", "description", "body"]);
 
+// ---------------------------------------------------------------------------
+// Merge decisions — pending field-aware merge receipt collection
+// ---------------------------------------------------------------------------
+
+/** Display length cap for a discarded merge value — keeps the brief token-cheap. */
+const MERGE_DECISION_VALUE_MAX = 120;
+/** Cap on receipts surfaced before budget compaction; the brief never dumps an unbounded list. */
+const MERGE_DECISION_MAX_RECEIPTS = 10;
+
+/**
+ * Strip one matched layer of surrounding single or double quotes from a Git-supplied
+ * item path. The field-aware merge driver records the `%P` path verbatim, and Git
+ * wraps paths containing single quotes in a pair of single quotes (doubling internal
+ * quotes), so a path like `'.pm/tasks/lab-fx0u.toon'` arrives with a stray wrapping
+ * layer that makes it unreadable in output. Upstream tracking issue: unbraind/pm-cli#771
+ * — this normalization is removable once the driver strips the wrapping layer itself.
+ */
+function normalizeItemPath(itemPath: string): string {
+  const trimmed = itemPath.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === "'" || first === "\"") && first === last) return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * Collapse a discarded merge value to one line and cap its length, reusing the
+ * file's `escapeLine` helper for newline normalization. Long values are truncated
+ * with an ellipsis rather than dumped, so a multi-kilobyte description cannot blow
+ * the brief's token budget.
+ */
+function truncateForBrief(value: unknown): string {
+  const collapsed = escapeLine(value);
+  return collapsed.length > MERGE_DECISION_VALUE_MAX ? `${collapsed.slice(0, MERGE_DECISION_VALUE_MAX)}\u2026` : collapsed;
+}
+
+/**
+ * Convert a raw SDK `MergeDecisionReceipt` into the brief's budget-friendly shape.
+ * Only scalar conflict `decisions` carry a discarded value worth surfacing; clean
+ * takes (`fields_from_theirs`) and union collections (`union_fields`) merge
+ * without loss and are intentionally not reported here.
+ */
+function toMergeDecisionEntry(receipt: MergeDecisionReceipt): MergeDecisionEntry {
+  return {
+    receiptId: receipt.id,
+    itemId: normalizeItemPath(receipt.item_id),
+    itemPath: normalizeItemPath(receipt.item_path),
+    preferred: receipt.preferred,
+    conflicts: receipt.decisions.map((decision) => ({
+      field: decision.field,
+      discarded: truncateForBrief(decision.discarded),
+    })),
+  };
+}
+
+/**
+ * Collect pending merge-decision receipts from this clone's
+ * `.git/pm-merge-receipts` directory. A pending receipt means a peer agent's scalar
+ * edit was discarded by the field-aware merge driver and that fact is not yet
+ * represented in committed history, so an agent resuming after a merge would
+ * otherwise load a context that silently omits the peer's work. Returns a compact
+ * summary, or `undefined` when there are no pending receipts (the quiet path that
+ * keeps the common case noise-free).
+ */
+export async function collectPendingMergeDecisions(pmRoot: string): Promise<MergeDecisionsSummary | undefined> {
+  // `findGitWorkspaceRoot` walks up from the tracker root to the enclosing worktree;
+  // outside a git repo it returns null and there can be no receipts to read.
+  const workspaceRoot = await findGitWorkspaceRoot(pathResolve(pmRoot));
+  const cwd = workspaceRoot ?? process.cwd();
+  const receipts = await listMergeReceipts(cwd);
+  const pending = receipts.filter((receipt) => receipt.state === "pending");
+  if (pending.length === 0) return undefined;
+  const entries = pending.map(toMergeDecisionEntry);
+  return {
+    pendingCount: entries.length,
+    receipts: entries.slice(0, MERGE_DECISION_MAX_RECEIPTS),
+  };
+}
+
+/** True when the merge-decisions section is absent or has no receipts. */
+export function mergeDecisionsIsEmpty(m: MergeDecisionsSummary | undefined): boolean {
+  return !m || m.receipts.length === 0;
+}
+
+/** Set of item ids that have a pending merge-decision receipt, for cross-referencing. */
+function compromisedItemIds(m: MergeDecisionsSummary | undefined): Set<string> {
+  if (!m) return new Set();
+  return new Set(m.receipts.map((entry) => entry.itemId));
+}
+
+
 /**
  * Map a `scanMutationSecrets` JSON-path (e.g. `$.description`) to a short field
  * name for display. The path is the only location information the SDK returns —
@@ -1366,6 +1530,11 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   const focus = focusSelection.items.map((item) => toBriefItem(item, rels, items, now, activeIds));
   const next = selectNextItems(items, options);
   const insights = buildInsights(items, options, focusSelection, next);
+  // Cross-reference: mark any next/focus/decision item that has a pending merge-
+  // decision receipt so the agent sees at a glance its context is compromised.
+  const compromised = compromisedItemIds(options.mergeDecisions);
+  const mark = (items: BriefItem[]): BriefItem[] =>
+    compromised.size === 0 ? items : items.map((item) => (compromised.has(item.id) ? { ...item, mergeCompromised: true } : item));
   const blockers = rels
     .filter((rel) => rel.kind === "blocked_by" || rel.kind === "depends_on")
     .map((rel) => {
@@ -1376,6 +1545,9 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     .filter((item) => !isClosed(item) && typeOf(item).toLowerCase() === "decision")
     .slice(0, 5)
     .map((item) => toBriefItem(item, rels, items, now, activeIds));
+  const markedFocus = mark(focus);
+  const markedNext = mark(next);
+  const markedDecisions = mark(decisionsNeeded);
   const staleContext = detectStaleContext(items, options).slice(0, 10);
   const momentum = summarizeMomentum(items, options);
   const risks = summarizeRisks(items, options).slice(0, 12);
@@ -1406,17 +1578,18 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
       estimatedTokens: 0,
       truncated: false,
     },
-    focus,
-    next,
+    focus: markedFocus,
+    next: markedNext,
     blockers,
     risks,
     staleContext,
     momentum,
     recentActivity,
-    decisionsNeeded,
+    decisionsNeeded: markedDecisions,
     recommendedPmUpdates,
     insights,
     governance: governanceIsEmpty(options.governance) ? undefined : options.governance,
+    mergeDecisions: mergeDecisionsIsEmpty(options.mergeDecisions) ? undefined : options.mergeDecisions,
   });
 }
 
@@ -1565,6 +1738,85 @@ function renderGovernanceAgentPrompt(g: GovernanceSummary | undefined): string[]
   return lines;
 }
 
+// ---------------------------------------------------------------------------
+// Merge decisions — rendering (markdown / slack / agent-prompt / text)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render the pending merge-decisions section as markdown lines. Returns an empty
+ * array when there are no pending receipts, so the common case stays quiet. Each
+ * receipt lists its item id, the conflicting field names, and the discarded value
+ * (truncated) so an agent resuming after a merge can see a peer's work was dropped.
+ */
+function renderMergeDecisionsMarkdown(m: MergeDecisionsSummary | undefined): string[] {
+  if (mergeDecisionsIsEmpty(m)) return [];
+  const lines: string[] = ["## \u26a0 Pending Merge Decisions", ""];
+  const more = m!.pendingCount > m!.receipts.length ? ` (+${m!.pendingCount - m!.receipts.length} more)` : "";
+  lines.push(`_${m!.pendingCount} pending receipt(s) — a peer agent's scalar edit was discarded by the field-aware merge driver and is not yet in committed history.${more}_`, "");
+  for (const entry of m!.receipts) {
+    const fields = entry.conflicts.map((c) => c.field).join(", ");
+    lines.push(`- \`${entry.itemId}\` (kept ${entry.preferred}) — fields: ${fields}`);
+    for (const conflict of entry.conflicts) {
+      lines.push(`  - \`${conflict.field}\` discarded: ${conflict.discarded}`);
+    }
+    lines.push(`  - reconcile with \`pm merge reconcile\``);
+  }
+  lines.push("");
+  return lines;
+}
+
+/**
+ * Render the pending merge-decisions section as Slack-formatted lines. Returns an
+ * empty array when there are no pending receipts.
+ */
+function renderMergeDecisionsSlack(m: MergeDecisionsSummary | undefined): string[] {
+  if (mergeDecisionsIsEmpty(m)) return [];
+  const lines: string[] = ["*\u26a0 Pending Merge Decisions*", ""];
+  const more = m!.pendingCount > m!.receipts.length ? ` _(+${m!.pendingCount - m!.receipts.length} more)_` : "";
+  lines.push(`_${m!.pendingCount} pending receipt(s) — a peer's scalar edit was discarded and is not yet in committed history${more}_`, "");
+  for (const entry of m!.receipts) {
+    const fields = entry.conflicts.map((c) => c.field).join(", ");
+    lines.push(`• \`${entry.itemId}\` (kept ${entry.preferred}) — fields: ${fields}`);
+    for (const conflict of entry.conflicts) {
+      lines.push(`  • \`${conflict.field}\` discarded: ${conflict.discarded}`);
+    }
+    lines.push(`  • reconcile with \`pm merge reconcile\``);
+  }
+  lines.push("");
+  return lines;
+}
+
+/**
+ * Render the pending merge-decisions section as compact agent-prompt lines.
+ * Returns an empty array when there are no pending receipts.
+ */
+function renderMergeDecisionsAgentPrompt(m: MergeDecisionsSummary | undefined): string[] {
+  if (mergeDecisionsIsEmpty(m)) return [];
+  const lines: string[] = ["Pending merge decisions (a peer agent's scalar edit was discarded and is NOT in committed history — your context is compromised):"];
+  for (const entry of m!.receipts) {
+    const conflicts = entry.conflicts.map((c) => `${c.field}=${c.discarded}`).join(", ");
+    lines.push(`- \u26a0 ${entry.itemId} (kept ${entry.preferred}): discarded ${conflicts}`);
+    lines.push(`  - run \`pm merge reconcile\` to record the decision in history`);
+  }
+  return lines;
+}
+
+/** Compact text line for one merge-decision entry, shared by the text diverge renderer. */
+function mergeDecisionEntryText(entry: MergeDecisionEntry): string {
+  const conflicts = entry.conflicts.map((c) => `${c.field}=${c.discarded}`).join(", ");
+  return `${entry.itemId} (kept ${entry.preferred}): ${conflicts}`;
+}
+
+/**
+ * Inline marker prepended to an item line when the item has a pending merge-decision
+ * receipt. Uses the same \u26a0 warning glyph the file already uses for fence and
+ * secret warnings, so the annotation convention stays consistent across sections.
+ */
+function mergeMarker(item: BriefItem): string {
+  return item.mergeCompromised ? "\u26a0 merge " : "";
+}
+
+
 export function renderMarkdownBrief(brief: AgentBrief): string {
   const lines: string[] = [
     "# pm brief",
@@ -1584,11 +1836,11 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   }
   lines.push("## Next Work", "");
   if (brief.next.length === 0) lines.push("_No open work matched the filters._");
-  for (const item of brief.next) lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) - ${item.whyNow}; score ${item.rankingScore}; confidence ${item.confidence}`);
+  for (const item of brief.next) lines.push(`- ${mergeMarker(item)}${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) - ${item.whyNow}; score ${item.rankingScore}; confidence ${item.confidence}`);
   lines.push("", "## Focus", "");
   if (brief.focus.length === 0) lines.push("_No focus items._");
   for (const item of brief.focus) {
-    lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status})`);
+    lines.push(`- ${mergeMarker(item)}${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status})`);
     if (item.requiredContext.length > 0) lines.push(`  - context: ${item.requiredContext.join(", ")}`);
   }
   lines.push("", "## Blockers", "");
@@ -1630,6 +1882,7 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
     }
   }
   lines.push(...renderGovernanceMarkdown(brief.governance));
+  lines.push(...renderMergeDecisionsMarkdown(brief.mergeDecisions));
   lines.push("", "## Recommended PM Updates", "");
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`- ${update.itemId}: \`${update.command}\` - ${update.reason}`);
@@ -1651,12 +1904,12 @@ export function renderSlackBrief(brief: AgentBrief): string {
   }
   lines.push("*Next Work*");
   if (brief.next.length === 0) lines.push("_No open work matched the filters._");
-  for (const item of brief.next) lines.push(`• \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status}) — ${item.whyNow}; score ${item.rankingScore}; confidence ${item.confidence}`);
+  for (const item of brief.next) lines.push(`• ${mergeMarker(item)}\`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status}) — ${item.whyNow}; score ${item.rankingScore}; confidence ${item.confidence}`);
   lines.push("", "*Focus*");
   if (brief.focus.length === 0) lines.push("_No focus items._");
   for (const item of brief.focus) {
     const context = item.requiredContext.length > 0 ? ` — context: ${item.requiredContext.join(", ")}` : "";
-    lines.push(`• \`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status})${context}`);
+    lines.push(`• ${mergeMarker(item)}\`${item.id}\` ${escapeLine(item.title)} (${item.type}, ${item.status})${context}`);
   }
   lines.push("", "*Blockers*");
   if (brief.blockers.length === 0) lines.push("_No visible blockers._");
@@ -1699,6 +1952,7 @@ export function renderSlackBrief(brief: AgentBrief): string {
     }
   }
   lines.push(...renderGovernanceSlack(brief.governance));
+  lines.push(...renderMergeDecisionsSlack(brief.mergeDecisions));
   lines.push("", "*Recommended PM Updates*");
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`• \`${update.itemId}\` \`${update.command}\` — ${update.reason}`);
@@ -1720,13 +1974,13 @@ export function renderAgentPrompt(brief: AgentBrief): string {
   ];
   if (brief.next.length === 0) lines.push("- No open work matched the filters.");
   for (const item of brief.next) {
-    lines.push(`- ${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) because ${item.whyNow}; score=${item.rankingScore}; confidence=${item.confidence}`);
+    lines.push(`- ${mergeMarker(item)}${item.id}: ${escapeLine(item.title)} (${item.type}, ${item.status}) because ${item.whyNow}; score=${item.rankingScore}; confidence=${item.confidence}`);
   }
   lines.push("", "Focus context:");
   if (brief.focus.length === 0) lines.push("- No explicit focus item.");
   for (const item of brief.focus.slice(0, 5)) {
     const context = item.requiredContext.length > 0 ? ` context=${item.requiredContext.join(",")}` : "";
-    lines.push(`- ${item.id}: ${escapeLine(item.title)}${context}`);
+    lines.push(`- ${mergeMarker(item)}${item.id}: ${escapeLine(item.title)}${context}`);
   }
   lines.push("", "Blockers and risks:");
   if (brief.blockers.length === 0 && brief.risks.length === 0) lines.push("- No visible blockers or metadata risks.");
@@ -1741,6 +1995,11 @@ export function renderAgentPrompt(brief: AgentBrief): string {
   if (govLines.length > 0) {
     lines.push("");
     lines.push(...govLines);
+  }
+  const mergeLines = renderMergeDecisionsAgentPrompt(brief.mergeDecisions);
+  if (mergeLines.length > 0) {
+    lines.push("");
+    lines.push(...mergeLines);
   }
   lines.push("", "Suggested pm commands:");
   if (brief.recommendedPmUpdates.length === 0) lines.push("- No suggested pm updates.");
@@ -2495,6 +2754,8 @@ export interface DivergenceSummary {
   budget?: { requestedTokens: number; estimatedTokens: number };
   fence: FenceStatus;
   recommendedCommands: string[];
+  /** Pending merge-decision receipts already in this clone; present only when there is at least one. */
+  mergeDecisions?: MergeDecisionsSummary;
 }
 
 // ---- git readers (spawnSync git, cwd = repo root, maxBuffer 64 MiB) ----------
@@ -2916,6 +3177,7 @@ export function buildDivergence(
     tokenBudget?: number;
     format?: string;
     ancestorDate?: string;
+    mergeDecisions?: MergeDecisionsSummary;
   },
 ): DivergenceSummary {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
@@ -2967,6 +3229,11 @@ export function buildDivergence(
   if (options.ancestorSha && options.ancestorDate) {
     recommendedCommands.push(`pm brief since ${options.ancestorDate}`);
   }
+  // When pending merge-decision receipts are present they belong in the recommended
+  // next steps too — the agent should reconcile them before trusting its context.
+  if (!mergeDecisionsIsEmpty(options.mergeDecisions)) {
+    recommendedCommands.push("pm merge reconcile");
+  }
 
   // apply maxItems + token budget trimming (same pattern as buildDelta)
   const maxItems = Math.max(1, Math.floor(options.maxItems ?? 40));
@@ -2987,6 +3254,7 @@ export function buildDivergence(
     items: visible,
     fence: options.fence,
     recommendedCommands: dedupeStrings(recommendedCommands),
+    mergeDecisions: mergeDecisionsIsEmpty(options.mergeDecisions) ? undefined : options.mergeDecisions,
   };
 
   applyDivergenceBudget(summary, maxItems, tokenBudget, options.format);
@@ -3083,6 +3351,7 @@ export function renderMarkdownDivergence(summary: DivergenceSummary): string {
     lines.push("Missing: " + summary.fence.missing.join("; "));
     lines.push("Run `pm merge install` before merging.", "");
   }
+  lines.push(...renderMergeDecisionsMarkdown(summary.mergeDecisions));
 
   // group items by kind in severity order
   const grouped = groupDivergeItems(summary.items);
@@ -3119,6 +3388,11 @@ export function renderTextDivergence(summary: DivergenceSummary): string {
   if (!summary.fence.ok) {
     lines.push(`WARNING: merge driver fence not installed (${summary.fence.missing.join("; ")}). Even union-safe items will hard-conflict. Run 'pm merge install'.`);
   }
+  if (!mergeDecisionsIsEmpty(summary.mergeDecisions)) {
+    const m = summary.mergeDecisions!;
+    lines.push(`\u26a0 ${m.pendingCount} pending merge decision(s):`);
+    for (const entry of m.receipts) lines.push(`  ${mergeDecisionEntryText(entry)}`);
+  }
   lines.push("");
   for (const item of summary.items) {
     lines.push(divergeItemLine(item));
@@ -3147,6 +3421,7 @@ export function renderSlackDivergence(summary: DivergenceSummary): string {
   if (!summary.fence.ok) {
     lines.push(`*⚠ Merge driver fence not installed* — missing: ${summary.fence.missing.join("; ")}. Even union-safe items will hard-conflict. Run \`pm merge install\`.`);
   }
+  lines.push(...renderMergeDecisionsSlack(summary.mergeDecisions));
   const grouped = groupDivergeItems(summary.items);
   for (const { title, members } of grouped) {
     lines.push(`*${title}*`);
@@ -3619,7 +3894,7 @@ function registerCommands(api: ExtensionApi): void {
     flags: commonFlags,
     async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
-      const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
+      const format = resolveBriefFormat(options, ctx.global, "markdown");
       if (format !== "markdown" && format !== "json" && format !== "slack") throw new CommandError("--format must be markdown, json, or slack", EXIT_CODE.USAGE);
       const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
       const includeHistory = readBool(options, "include-history", "includeHistory");
@@ -3638,6 +3913,11 @@ function registerCommands(api: ExtensionApi): void {
         generatedAt,
         pmRoot: ctx.pm_root,
       });
+      // Pending merge-decision receipts are always surfaced (never skippable): a
+      // pending receipt means a peer's edit was silently discarded and the agent's
+      // context is compromised, which is never safe to hide. `pm validate` reports
+      // ok: true and never mentions receipts (unbraind/pm-cli#770).
+      const mergeDecisions = await collectPendingMergeDecisions(ctx.pm_root);
       const brief = buildBrief(items, {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
         dependencyOrder: briefDependencyOrder,
@@ -3654,6 +3934,7 @@ function registerCommands(api: ExtensionApi): void {
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
         governance,
+        mergeDecisions,
         // Keep the brief's next-work section aligned with `pm next` (companion gyi1).
         // Skipped under `--dependency-order` so the explicit prerequisite-first sort wins.
         nextOrder: briefDependencyOrder ? undefined : readNextOrderedIds(ctx.pm_root, { limit: 200, assignee: readString(options, "assignee") }),
@@ -3687,6 +3968,7 @@ function registerCommands(api: ExtensionApi): void {
         generatedAt,
         pmRoot: ctx.pm_root,
       });
+      const mergeDecisions = await collectPendingMergeDecisions(ctx.pm_root);
       const brief = buildBrief(items, {
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 2500),
         dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
@@ -3703,6 +3985,7 @@ function registerCommands(api: ExtensionApi): void {
         pmRoot: ctx.pm_root,
         pmVersion: pmVersion(),
         governance,
+        mergeDecisions,
       });
       const output = renderAgentPrompt(brief);
       const outputPath = readString(options, "output");
@@ -3727,7 +4010,7 @@ function registerCommands(api: ExtensionApi): void {
     ],
     async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
-      const format = (readString(options, "format") ?? "text").toLowerCase();
+      const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
       const nextCount = readInt(options, ["count"], 5);
       const assignee = readString(options, "assignee");
@@ -3774,7 +4057,7 @@ function registerCommands(api: ExtensionApi): void {
     ],
     async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
-      const format = (readString(options, "format") ?? "text").toLowerCase();
+      const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
       const stale = detectStaleContext(readPmItems(ctx.pm_root), {
         staleDays: readNonNegativeInt(options, ["days"], 7),
@@ -3797,7 +4080,7 @@ function registerCommands(api: ExtensionApi): void {
     ],
     async run(ctx: CommandHandlerContext) {
       const options = ctx.options as Record<string, unknown>;
-      const format = (readString(options, "format") ?? "text").toLowerCase();
+      const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
       const momentum = summarizeMomentum(readPmItems(ctx.pm_root), {
         completedDays: readInt(options, ["days"], 7),
@@ -3845,7 +4128,7 @@ function registerCommands(api: ExtensionApi): void {
       const rawCheckpoint = (ctx.args?.[0] ?? "").trim();
       if (!rawCheckpoint) throw new CommandError("pm brief since requires a <checkpoint> (ISO timestamp or relative window like 7d)", EXIT_CODE.USAGE);
       const checkpoint = normalizeCheckpoint(rawCheckpoint);
-      const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
+      const format = resolveBriefFormat(options, ctx.global, "markdown");
       if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
       const untilRaw = readString(options, "until");
       const until = untilRaw ? normalizeCheckpoint(untilRaw) : undefined;
@@ -3915,7 +4198,7 @@ function registerCommands(api: ExtensionApi): void {
       const includeClean = readBool(options, "include-clean", "includeClean");
       const maxItems = readInt(options, ["max-items", "maxItems"], 40);
       const tokenBudget = readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000);
-      const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "markdown")).toLowerCase();
+      const format = resolveBriefFormat(options, ctx.global, "markdown");
       if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
 
       const workspace = ctx.pm_root ?? ".agents/pm";
@@ -4020,6 +4303,7 @@ function registerCommands(api: ExtensionApi): void {
         maxItems,
         tokenBudget,
         format,
+        mergeDecisions: await collectPendingMergeDecisions(workspace),
       });
 
       const outputPath = readString(options, "output");

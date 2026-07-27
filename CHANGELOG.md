@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Surface pending field-aware merge-decision receipts in pm brief ([pm-brief-nd0k](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nd0k.toon))
+
 ## 2026.7.27 - 2026-07-27
 
 ### Added

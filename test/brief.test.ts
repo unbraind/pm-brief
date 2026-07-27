@@ -56,6 +56,8 @@ import extension, {
   governanceIsEmpty,
   renderTextGovernance,
   renderMarkdownGovernance,
+  collectPendingMergeDecisions,
+  mergeDecisionsIsEmpty,
   type DeltaActivityEntry,
   type DivergeEvent,
   type PmItem,
@@ -65,6 +67,8 @@ import extension, {
   type SimilarItemMatch,
   type GovernanceSummary,
   type GovernanceDuplicateCluster,
+  type MergeDecisionsSummary,
+  type MergeDecisionEntry,
 } from "../dist/index.js";
 
 /**
@@ -2641,5 +2645,387 @@ describe("brief since author filtering", () => {
       process.chdir(previousCwd);
       await rm(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief merge-decisions — pending field-aware merge receipts surfaced in the brief
+// ---------------------------------------------------------------------------
+
+/** Helper: build a synthetic MergeDecisionEntry with sane defaults for unit tests. */
+function mergeDecisionEntry(overrides: Partial<MergeDecisionEntry> = {}): MergeDecisionEntry {
+  return {
+    receiptId: "rec-1",
+    itemId: "pm-a",
+    itemPath: ".agents/pm/tasks/pm-a.toon",
+    preferred: "ours",
+    conflicts: [{ field: "description", discarded: "peer value" }],
+    ...overrides,
+  };
+}
+
+/** Helper: build a synthetic MergeDecisionsSummary with sane defaults for unit tests. */
+function mergeSummary(overrides: Partial<MergeDecisionsSummary> = {}): MergeDecisionsSummary {
+  return {
+    pendingCount: 1,
+    receipts: [mergeDecisionEntry()],
+    ...overrides,
+  };
+}
+
+describe("brief merge-decisions (unit)", () => {
+  test("mergeDecisionsIsEmpty returns true for undefined and empty receipts", () => {
+    assert.equal(mergeDecisionsIsEmpty(undefined), true);
+    assert.equal(mergeDecisionsIsEmpty(mergeSummary({ receipts: [] })), true);
+    assert.equal(mergeDecisionsIsEmpty(mergeSummary({ pendingCount: 0, receipts: [] })), true);
+    assert.equal(mergeDecisionsIsEmpty(mergeSummary()), false, "a summary with a receipt is not empty");
+  });
+
+  test("buildBrief includes the mergeDecisions section when provided and non-empty", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { mergeDecisions: mergeSummary(), generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    assert.ok(brief.mergeDecisions, "mergeDecisions section should be present");
+    assert.equal(brief.mergeDecisions!.pendingCount, 1);
+    assert.equal(brief.mergeDecisions!.receipts[0]!.itemId, "pm-a");
+  });
+
+  test("buildBrief omits the mergeDecisions section when there are no receipts", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    assert.equal(buildBrief(items, { mergeDecisions: undefined, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" }).mergeDecisions, undefined);
+    assert.equal(buildBrief(items, { mergeDecisions: mergeSummary({ receipts: [] }), generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" }).mergeDecisions, undefined, "empty receipts must be omitted");
+  });
+
+  test("buildBrief cross-references pending receipts as mergeCompromised markers on focus/next/decision items", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Compromised task", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+      { id: "pm-b", title: "Clean task", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { mergeDecisions: mergeSummary(), generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    const compromised = brief.next.find((i) => i.id === "pm-a");
+    const clean = brief.next.find((i) => i.id === "pm-b");
+    assert.ok(compromised, "pm-a should be in next work");
+    assert.equal(compromised!.mergeCompromised, true, "the receipt's item must be marked compromised");
+    assert.ok(clean, "pm-b should be in next work");
+    assert.equal(clean!.mergeCompromised, undefined, "an item with no receipt must not be marked");
+
+    const md = renderMarkdownBrief(brief);
+    assert.match(md, /⚠ merge pm-a:/, "markdown focus/next line for the compromised item must carry the ⚠ merge marker");
+    assert.doesNotMatch(md, /⚠ merge pm-b:/, "the clean item must not get the marker");
+
+    const prompt = renderAgentPrompt(brief);
+    assert.match(prompt, /- ⚠ pm-a \(kept ours\): discarded description=peer value/);
+
+    const slack = renderSlackBrief(brief);
+    assert.match(slack, /⚠ merge `pm-a`/);
+    assert.match(slack, /\*⚠ Pending Merge Decisions\*/);
+  });
+
+  test("a clean workspace renders no merge-decision noise in any format", () => {
+    const items: PmItem[] = [
+      { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
+    ];
+    const brief = buildBrief(items, { mergeDecisions: undefined, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    for (const item of [...brief.next, ...brief.focus]) assert.equal(item.mergeCompromised, undefined);
+    for (const output of [renderMarkdownBrief(brief), renderSlackBrief(brief), renderAgentPrompt(brief)]) {
+      assert.doesNotMatch(output, /Pending Merge Decisions/);
+      assert.doesNotMatch(output, /⚠ merge/);
+      assert.doesNotMatch(output, /merge reconcile/);
+    }
+  });
+
+  test("buildDivergence surfaces merge decisions and recommends `pm merge reconcile` even for a clean divergence", () => {
+    const base = {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    };
+    // A pending receipt can linger even when the diverged branches touched
+    // disjoint items (clean verdict). The pre-existing both-sided reconcile
+    // recommendation (`hasBothSided`) does NOT cover that case, so the merge-
+    // decisions integration is what adds `pm merge reconcile` here — the whole
+    // point of surfacing receipts in divergence.
+    const cleanWithReceipts = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
+    assert.equal(cleanWithReceipts.verdict, "clean");
+    assert.ok(cleanWithReceipts.mergeDecisions, "divergence summary must carry the merge decisions");
+    assert.ok(cleanWithReceipts.recommendedCommands.includes("pm merge reconcile"), "a pending receipt must recommend reconcile even on a clean divergence");
+
+    const cleanNoReceipts = buildDivergence([], { ...base });
+    assert.equal(cleanNoReceipts.verdict, "clean");
+    assert.equal(cleanNoReceipts.mergeDecisions, undefined, "divergence with no receipts must not carry merge decisions");
+    assert.ok(!cleanNoReceipts.recommendedCommands.includes("pm merge reconcile"), "a clean divergence with no receipts must not recommend reconcile");
+  });
+
+  test("buildDivergence renders the merge-decisions section only when receipts are present", () => {
+    const base = {
+      base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+    };
+    // A real field-collision so the divergence is `review-required` and the
+    // renderers do not short-circuit on the clean verdict, which would skip
+    // the merge section before it could be asserted.
+    const collisionItem = classifyItemDivergence({
+      id: "pm-coll",
+      ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+      base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: true, malformedLines: 0 },
+      head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true, malformedLines: 0 },
+    });
+    assert.equal(collisionItem.kind, "field-collision");
+
+    const withMerge = buildDivergence([collisionItem], { ...base, mergeDecisions: mergeSummary() });
+    assert.equal(withMerge.verdict, "review-required");
+    assert.ok(withMerge.mergeDecisions, "divergence summary must carry the merge decisions");
+    assert.match(renderTextDivergence(withMerge), /pending merge decision/);
+    assert.match(renderMarkdownDivergence(withMerge), /## ⚠ Pending Merge Decisions/);
+    assert.match(renderSlackDivergence(withMerge), /\*⚠ Pending Merge Decisions\*/);
+
+    const withoutMerge = buildDivergence([collisionItem], { ...base });
+    assert.equal(withoutMerge.verdict, "review-required");
+    assert.equal(withoutMerge.mergeDecisions, undefined, "divergence with no receipts must not carry merge decisions");
+    assert.doesNotMatch(renderTextDivergence(withoutMerge), /pending merge decision/);
+    assert.doesNotMatch(renderMarkdownDivergence(withoutMerge), /Pending Merge Decisions/);
+    assert.doesNotMatch(renderSlackDivergence(withoutMerge), /Pending Merge Decisions/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief merge-decisions end-to-end — real conflicting git merge
+// ---------------------------------------------------------------------------
+
+describe("brief merge-decisions end-to-end", () => {
+  /** Skip guard shared by every real-merge E2E test: a missing pm is a real skip. */
+  function pmOnPath(pmBin: string): boolean {
+    try {
+      return spawnSync(pmBin, ["--version"], { stdio: "pipe", encoding: "utf-8" }).status === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Build a real two-branch conflicting merge in a temp git repo. The base item
+   * is shared; agent-a and agent-b both rewrite the same scalar (`description`)
+   * and each append a `notes` entry (a union collection). Merging agent-a into
+   * agent-b exits 1 and lands a pending field-aware merge receipt.
+   *
+   * Returns the workspace + the conflicting item id so the caller can drive the
+   * real registered `brief`/`brief diverge` commands and assert against reality.
+   */
+  async function buildConflictingMerge(tmpDir: string, pmBin: string, override: { aDesc: string; bDesc: string }): Promise<string> {
+    const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+    const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+    const pmPath = join(tmpDir, ".agents", "pm");
+    git(["init"]);
+    git(["config", "user.email", "t@t.t"]);
+    git(["config", "user.name", "t"]);
+    pm(["init", "--pm-path", pmPath]);
+    pm(["merge", "install", "--pm-path", pmPath]);
+    const createOut = JSON.parse(pm(["--pm-path", pmPath, "create", "--title", "Shared item", "--type", "Task", "--author", "agent-a", "--json"])) as { id?: string; item?: { id?: string } };
+    const itemId = createOut.id ?? createOut.item?.id ?? "";
+    assert.ok(itemId, "pm create must return the created item id");
+    git(["add", "-A"]); git(["commit", "-m", "base"]);
+    const base = git(["rev-parse", "HEAD"]);
+    git(["checkout", "-b", "agent-a"]);
+    pm(["--pm-path", pmPath, "update", itemId, "--description", override.aDesc, "--author", "agent-a"]);
+    pm(["--pm-path", pmPath, "notes", itemId, "--add", "note from A", "--author", "agent-a", "--json"]);
+    git(["add", "-A"]); git(["commit", "-m", "agent-a"]);
+    git(["checkout", base]);
+    git(["checkout", "-b", "agent-b"]);
+    pm(["--pm-path", pmPath, "update", itemId, "--description", override.bDesc, "--author", "agent-b"]);
+    pm(["--pm-path", pmPath, "notes", itemId, "--add", "note from B", "--author", "agent-b", "--json"]);
+    git(["add", "-A"]); git(["commit", "-m", "agent-b"]);
+    // The field-aware driver resolves toward `ours` (agent-b) and records a receipt;
+    // git still exits 1 because the .toon has a content conflict needing commit.
+    const merge = spawnSync("git", ["merge", "agent-a", "-m", "merge"], { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" });
+    assert.notEqual(merge.status, 0, "the conflicting merge must exit non-zero");
+    return itemId;
+  }
+
+  test("integration: collectPendingMergeDecisions reads a real pending receipt with normalized item_path", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-conflict-"));
+    try {
+      const itemId = await buildConflictingMerge(tmpDir, pmBin, { aDesc: "Agent A description", bDesc: "Agent B description" });
+      const summary = await collectPendingMergeDecisions(join(tmpDir, ".agents", "pm"));
+      assert.ok(summary, "a pending merge should produce a summary");
+      assert.equal(summary!.pendingCount, 1);
+      assert.equal(summary!.receipts.length, 1);
+      const entry = summary!.receipts[0]!;
+      assert.equal(entry.itemId, itemId);
+      // Upstream unbraind/pm-cli#771: Git wraps the `%P` path in a stray quote
+      // layer; the brief must strip it so the path is readable.
+      assert.equal(entry.itemPath, ".agents/pm/tasks/" + itemId + ".toon");
+      assert.doesNotMatch(entry.itemPath, /^'/, "no leading wrapping quote");
+      assert.equal(entry.preferred, "ours");
+      // Only the LOSSY scalar conflict is surfaced — the `notes` union collection
+      // merged without loss and must NOT appear as a conflict.
+      assert.deepEqual(entry.conflicts.map((c) => c.field), ["description"]);
+      assert.equal(entry.conflicts[0]!.discarded, "Agent A description", "the peer agent's discarded value must be captured");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: registered `brief` and `brief diverge` surface pending receipts via the real command pipeline", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-brief-e2e-"));
+    const previousCwd = process.cwd();
+    try {
+      const itemId = await buildConflictingMerge(tmpDir, pmBin, { aDesc: "Agent A description", bDesc: "Agent B description" });
+      const { commands } = await activateBrief();
+      // `global: { json: false }` is explicit rather than incidental: the SDK test
+      // harness defaults globals to `{ json: true, quiet: true, noPager: true }`,
+      // and `brief` now honours the host-owned `--json` global (it previously read
+      // `--json` from ctx.options, where the host never puts it, so `pm brief --json`
+      // returned markdown). This case asserts the MARKDOWN rendering, so it must ask
+      // for markdown instead of relying on the handler ignoring the global.
+      const run = async (command: string, options: Record<string, unknown>, args: string[] = []): Promise<{ pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string; verdict?: string }> =>
+        (await runRegisteredCommandForTest(commands, { command, args, options, global: { json: false }, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string; verdict?: string };
+
+      process.chdir(tmpDir);
+      const briefMd = await run("brief", {});
+      const briefJson = await run("brief", { json: true });
+      const divergeMd = await run("brief diverge", { head: "agent-a" }, ["agent-b"]);
+      const divergeJson = await run("brief diverge", { head: "agent-a", format: "json" }, ["agent-b"]);
+
+      // brief (markdown): inline marker + dedicated section naming the discarded value.
+      assert.equal(briefMd.pmBriefRendered, true);
+      const md = String(briefMd.output);
+      assert.match(md, new RegExp("⚠ merge " + itemId + ":"));
+      assert.match(md, /## ⚠ Pending Merge Decisions/);
+      assert.match(md, new RegExp("`" + itemId + "` \\(kept ours\\) — fields: description"));
+      assert.match(md, /`description` discarded: Agent A description/);
+      assert.match(md, /reconcile with `pm merge reconcile`/);
+
+      // brief --json: compromised flag on the item + a mergeDecisions block.
+      const brief = JSON.parse(String(briefJson.output)) as { focus: Array<{ id: string; mergeCompromised?: boolean }>; next: Array<{ id: string; mergeCompromised?: boolean }>; mergeDecisions?: { pendingCount: number; receipts: Array<{ itemPath: string; preferred: string; conflicts: Array<{ field: string; discarded: string }> }> } };
+      const compromisedFocus = brief.focus.find((i) => i.id === itemId);
+      const compromisedNext = brief.next.find((i) => i.id === itemId);
+      assert.ok(compromisedFocus?.mergeCompromised, "focus item must be flagged");
+      assert.ok(compromisedNext?.mergeCompromised, "next item must be flagged");
+      assert.ok(brief.mergeDecisions, "json brief must carry the mergeDecisions section");
+      assert.equal(brief.mergeDecisions!.pendingCount, 1);
+      const entry = brief.mergeDecisions!.receipts[0]!;
+      assert.equal(entry.itemPath, ".agents/pm/tasks/" + itemId + ".toon");
+      assert.equal(entry.preferred, "ours");
+      assert.equal(entry.conflicts[0]!.field, "description");
+      assert.equal(entry.conflicts[0]!.discarded, "Agent A description");
+
+      // brief diverge (markdown): the section + a recommended reconcile step.
+      assert.equal(divergeMd.pmBriefRendered, true);
+      const dMd = String(divergeMd.output);
+      assert.match(dMd, /## ⚠ Pending Merge Decisions/);
+      assert.match(dMd, /pm merge reconcile/);
+
+      // brief diverge --json (no --output): a rendered result wrapping the JSON string.
+      assert.equal(divergeJson.pmBriefRendered, true);
+      const divergence = JSON.parse(String(divergeJson.output)) as { mergeDecisions?: { pendingCount: number }; recommendedCommands: string[]; items: Array<{ id: string; kind: string }> };
+      assert.ok(divergence.mergeDecisions, "divergence json must carry mergeDecisions");
+      assert.equal(divergence.mergeDecisions!.pendingCount, 1);
+      assert.ok(divergence.recommendedCommands.includes("pm merge reconcile"));
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: a long discarded value is truncated so it cannot blow the token budget", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-trunc-"));
+    try {
+      const longPeerValue = "x".repeat(200);
+      await buildConflictingMerge(tmpDir, pmBin, { aDesc: longPeerValue, bDesc: "short B value" });
+      const summary = await collectPendingMergeDecisions(join(tmpDir, ".agents", "pm"));
+      assert.ok(summary);
+      const discarded = summary!.receipts[0]!.conflicts[0]!.discarded;
+      assert.equal(discarded.length, 121, "a 200-char discarded value must be capped to 120 + ellipsis");
+      assert.ok(discarded.endsWith("\u2026"), "the truncated value must end with an ellipsis");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: a clean workspace adds no merge-decision noise to `brief`", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-quiet-"));
+    const previousCwd = process.cwd();
+    try {
+      const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pmPath = join(tmpDir, ".agents", "pm");
+      git(["init"]); git(["config", "user.email", "t@t.t"]); git(["config", "user.name", "t"]);
+      pm(["init", "--pm-path", pmPath]);
+      pm(["--pm-path", pmPath, "create", "--title", "Solo item", "--type", "Task", "--author", "agent-a", "--json"]);
+      git(["add", "-A"]); git(["commit", "-m", "base"]);
+
+      // No conflicting merge ever happens — collectPendingMergeDecisions stays silent.
+      assert.equal(await collectPendingMergeDecisions(pmPath), undefined);
+
+      const { commands } = await activateBrief();
+      process.chdir(tmpDir);
+      const briefMd = (await runRegisteredCommandForTest(commands, { command: "brief", options: {}, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      const md = String(briefMd.output);
+      assert.doesNotMatch(md, /Pending Merge Decisions/);
+      assert.doesNotMatch(md, /⚠ merge/);
+      const briefJson = (await runRegisteredCommandForTest(commands, { command: "brief", options: { json: true }, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      const brief = JSON.parse(String(briefJson.output)) as { mergeDecisions?: unknown };
+      assert.equal(brief.mergeDecisions, undefined, "the quiet path must add no mergeDecisions section");
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: `brief` must honour the HOST-OWNED `--json` global.
+//
+// `--json` is a host-owned global: the CLI consumes it into `ctx.global`, never
+// into `ctx.options`. `brief` used to read it from `options`, where it never
+// appears, so `pm brief --json` emitted markdown and `pm brief --json | jq .`
+// failed with a JSON parse error on `# pm brief`. An explicit `--format` still
+// wins, so an author who asks for markdown gets markdown.
+// ---------------------------------------------------------------------------
+
+describe("brief output format contract", () => {
+  test("the host-owned --json global selects structured output, and an explicit --format still wins", async () => {
+    const { commands } = await activateBrief();
+    const run = async (options: Record<string, unknown>, global: Record<string, unknown>): Promise<{ pmBriefRendered?: boolean; output?: string }> =>
+      (await runRegisteredCommandForTest(commands, { command: "brief", args: [], options, global, pmRoot: ".agents/pm" }))
+        .result as { pmBriefRendered?: boolean; output?: string };
+
+    // pm-brief returns BOTH formats through its rendered-string wrapper
+    // (`pmBriefRendered: true` + `output`) so it fully controls stdout, so the
+    // contract that matters is the CONTENT of `output`: valid JSON under `--json`,
+    // the markdown heading otherwise.
+    const viaJsonGlobal = await run({}, { json: true });
+    assert.doesNotThrow(
+      () => JSON.parse(String(viaJsonGlobal.output)),
+      "the host-owned --json global must make `brief` emit parseable JSON (pm brief --json | jq . must work)",
+    );
+
+    const viaMarkdown = await run({}, { json: false });
+    assert.match(String(viaMarkdown.output), /^# pm brief/, "without --json the brief renders markdown");
+
+    // An explicit --format must beat the global in BOTH directions.
+    const explicitMarkdown = await run({ format: "markdown" }, { json: true });
+    assert.match(String(explicitMarkdown.output), /^# pm brief/, "--format markdown must win over the --json global");
+    const explicitJson = await run({ format: "json" }, { json: false });
+    assert.doesNotThrow(
+      () => JSON.parse(String(explicitJson.output)),
+      "--format json must win over a false --json global",
+    );
   });
 });
