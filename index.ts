@@ -3325,7 +3325,13 @@ function divergeItemLine(item: DivergeItem): string {
 export function renderMarkdownDivergence(summary: DivergenceSummary): string {
  const header = `# Divergence: ${summary.base} ← ${summary.head}`;
   if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
-    return `${header}\n\nNo pm item divergence between ${summary.base} and ${summary.head}.\n`;
+    // A clean divergence is exactly when a pending merge decision matters MOST:
+    // nothing else changed, so the only thing worth reporting is that a peer's
+    // value was discarded. Returning early here hid it from the DEFAULT output
+    // while the JSON payload carried it (caught in review by Greptile's T-Rex run).
+    const clean = `${header}\n\nNo pm item divergence between ${summary.base} and ${summary.head}.\n`;
+    if (mergeDecisionsIsEmpty(summary.mergeDecisions)) return clean;
+    return `${clean}\n${renderMergeDecisionsAgentPrompt(summary.mergeDecisions).join("\n")}\n`;
   }
   const lines: string[] = [
     header,
@@ -3374,7 +3380,10 @@ export function renderMarkdownDivergence(summary: DivergenceSummary): string {
 
 export function renderTextDivergence(summary: DivergenceSummary): string {
   if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
-    return `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
+    const clean = `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
+    if (mergeDecisionsIsEmpty(summary.mergeDecisions)) return clean;
+    const entries = summary.mergeDecisions!.receipts.map((e) => `  - \u26a0 ${mergeDecisionEntryText(e)}`);
+    return `${clean}\nPending merge decisions (run \`pm merge reconcile\`):\n${entries.join("\n")}\n`;
   }
   const t = summary.totals;
   const lines: string[] = [
@@ -3406,7 +3415,10 @@ export function renderTextDivergence(summary: DivergenceSummary): string {
 
 export function renderSlackDivergence(summary: DivergenceSummary): string {
   if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
-    return `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
+    const clean = `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
+    if (mergeDecisionsIsEmpty(summary.mergeDecisions)) return clean;
+    const entries = summary.mergeDecisions!.receipts.map((e) => `• \u26a0 ${mergeDecisionEntryText(e)}`);
+    return `${clean}\n*Pending merge decisions* — run \`pm merge reconcile\`\n${entries.join("\n")}\n`;
   }
   const t = summary.totals;
   const lines: string[] = [

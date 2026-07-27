@@ -3029,3 +3029,52 @@ describe("brief output format contract", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: a CLEAN divergence must still SHOW pending merge decisions in every
+// non-JSON renderer.
+//
+// The builder retained the receipts (asserted above) but all three renderers
+// early-returned on `items.length === 0 && totals.itemsChanged === 0`, so the
+// pending decision was visible only in `--format json`. That inverts the priority:
+// a clean divergence is exactly when a discarded peer value is the ONLY thing
+// worth reporting, and markdown is the default output. Caught in review by
+// Greptile's T-Rex run against the divergence harness.
+// ---------------------------------------------------------------------------
+
+describe("clean divergence still reports pending merge decisions", () => {
+  const base = {
+    base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+    workspace: ".agents/pm", pmVersion: "test",
+    fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+  };
+
+  test("markdown, text and slack all surface the discarded value and the reconcile command", () => {
+    const withReceipts = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
+    assert.equal(withReceipts.verdict, "clean", "the fixture must be a clean divergence");
+
+    const rendered = {
+      markdown: renderMarkdownDivergence(withReceipts),
+      text: renderTextDivergence(withReceipts),
+      slack: renderSlackDivergence(withReceipts),
+    };
+    for (const [format, output] of Object.entries(rendered)) {
+      assert.match(output, /No pm item divergence/, `${format}: the clean verdict is still stated`);
+      assert.match(output, /pm-a/, `${format}: the affected item id must be reported`);
+      assert.match(output, /pm merge reconcile/, `${format}: the reconcile command must be recommended`);
+      assert.match(output, /⚠/, `${format}: the warning glyph marks the compromised context`);
+    }
+  });
+
+  test("a clean divergence with NO receipts stays completely quiet in every renderer", () => {
+    const clean = buildDivergence([], { ...base, mergeDecisions: mergeSummary({ pendingCount: 0, receipts: [] }) });
+    for (const [format, output] of Object.entries({
+      markdown: renderMarkdownDivergence(clean),
+      text: renderTextDivergence(clean),
+      slack: renderSlackDivergence(clean),
+    })) {
+      assert.doesNotMatch(output, /Pending merge decisions/i, `${format}: no receipts must add no section`);
+      assert.doesNotMatch(output, /⚠/, `${format}: no receipts must add no warning glyph`);
+    }
+  });
+});
