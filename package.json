@@ -1,6 +1,6 @@
 {
   "name": "pm-brief",
-  "version": "2026.7.26",
+  "version": "2026.7.27",
   "description": "Token-budgeted agent briefs and next-work plans for pm workspaces",
   "type": "module",
   "main": "dist/index.js",
@@ -19,7 +19,7 @@
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck",
-    "audit:prod": "npm audit --omit=dev",
+    "audit:prod": "env -u npm_config_allow_scripts npm audit --omit=dev --ignore-scripts",
     "pack:dry-run": "npm pack --dry-run",
     "changelog": "pm-changelog --pm-root .agents/pm --mode prepend --output CHANGELOG.md --release-version-from-package --since-previous-tag --until-release-tag --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm --respect-item-release",
     "changelog:full": "pm-changelog --pm-root .agents/pm --mode replace --output CHANGELOG.md --all-release-tags --release-version-from-package --item-url-base https://github.com/unbraind/pm-brief/blob/main/.agents/pm --respect-item-release",
@@ -56,7 +56,7 @@
     "@types/node": "^26.1.1",
     "pm-changelog": "^2026.7.25",
     "typescript": "^7.0.2",
-    "@unbrained/pm-cli": "^2026.7.26"
+    "@unbrained/pm-cli": "^2026.7.27"
   },
   "pm": {
     "aliases": [
@@ -97,6 +97,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@unbrained/pm-cli": "^2026.7.26"
+    "@unbrained/pm-cli": "^2026.7.27"
   }
 }

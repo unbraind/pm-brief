@@ -188,6 +188,32 @@ test("brief next command exposes explain flag", async () => {
   assert.ok((await registeredFlagLongs("brief next")).includes("--explain"));
 });
 
+test("no command redeclares a host-owned global flag", async () => {
+  // Guards the whole surface, not just the one command that regressed:
+  // registering any of these makes the host reject the command outright, and
+  // the value must be read from ctx.global instead.
+  const hostOwned = new Set([
+    "--json",
+    "--quiet",
+    "--path",
+    "--lean",
+    "--id-only",
+    "--author",
+    "--no-changed-fields",
+    "--full-changed-fields",
+    "--pm-path",
+  ]);
+  const activation = await activateBrief();
+  for (const registration of activation.registrations.flags) {
+    for (const flag of registration.flags) {
+      assert.ok(
+        flag.long === undefined || !hostOwned.has(flag.long),
+        `${registration.target_command} must not redeclare host-owned global flag ${flag.long}`,
+      );
+    }
+  }
+});
+
 test("extractRelationships normalizes dependency fields", () => {
   assert.deepEqual(extractRelationships(items[0]!), [{ from: "pm-a", to: "pm-b", kind: "blocked_by" }]);
 });

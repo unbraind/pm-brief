@@ -3832,7 +3832,6 @@ function registerCommands(api: ExtensionApi): void {
     arguments: [{ name: "checkpoint", required: true, description: "Lower bound: a bare relative window treated as 'ago' (e.g. 7d, 24h, 2w), a signed relative (-7d), an ISO timestamp, or a date (2026-07-20)" }],
     flags: [
       { long: "--until", value_name: "checkpoint", description: "Upper bound timestamp/relative (pm activity --to)", type: "string" },
-      { long: "--author", value_name: "name", description: "Only include changes by this author", type: "string" },
       { long: "--limit", value_name: "n", description: "Max activity entries to scan (default 1000)", type: "string" },
       { long: "--max-items", value_name: "n", description: "Max changed items to render (default 40)", type: "string" },
       { long: "--token-budget", value_name: "n", description: "Approx max output token budget (alias --max-tokens; default 4000)", type: "string" },
@@ -3849,7 +3848,9 @@ function registerCommands(api: ExtensionApi): void {
       if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
       const untilRaw = readString(options, "until");
       const until = untilRaw ? normalizeCheckpoint(untilRaw) : undefined;
-      const author = readString(options, "author");
+      // `--author` is a host-owned global flag: extensions must not redeclare it
+      // (the host rejects the registration) and must read it from ctx.global.
+      const author = ctx.global?.author as string | undefined;
       const limit = readInt(options, ["limit"], 1000);
       const maxItems = readInt(options, ["max-items", "maxItems"], 40);
       const tokenBudget = readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000);
