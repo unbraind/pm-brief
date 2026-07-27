@@ -3078,3 +3078,68 @@ describe("clean divergence still reports pending merge decisions", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: receipts omitted by the display cap must be NAMED, not silently
+// dropped.
+//
+// `pendingCount` carries the TRUE number of pending receipts while `receipts` is
+// capped at MERGE_DECISION_MAX_RECEIPTS (10) for token cost. A renderer that
+// iterates `receipts` alone therefore drops the remainder without a word — the
+// exact silent loss this whole section exists to surface. Caught in review by
+// Greptile after the clean-divergence renderer fix.
+// ---------------------------------------------------------------------------
+
+describe("merge-decision display cap is disclosed", () => {
+  const base = {
+    base: "main", head: "feat/x", baseSha: "s1", headSha: "s2", ancestorSha: "s0",
+    workspace: ".agents/pm", pmVersion: "test",
+    fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+  };
+  // 12 pending, only 10 renderable — mirrors what collectPendingMergeDecisions
+  // produces when a merge discards more than the cap.
+  const overCap = mergeSummary({ pendingCount: 12, receipts: [mergeDecisionEntry()] });
+
+  test("every clean-divergence renderer names the omitted receipts", () => {
+    const summary = buildDivergence([], { ...base, mergeDecisions: overCap });
+    for (const [format, output] of Object.entries({
+      markdown: renderMarkdownDivergence(summary),
+      text: renderTextDivergence(summary),
+      slack: renderSlackDivergence(summary),
+    })) {
+      assert.match(output, /11 further pending decision\(s\) not shown/, `${format}: the omitted count must be stated`);
+      assert.match(output, /pm merge report/, `${format}: must point at the command that lists them all`);
+    }
+  });
+
+  test("the brief's markdown and slack sections disclose the omitted count", () => {
+    const brief = buildBrief(
+      [{ id: "pm-a", type: "Task", status: "open", title: "Shared", priority: 2 } as never],
+      { mergeDecisions: overCap, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" },
+    );
+    // These two sections already disclosed the remainder as `(+N more)` before this
+    // change; the assertion pins that contract rather than the newer wording, since
+    // what matters is that the true count is never hidden.
+    assert.match(renderMarkdownBrief(brief), /\(\+11 more\)/, "markdown must disclose the 11 omitted receipts");
+    assert.match(renderSlackBrief(brief), /\(\+11 more\)/, "slack must disclose the 11 omitted receipts");
+    assert.match(renderMarkdownBrief(brief), /12 pending receipt\(s\)/, "the TRUE pending count must be stated");
+  });
+
+  test("the agent-prompt section names the omitted receipts", () => {
+    const brief = buildBrief(
+      [{ id: "pm-a", type: "Task", status: "open", title: "Shared", priority: 2 } as never],
+      { mergeDecisions: overCap, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" },
+    );
+    // This path (used by `brief prompt` and the clean-divergence markdown) had NO
+    // disclosure before this change — it iterated the capped list only.
+    assert.match(renderAgentPrompt(brief), /11 further pending decision\(s\) not shown/);
+    assert.match(renderAgentPrompt(brief), /pm merge report/);
+  });
+
+  test("nothing is claimed omitted when the cap is not exceeded", () => {
+    const summary = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
+    for (const output of [renderMarkdownDivergence(summary), renderTextDivergence(summary), renderSlackDivergence(summary)]) {
+      assert.doesNotMatch(output, /further pending decision/, "an uncapped list must not claim omissions");
+    }
+  });
+});

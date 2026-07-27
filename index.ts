@@ -1790,6 +1790,20 @@ function renderMergeDecisionsSlack(m: MergeDecisionsSummary | undefined): string
  * Render the pending merge-decisions section as compact agent-prompt lines.
  * Returns an empty array when there are no pending receipts.
  */
+/**
+ * Trailing notice naming receipts omitted by {@link MERGE_DECISION_MAX_RECEIPTS}.
+ *
+ * `pendingCount` is the TRUE number of pending receipts while `receipts` is capped
+ * for token cost, so a renderer that iterates `receipts` alone silently drops the
+ * remainder — the exact silent loss this section exists to surface. Returns an
+ * empty array when nothing was omitted.
+ */
+function mergeDecisionOmittedLines(m: MergeDecisionsSummary): string[] {
+  const omitted = m.pendingCount - m.receipts.length;
+  if (omitted <= 0) return [];
+  return [`- \u26a0 ${omitted} further pending decision(s) not shown — run \`pm merge report\` for the full list`];
+}
+
 function renderMergeDecisionsAgentPrompt(m: MergeDecisionsSummary | undefined): string[] {
   if (mergeDecisionsIsEmpty(m)) return [];
   const lines: string[] = ["Pending merge decisions (a peer agent's scalar edit was discarded and is NOT in committed history — your context is compromised):"];
@@ -1798,6 +1812,7 @@ function renderMergeDecisionsAgentPrompt(m: MergeDecisionsSummary | undefined): 
     lines.push(`- \u26a0 ${entry.itemId} (kept ${entry.preferred}): discarded ${conflicts}`);
     lines.push(`  - run \`pm merge reconcile\` to record the decision in history`);
   }
+  lines.push(...mergeDecisionOmittedLines(m!));
   return lines;
 }
 
@@ -3383,7 +3398,8 @@ export function renderTextDivergence(summary: DivergenceSummary): string {
     const clean = `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
     if (mergeDecisionsIsEmpty(summary.mergeDecisions)) return clean;
     const entries = summary.mergeDecisions!.receipts.map((e) => `  - \u26a0 ${mergeDecisionEntryText(e)}`);
-    return `${clean}\nPending merge decisions (run \`pm merge reconcile\`):\n${entries.join("\n")}\n`;
+    const omitted = mergeDecisionOmittedLines(summary.mergeDecisions!).map((line) => `  ${line.replace(/^- /, "")}`);
+    return `${clean}\nPending merge decisions (run \`pm merge reconcile\`):\n${[...entries, ...omitted].join("\n")}\n`;
   }
   const t = summary.totals;
   const lines: string[] = [
@@ -3418,7 +3434,8 @@ export function renderSlackDivergence(summary: DivergenceSummary): string {
     const clean = `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
     if (mergeDecisionsIsEmpty(summary.mergeDecisions)) return clean;
     const entries = summary.mergeDecisions!.receipts.map((e) => `• \u26a0 ${mergeDecisionEntryText(e)}`);
-    return `${clean}\n*Pending merge decisions* — run \`pm merge reconcile\`\n${entries.join("\n")}\n`;
+    const omitted = mergeDecisionOmittedLines(summary.mergeDecisions!).map((line) => line.replace(/^- /, "• "));
+    return `${clean}\n*Pending merge decisions* — run \`pm merge reconcile\`\n${[...entries, ...omitted].join("\n")}\n`;
   }
   const t = summary.totals;
   const lines: string[] = [
