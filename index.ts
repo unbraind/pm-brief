@@ -3417,6 +3417,10 @@ export function renderTextDivergence(summary: DivergenceSummary): string {
     const m = summary.mergeDecisions!;
     lines.push(`\u26a0 ${m.pendingCount} pending merge decision(s):`);
     for (const entry of m.receipts) lines.push(`  ${mergeDecisionEntryText(entry)}`);
+    // Stating pendingCount is not enough on its own: receipts is capped, so the
+    // omitted entries need naming and a route to the full list, exactly as the
+    // clean-divergence path does.
+    lines.push(...mergeDecisionOmittedLines(m).map((line) => `  ${line.replace(/^- /, "")}`));
   }
   lines.push("");
   for (const item of summary.items) {

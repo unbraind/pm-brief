@@ -3136,6 +3136,31 @@ describe("merge-decision display cap is disclosed", () => {
     assert.match(renderAgentPrompt(brief), /pm merge report/);
   });
 
+  test("a NON-clean divergence also names the omitted receipts in every renderer", () => {
+    // The prior fix covered the clean-divergence early-return only. When there ARE
+    // changed items the renderers take their main path, and the bespoke text block
+    // there printed pendingCount then looped the CAPPED list with no omission line.
+    // Greptile's T-Rex reproduced it: 12 pending, 10 rendered, 2 unaccounted for.
+    // A real field collision, built the same way the divergence tests above do, so
+    // buildDivergence classifies it review-required rather than clean.
+    const collided = classifyItemDivergence({
+      id: "pm-coll",
+      ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" })], itemPresent: true },
+      base: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }], { afterHash: "b1" })], itemPresent: true },
+      head: { events: [divEvent("create", "2026-07-19T00:00:00Z", [{ op: "add", path: "/metadata/status", value: "open" }], { afterHash: "a0" }), divEvent("update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }], { afterHash: "h1" })], itemPresent: true },
+    });
+    const summary = buildDivergence([collided], { ...base, mergeDecisions: overCap });
+    assert.notEqual(summary.verdict, "clean", "the fixture must exercise the NON-clean path");
+    for (const [format, output] of Object.entries({
+      markdown: renderMarkdownDivergence(summary),
+      text: renderTextDivergence(summary),
+      slack: renderSlackDivergence(summary),
+    })) {
+      const disclosesCount = /11 further pending decision\(s\) not shown/.test(output) || /\(\+11 more\)/.test(output);
+      assert.ok(disclosesCount, `${format}: a non-clean divergence must still disclose the 11 omitted receipts`);
+    }
+  });
+
   test("nothing is claimed omitted when the cap is not exceeded", () => {
     const summary = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
     for (const output of [renderMarkdownDivergence(summary), renderTextDivergence(summary), renderSlackDivergence(summary)]) {
