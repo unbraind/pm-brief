@@ -2669,6 +2669,7 @@ function mergeDecisionEntry(overrides: Partial<MergeDecisionEntry> = {}): MergeD
 function mergeSummary(overrides: Partial<MergeDecisionsSummary> = {}): MergeDecisionsSummary {
   return {
     pendingCount: 1,
+    compromisedItemIds: ["pm-a"],
     receipts: [mergeDecisionEntry()],
     ...overrides,
   };
@@ -3218,6 +3219,92 @@ describe("merge-decision display cap is disclosed", () => {
     const summary = buildDivergence([], { ...base, mergeDecisions: mergeSummary() });
     for (const output of [renderMarkdownDivergence(summary), renderTextDivergence(summary), renderSlackDivergence(summary)]) {
       assert.doesNotMatch(output, /further pending decision/, "an uncapped list must not claim omissions");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: the receipt DISPLAY cap must never constrain the compromised-id set.
+//
+// `receipts` is capped at MERGE_DECISION_MAX_RECEIPTS (10) for token cost, but the
+// `⚠ merge ` item markers were derived from that ALREADY-CAPPED list — so with
+// 11+ pending receipts, an item whose only receipt fell past the cap rendered with
+// NO warning marker: presented as trustworthy context while its scalar value had
+// in fact been discarded by a merge. Silent false confidence, the exact failure
+// this feature exists to prevent — and it only manifests past ten receipts, so it
+// could have sat undetected indefinitely. Caught in review by Greptile.
+//
+// This pins the whole chain on RENDERED output — a real receipt store read by the
+// real collector, through buildBrief, into the renderers — because the earlier
+// model-only assertions are precisely why this class of bug shipped.
+// ---------------------------------------------------------------------------
+
+describe("merge-decision display cap never constrains the compromised-id set", () => {
+  test("an item represented ONLY by a receipt past the cap still renders its ⚠ merge marker", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-cap-"));
+    try {
+      // A real (if minimal) git workspace: collectPendingMergeDecisions resolves
+      // the receipt store via `git rev-parse` from the pm root, and silently falls
+      // back to process.cwd() when the pm root is not inside a worktree — so both
+      // the repo and the pm root directory must really exist.
+      const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); };
+      git(["init"]);
+      const pmRoot = join(tmpDir, ".agents", "pm");
+      await mkdir(pmRoot, { recursive: true });
+
+      // 12 pending receipts for 12 distinct items — two more than the display cap.
+      // listMergeReceipts sorts by created_at, so pm-r11/pm-r12 deterministically
+      // fall past the cap: pm-r12 is represented ONLY by a receipt the renderers
+      // never show.
+      const receiptsDir = join(tmpDir, ".git", "pm-merge-receipts");
+      await mkdir(receiptsDir, { recursive: true });
+      for (let i = 1; i <= 12; i++) {
+        const n = String(i).padStart(2, "0");
+        const itemId = `pm-r${n}`;
+        const receipt = {
+          version: 1,
+          id: `receipt-${n}`,
+          item_path: `.agents/pm/tasks/${itemId}.toon`,
+          item_id: itemId,
+          preferred: "ours",
+          fields_from_theirs: [],
+          union_fields: [],
+          decisions: [{ field: "description", base: "base", ours: "ours", theirs: `peer value ${n}`, retained: "ours", discarded: `peer value ${n}` }],
+          state: "pending",
+          created_at: `2026-07-20T00:00:${n}Z`,
+        };
+        await writeFile(join(receiptsDir, `receipt-${n}.json`), JSON.stringify(receipt) + "\n");
+      }
+
+      const summary = await collectPendingMergeDecisions(pmRoot);
+      assert.ok(summary, "12 pending receipts must produce a summary");
+      assert.equal(summary!.pendingCount, 12, "pendingCount is the TRUE total");
+      assert.equal(summary!.receipts.length, 10, "the display cap still caps the rendered receipt list");
+      assert.equal(summary!.compromisedItemIds.length, 12, "the compromised-id set is computed from ALL receipts");
+      assert.ok(summary!.compromisedItemIds.includes("pm-r12"), "an item past the cap is still in the compromised-id set");
+
+      // pm-r01 is inside the cap; pm-r12 is represented ONLY past it; pm-clean has
+      // no receipt at all and must stay unmarked.
+      const items: PmItem[] = ["pm-r01", "pm-r12", "pm-clean"].map((id) => ({ id, title: `Task ${id}`, type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" }));
+      const brief = buildBrief(items, { mergeDecisions: summary, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+
+      // THE regression assertion, on rendered output: the past-cap item must still
+      // carry the warning marker on its item lines.
+      const md = renderMarkdownBrief(brief);
+      assert.match(md, /⚠ merge pm-r12:/, "an item past the receipt cap must still be marked compromised");
+      assert.match(md, /⚠ merge pm-r01:/, "an in-cap item must still be marked compromised");
+      assert.doesNotMatch(md, /⚠ merge pm-clean:/, "an item with no receipt must not be marked");
+      assert.match(renderSlackBrief(brief), /⚠ merge `pm-r12`/, "slack item lines mark the past-cap item too");
+
+      // The display cap itself must not regress: receipts stay capped and the
+      // omitted remainder is still disclosed by both disclosure wordings.
+      assert.match(md, /12 pending receipt\(s\)/, "the TRUE pending count is still stated");
+      assert.match(md, /\(\+2 more\)/, "markdown still discloses the 2 capped receipts");
+      const prompt = renderAgentPrompt(brief);
+      assert.match(prompt, /2 further pending decision\(s\) not shown/, "agent prompt still names the omitted receipts");
+      assert.match(prompt, /pm merge report/);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
     }
   });
 });

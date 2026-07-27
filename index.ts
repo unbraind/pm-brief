@@ -277,7 +277,20 @@ export interface MergeDecisionEntry {
 export interface MergeDecisionsSummary {
   /** Total pending receipts found in this clone. */
   pendingCount: number;
-  /** Per-receipt compact entries, capped for the token budget. */
+  /**
+   * Ids of EVERY item with a pending receipt, in first-seen receipt order, computed
+   * from all pending receipts before any display cap is applied. This is the
+   * correctness set behind the `⚠ merge ` item markers: bare ids are token-cheap,
+   * so unlike `receipts` this list is NEVER capped — capping it once let items past
+   * {@link MERGE_DECISION_MAX_RECEIPTS} render with no warning marker even though a
+   * merge had discarded their scalar context.
+   */
+  compromisedItemIds: string[];
+  /**
+   * Per-receipt compact entries, capped at {@link MERGE_DECISION_MAX_RECEIPTS} for
+   * the token budget. RENDERING ONLY — never derive the compromised-id set from
+   * this list; use {@link MergeDecisionsSummary.compromisedItemIds} instead.
+   */
   receipts: MergeDecisionEntry[];
 }
 
@@ -1187,6 +1200,12 @@ export async function collectPendingMergeDecisions(pmRoot: string): Promise<Merg
     const entries = pending.map(toMergeDecisionEntry);
     return {
       pendingCount: entries.length,
+      // Computed from ALL pending receipts, before the cap below. Bare ids are
+      // token-cheap, so this correctness set is never capped.
+      compromisedItemIds: [...new Set(entries.map((entry) => entry.itemId))],
+      // INVARIANT: MERGE_DECISION_MAX_RECEIPTS is a DISPLAY/token-cost cap only and
+      // must never constrain the compromised-id set above — the last two bugs on
+      // this branch came from letting a rendering bound reach correctness data.
       receipts: entries.slice(0, MERGE_DECISION_MAX_RECEIPTS),
     };
   } catch {
@@ -1199,10 +1218,16 @@ export function mergeDecisionsIsEmpty(m: MergeDecisionsSummary | undefined): boo
   return !m || m.receipts.length === 0;
 }
 
-/** Set of item ids that have a pending merge-decision receipt, for cross-referencing. */
+/**
+ * Set of item ids that have a pending merge-decision receipt, for cross-referencing
+ * against focus/next/decision items. Reads the summary's NEVER-capped id list:
+ * deriving this from the display-capped `receipts` list silently dropped the
+ * `⚠ merge ` marker for every item past the cap, presenting compromised context as
+ * trustworthy — the exact failure this feature exists to prevent.
+ */
 function compromisedItemIds(m: MergeDecisionsSummary | undefined): Set<string> {
   if (!m) return new Set();
-  return new Set(m.receipts.map((entry) => entry.itemId));
+  return new Set(m.compromisedItemIds);
 }
 
 

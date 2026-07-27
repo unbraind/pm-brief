@@ -1,0 +1,15 @@
+id: pm-brief-8up0
+title: Merge-receipt display cap silently drops item warning markers past the tenth receipt
+description: "compromisedItemIds() built the warning-marker set from the ALREADY-CAPPED receipts list (MERGE_DECISION_MAX_RECEIPTS=10), a category error: a display/token-cost cap constrained a correctness set. With 11+ pending receipts, an item whose only receipt fell past the cap rendered with no warning marker, presenting compromised context as trustworthy. Fixed by carrying the complete compromisedItemIds list on MergeDecisionsSummary, computed from ALL pending receipts before the slice; the receipts list stays capped for rendering only."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-27T21:47:11.404Z"
+updated_at: "2026-07-27T21:47:37.965Z"
+closed_at: "2026-07-27T21:47:37.965Z"
+author: pi-agent
+notes[1]{created_at,author,text}:
+  "2026-07-27T21:47:24.334Z",pi-agent,"Root cause is a category error: MERGE_DECISION_MAX_RECEIPTS is a display/token-cost cap but was allowed to constrain a correctness set — the compromised-id set behind the warning marker on item lines was derived from the capped receipts list, so any item past the cap silently lost its marker. This is the third bug on feat/brief-merge-decisions caused by that boundary, so the cap site now carries an explicit display-only invariant comment. It only manifests past 10 pending receipts, so it could have sat undetected indefinitely (Greptile caught it in review). Regression pin: an item represented ONLY by a receipt past the cap (12 receipts, item pm-r12) must still render the warning marker in markdown and slack output, while receipts stays capped at 10, pendingCount stays the true total, and both omitted-receipt disclosures keep working; asserted on RENDERED output because the earlier model-only assertions are why this class of bug shipped. Verified the test goes red under the old capped-list derivation."
+close_reason: "MergeDecisionsSummary now carries the COMPLETE compromisedItemIds list, computed from all pending receipts before the display cap; receipts stays capped at MERGE_DECISION_MAX_RECEIPTS for rendering only, with an explicit display-only invariant comment at the cap site. compromisedItemIds() reads the never-capped list. Gates: npm test 160/160 pass (was 159, +1 regression test on rendered output, verified red under the old code), npx tsc --noEmit clean."
+body: ""
