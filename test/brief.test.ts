@@ -188,6 +188,32 @@ test("brief next command exposes explain flag", async () => {
   assert.ok((await registeredFlagLongs("brief next")).includes("--explain"));
 });
 
+test("no command redeclares a host-owned global flag", async () => {
+  // Guards the whole surface, not just the one command that regressed:
+  // registering any of these makes the host reject the command outright, and
+  // the value must be read from ctx.global instead.
+  const hostOwned = new Set([
+    "--json",
+    "--quiet",
+    "--path",
+    "--lean",
+    "--id-only",
+    "--author",
+    "--no-changed-fields",
+    "--full-changed-fields",
+    "--pm-path",
+  ]);
+  const activation = await activateBrief();
+  for (const registration of activation.registrations.flags) {
+    for (const flag of registration.flags) {
+      assert.ok(
+        flag.long === undefined || !hostOwned.has(flag.long),
+        `${registration.target_command} must not redeclare host-owned global flag ${flag.long}`,
+      );
+    }
+  }
+});
+
 test("extractRelationships normalizes dependency fields", () => {
   assert.deepEqual(extractRelationships(items[0]!), [{ from: "pm-a", to: "pm-b", kind: "blocked_by" }]);
 });
@@ -2547,6 +2573,72 @@ describe("brief governance end-to-end", () => {
       // The detector rule SHOULD appear
       assert.match(textOutput, /aws_access_key/);
     } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `--by` filter vs pm's host-owned global `--author`
+// ---------------------------------------------------------------------------
+
+describe("brief since author filtering", () => {
+  test("integration: --by filters the delta, global --author does not", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+
+    let pmAvailable = false;
+    try {
+      const r = spawnSync(pmBin, ["--version"], { stdio: "pipe", encoding: "utf-8" });
+      pmAvailable = r.status === 0;
+    } catch {
+      pmAvailable = false;
+    }
+    if (!pmAvailable) {
+      t.skip("pm not on PATH");
+      return;
+    }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-by-test-"));
+    const previousCwd = process.cwd();
+    try {
+      const pm = (args: string[]) => {
+        const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+        if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`);
+        return r.stdout.trim();
+      };
+      const pmPath = join(tmpDir, ".agents", "pm");
+      pm(["init", "--pm-path", pmPath]);
+      pm(["--pm-path", pmPath, "--author", "agent-alpha", "create", "Task", "--title", "Alpha work item", "--json"]);
+      pm(["--pm-path", pmPath, "--author", "agent-beta", "create", "Task", "--title", "Beta work item", "--json"]);
+
+      const { commands } = await activateBrief();
+      const runSince = async (options: Record<string, unknown>, global: Record<string, unknown>): Promise<string> => {
+        const outcome = await runRegisteredCommandForTest(commands, {
+          command: "brief since",
+          args: ["7d"],
+          options: { format: "markdown", ...options },
+          global,
+          pmRoot: ".agents/pm",
+        });
+        return JSON.stringify(outcome.result);
+      };
+
+      process.chdir(tmpDir);
+
+      // pm's global `--author` overrides the *mutation* author for the
+      // invocation. It must never double as a read filter: agents routinely
+      // pass `--author <agent-id>` on every call, and doing so must not
+      // silently hide other agents' changes from the brief.
+      const asAlpha = await runSince({}, { author: "agent-alpha" });
+      assert.match(asAlpha, /Alpha work item/, "global --author must not filter out its own changes");
+      assert.match(asAlpha, /Beta work item/, "global --author must NOT act as a filter on other authors");
+
+      // `--by` is the extension's own filter and must narrow the delta.
+      const onlyBeta = await runSince({ by: "agent-beta" }, {});
+      assert.match(onlyBeta, /Beta work item/, "--by must retain the selected author's changes");
+      assert.doesNotMatch(onlyBeta, /Alpha work item/, "--by must exclude other authors' changes");
+    } finally {
+      process.chdir(previousCwd);
       await rm(tmpDir, { recursive: true, force: true });
     }
   });

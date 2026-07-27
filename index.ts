@@ -3828,11 +3828,11 @@ function registerCommands(api: ExtensionApi): void {
     name: "brief since",
     description: "Summarize what changed in the workspace since a checkpoint (delta brief).",
     intent: "give an agent resuming work a precise, token-budgeted delta instead of a full re-read",
-    examples: ["pm brief since 7d", "pm brief since 2026-07-20 --format json", "pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice"],
+    examples: ["pm brief since 7d", "pm brief since 2026-07-20 --format json", "pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --by alice"],
     arguments: [{ name: "checkpoint", required: true, description: "Lower bound: a bare relative window treated as 'ago' (e.g. 7d, 24h, 2w), a signed relative (-7d), an ISO timestamp, or a date (2026-07-20)" }],
     flags: [
       { long: "--until", value_name: "checkpoint", description: "Upper bound timestamp/relative (pm activity --to)", type: "string" },
-      { long: "--author", value_name: "name", description: "Only include changes by this author", type: "string" },
+      { long: "--by", value_name: "name", description: "Only include changes made by this author", type: "string" },
       { long: "--limit", value_name: "n", description: "Max activity entries to scan (default 1000)", type: "string" },
       { long: "--max-items", value_name: "n", description: "Max changed items to render (default 40)", type: "string" },
       { long: "--token-budget", value_name: "n", description: "Approx max output token budget (alias --max-tokens; default 4000)", type: "string" },
@@ -3849,7 +3849,12 @@ function registerCommands(api: ExtensionApi): void {
       if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
       const untilRaw = readString(options, "until");
       const until = untilRaw ? normalizeCheckpoint(untilRaw) : undefined;
-      const author = readString(options, "author");
+      // This is a *filter* ("whose changes to show"), which is a different
+      // concept from pm's host-owned global `--author` ("override mutation
+      // author for this invocation"). The global cannot be reused here: agents
+      // routinely run `pm --author <agent-id> …`, which would silently narrow
+      // every brief to that agent's own changes. Hence the distinct `--by`.
+      const author = readString(options, "by");
       const limit = readInt(options, ["limit"], 1000);
       const maxItems = readInt(options, ["max-items", "maxItems"], 40);
       const tokenBudget = readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000);
