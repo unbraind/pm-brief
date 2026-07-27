@@ -1,0 +1,21 @@
+id: pm-brief-a007
+title: Merge-receipt read failures hard-fail every brief command
+description: "collectPendingMergeDecisions is awaited unconditionally by brief, brief prompt and brief diverge. Nothing catches errors from findGitWorkspaceRoot or listMergeReceipts, so a corrupt/unreadable receipt, permission error, or any SDK-side throw turns pm brief into a FAILED command. Merge-receipt reading is advisory context and must degrade to no-pending-decisions instead of failing. Found by CodeRabbit review on PR 46."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-27T21:20:40.275Z"
+updated_at: "2026-07-27T21:27:23.714Z"
+closed_at: "2026-07-27T21:27:23.713Z"
+claim_principal: pi-agent
+author: pi-agent
+notes[1]{created_at,author,text}:
+  "2026-07-27T21:27:13.569Z",pi-agent,"Root cause: collectPendingMergeDecisions awaited findGitWorkspaceRoot + listMergeReceipts with no error containment, and brief/brief prompt/brief diverge all await it unconditionally, so any SDK-side throw (e.g. corrupt receipt JSON missing created_at crashes the SDK's final created_at sort with a TypeError) hard-failed pm brief. Fix: wrapped workspace-root resolution, receipt listing and pending-filtering in try/catch returning undefined, with a comment stating the advisory invariant (receipt reading is context, never gating). Behaviour on healthy receipt stores is unchanged. Regression test: integration: a corrupt receipt store degrades brief to no pending decisions instead of failing — plants two created_at-less pending receipts, proves the raw SDK read throws (assert.rejects), then asserts collectPendingMergeDecisions returns undefined and the registered brief command still renders with no merge-decision section. Verified the test FAILS without the fix (TypeError propagates) and passes with it."
+files[2]{path,scope,note}:
+  index.ts,project,null
+  test/brief.test.ts,project,null
+tests[1]{command,scope}:
+  npm test,project
+close_reason: "Fixed: collectPendingMergeDecisions now wraps receipt reading in try/catch and returns undefined on any throw, so brief degrades to no-pending-decisions instead of failing. Gates green: npm run build, npm test (159/159 pass, incl. new regression test proving the degradation), npx tsc --noEmit, npm run changelog:check."
+body: ""

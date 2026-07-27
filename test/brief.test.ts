@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readSettings, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
 import { activateExtensionForTest, runRegisteredCommandForTest } from "@unbrained/pm-cli/sdk/testing";
+import { listMergeReceipts } from "@unbrained/pm-cli/sdk/merge";
 import type { ExtensionActivationResult, ExtensionCapability, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
 import extension, {
   buildBrief,
@@ -2982,6 +2983,58 @@ describe("brief merge-decisions end-to-end", () => {
       const briefJson = (await runRegisteredCommandForTest(commands, { command: "brief", options: { json: true }, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
       const brief = JSON.parse(String(briefJson.output)) as { mergeDecisions?: unknown };
       assert.equal(brief.mergeDecisions, undefined, "the quiet path must add no mergeDecisions section");
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("integration: a corrupt receipt store degrades `brief` to no pending decisions instead of failing", async (t) => {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
+
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-corrupt-"));
+    const previousCwd = process.cwd();
+    try {
+      const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
+      const pmPath = join(tmpDir, ".agents", "pm");
+      git(["init"]); git(["config", "user.email", "t@t.t"]); git(["config", "user.name", "t"]);
+      pm(["init", "--pm-path", pmPath]);
+      pm(["--pm-path", pmPath, "create", "--title", "Solo item", "--type", "Task", "--author", "agent-a", "--json"]);
+      git(["add", "-A"]); git(["commit", "-m", "base"]);
+
+      // Two structurally valid but incomplete pending receipts: the SDK pushes
+      // them (version 1 + pending passes its per-file guard), then its final
+      // created_at sort dereferences the missing field and throws. That is the
+      // SDK-side throw the brief must survive; one receipt would not do (the
+      // comparator is never invoked on a single-element array).
+      const receiptsDir = join(tmpDir, ".git", "pm-merge-receipts");
+      await mkdir(receiptsDir, { recursive: true });
+      for (const name of ["aaaa-corrupt.json", "bbbb-corrupt.json"]) {
+        await writeFile(join(receiptsDir, name), JSON.stringify({ version: 1, state: "pending" }) + "\n");
+      }
+
+      // Fixture sanity: the raw SDK read really does throw on this store, so the
+      // degradation assertions below cannot go vacuously green if the SDK is
+      // later hardened to tolerate this exact corruption.
+      await assert.rejects(listMergeReceipts(tmpDir), TypeError);
+
+      // The collector must degrade to undefined rather than reject.
+      assert.equal(await collectPendingMergeDecisions(pmPath), undefined);
+
+      // The registered `brief` command must still succeed and simply omit the
+      // pending-decisions section in every format.
+      const { commands } = await activateBrief();
+      process.chdir(tmpDir);
+      const briefMd = (await runRegisteredCommandForTest(commands, { command: "brief", options: {}, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      assert.equal(briefMd.pmBriefRendered, true, "the brief must render despite the broken receipt store");
+      const md = String(briefMd.output);
+      assert.doesNotMatch(md, /Pending Merge Decisions/);
+      assert.doesNotMatch(md, /⚠ merge/);
+      const briefJson = (await runRegisteredCommandForTest(commands, { command: "brief", options: { json: true }, pmRoot: ".agents/pm" })).result as { pmBriefRendered?: boolean; output?: string };
+      const brief = JSON.parse(String(briefJson.output)) as { mergeDecisions?: unknown };
+      assert.equal(brief.mergeDecisions, undefined, "a broken receipt store must add no mergeDecisions section");
     } finally {
       process.chdir(previousCwd);
       await rm(tmpDir, { recursive: true, force: true });

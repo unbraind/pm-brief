@@ -1168,21 +1168,30 @@ function toMergeDecisionEntry(receipt: MergeDecisionReceipt): MergeDecisionEntry
  * represented in committed history, so an agent resuming after a merge would
  * otherwise load a context that silently omits the peer's work. Returns a compact
  * summary, or `undefined` when there are no pending receipts (the quiet path that
- * keeps the common case noise-free).
+ * keeps the common case noise-free). Receipt reading is advisory context: any
+ * failure also yields `undefined`, so a broken receipt store degrades the brief
+ * instead of failing it.
  */
 export async function collectPendingMergeDecisions(pmRoot: string): Promise<MergeDecisionsSummary | undefined> {
-  // `findGitWorkspaceRoot` walks up from the tracker root to the enclosing worktree;
-  // outside a git repo it returns null and there can be no receipts to read.
-  const workspaceRoot = await findGitWorkspaceRoot(pathResolve(pmRoot));
-  const cwd = workspaceRoot ?? process.cwd();
-  const receipts = await listMergeReceipts(cwd);
-  const pending = receipts.filter((receipt) => receipt.state === "pending");
-  if (pending.length === 0) return undefined;
-  const entries = pending.map(toMergeDecisionEntry);
-  return {
-    pendingCount: entries.length,
-    receipts: entries.slice(0, MERGE_DECISION_MAX_RECEIPTS),
-  };
+  // Advisory invariant: receipt reading is context, not gating — any failure here
+  // (corrupt receipt, permission error, SDK-side throw) degrades the brief to
+  // "no pending merge decisions" and must NEVER fail the command.
+  try {
+    // `findGitWorkspaceRoot` walks up from the tracker root to the enclosing worktree;
+    // outside a git repo it returns null and there can be no receipts to read.
+    const workspaceRoot = await findGitWorkspaceRoot(pathResolve(pmRoot));
+    const cwd = workspaceRoot ?? process.cwd();
+    const receipts = await listMergeReceipts(cwd);
+    const pending = receipts.filter((receipt) => receipt.state === "pending");
+    if (pending.length === 0) return undefined;
+    const entries = pending.map(toMergeDecisionEntry);
+    return {
+      pendingCount: entries.length,
+      receipts: entries.slice(0, MERGE_DECISION_MAX_RECEIPTS),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /** True when the merge-decisions section is absent or has no receipts. */
