@@ -12,3 +12,4 @@ RELEASE_NOTES.md
 .env
 .env.*
 !.env.example
+coverage/

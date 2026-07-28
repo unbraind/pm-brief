@@ -70,7 +70,7 @@ import extension, {
   type GovernanceDuplicateCluster,
   type MergeDecisionsSummary,
   type MergeDecisionEntry,
-} from "../dist/index.js";
+} from "../index.ts";
 
 /**
  * Capabilities the on-disk `manifest.json` declares.
