@@ -4522,7 +4522,7 @@ function classifyPaths(paths: string[], pmRootRel: string, historyIds: Set<strin
 
 export default defineExtension({
   name: "pm-brief",
-  version: "2026.7.27",
+  version: "2026.7.28",
   description: "Token-budgeted agent briefs and next-work plans for pm workspaces",
   activate(api: ExtensionApi) {
     registerCommands(api);

@@ -1,0 +1,13 @@
+id: pm-brief-owcy
+title: Adopt pm-cli 2026.7.28
+description: "Bump pm-cli dependency and package version from 2026.7.27 to 2026.7.28 across package.json, manifest.json, and index.ts. Regenerate CHANGELOG."
+type: Chore
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-28T03:29:44.208Z"
+updated_at: "2026-07-28T03:29:46.428Z"
+closed_at: "2026-07-28T03:29:46.427Z"
+author: pi-agent
+close_reason: "Bumped @unbrained/pm-cli from ^2026.7.27 to ^2026.7.28 in package.json dependencies and devDependencies; bumped package version to 2026.7.28 in package.json, manifest.json, and the version constant in index.ts; regenerated CHANGELOG via changelog:full; npm install resolved pm-cli 2026.7.28; release:check passes (typecheck, build, 160 tests, audit, pack dry-run, changelog check)."
+body: ""
