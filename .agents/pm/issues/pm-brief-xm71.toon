@@ -2,13 +2,19 @@ id: pm-brief-xm71
 title: "brief since redeclared host-owned --author global, failing registration on pm-cli 2026.7.27"
 description: "pm-cli 2026.7.27 ships GH-719: the host rejects any extension command whose flags shadow a host-owned global flag. The 'brief since' command declared { long: \"--author\" }, so its registerCommand call failed and the command did not register against a real pm host. The existing test suite could not catch this because it activated through a real SDK harness that did not previously exercise host-owned flag rejection. Fix: drop the --author flag declaration from brief since and read the value from ctx.global.author instead, matching the existing ctx.global usage pattern. Also fixed the audit:prod script which used plain 'npm audit --omit=dev' instead of the 'env -u npm_config_allow_scripts npm audit --omit=dev --ignore-scripts' form required by project-scoped installs. Added a suite-wide guard test asserting no registered command redeclares any of the nine host-owned globals. Bumped pm-cli to 2026.7.27."
 type: Issue
-status: in_progress
+status: closed
 priority: 1
 tags: []
 created_at: "2026-07-27T04:58:51.752Z"
-updated_at: "2026-07-27T05:11:11.473Z"
+updated_at: "2026-07-28T11:40:51.720Z"
+closed_at: "2026-07-28T11:14:15.587Z"
 author: pi-agent
-notes[2]{created_at,author,text}:
+release: 2026.7.27
+notes[3]{created_at,author,text}:
   "2026-07-27T04:58:57.972Z",pi-agent,"Verified: activation probe prints failed=[] against the real pm host engine. npm test: 138/138 pass including the new suite-wide guard test asserting no command redeclares any host-owned global. release:check green end to end (typecheck, build, test, audit:prod, pack:dry-run, changelog:check). The --author flag is read from ctx.global.author in brief since, and the example in the usage string remains valid since --author still works as a host-owned global."
   "2026-07-27T05:11:11.472Z","harness:claude-code","Correction during review: the initial fix read pm's host-owned global --author as the filter, but that global means 'override mutation author for this invocation', not 'whose changes to show'. Agents routinely pass --author <agent-id>, which would have silently narrowed every brief to that agent's own changes. Replaced with a distinct --by flag preserving filter semantics, plus an integration regression test asserting global --author does NOT filter while --by does. Verified the test fails with the exact assertion when the fix is reverted."
+  "2026-07-28T11:40:51.720Z",claude-code,"Structured verification added at CodeRabbit's request on pm-brief#49. Real-host registration was confirmed on 2026-07-28 by installing the package into a throwaway pm init workspace and reading pm health: pm-brief appears under the extensions check loaded list with capabilities commands, renderers and schema, and the failed list is empty. pm brief --json then returns a real brief rather than an arity error."
+tests[1]{command,scope,timeout_seconds}:
+  "npm run release:check",project,900
+close_reason: "Shipped and verified functionally 2026-07-28: the package installs and loads on pm-cli 2026.7.28 with failed:[] in pm health, and its commands register and execute. Closing the registration tracker."
 body: ""

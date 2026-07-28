@@ -21,6 +21,10 @@
 
 - Surface governance findings in agent briefs via sdk/governance ([pm-brief-q325](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-q325.toon))
 
+### Fixed
+
+- brief since redeclared host-owned --author global, failing registration on pm-cli 2026.7.27 ([pm-brief-xm71](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-xm71.toon))
+
 ### Other
 
 - Adopt pm-cli 2026.7.26 typed authoring SDK: drop the any-cast defineExtension shim and move tests onto the real activation harness ([pm-brief-iapt](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-iapt.toon))
@@ -34,6 +38,10 @@
 ### Fixed
 
 - Documented install command fails: pm install github.com/unbraind/pm-brief cannot resolve an entry file ([pm-brief-xd8z](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-xd8z.toon))
+
+### Other
+
+- Enable governance duplicate-detection advisory mode and restore parent_reference=warn ([pm-brief-k39x](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-k39x.toon))
 
 ## 2026.7.25 - 2026-07-25
 
