@@ -51,3 +51,34 @@ jobs:
 
       - name: Verify Bun can install the package graph
         run: bun install --no-save
+
+  # The production audit script is the one place in this package that has to
+  # behave differently per platform: it strips npm_config_allow_scripts from the
+  # environment and, on Windows, must spawn npm through a shell because Node
+  # refuses to execute .cmd files via spawn otherwise. Two separate Windows-only
+  # breakages shipped here undetected because CI was ubuntu-only, so the script
+  # gets a Windows job of its own rather than a caveat in the commit message.
+  audit-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Production dependency audit
+        run: npm run audit:prod
+
+      - name: Production dependency audit with npm_config_allow_scripts set
+        # The exact condition the script exists to survive: a bare
+        # `npm audit --omit=dev` aborts with EALLOWSCRIPTS when this is present.
+        env:
+          npm_config_allow_scripts: "true"
+        run: npm run audit:prod
