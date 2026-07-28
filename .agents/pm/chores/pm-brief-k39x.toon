@@ -2,13 +2,14 @@ id: pm-brief-k39x
 title: Enable governance duplicate-detection advisory mode and restore parent_reference=warn
 description: ""
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[3]: duplicates,fleet,governance
 created_at: "2026-07-25T23:14:07.512Z"
-updated_at: "2026-07-25T23:14:08.670Z"
-assignee: claude-code
+updated_at: "2026-07-28T11:14:07.975Z"
+closed_at: "2026-07-28T11:14:07.974Z"
 author: claude-code
 notes[1]{created_at,author,text}:
   "2026-07-25T23:14:08.669Z",claude-code,"Closes the pm-brief half of the gap in fleet rollout pm-cli-website-rlws, whose title says 'all 18 pm package trackers' but whose completion note enumerates only 16; pm-brief and pm-web were skipped with no stated reason. pm-brief has now been the omitted repo in two consecutive fleet rollouts (the --respect-item-release sweep was the other). Verified on a throwaway copy of this repo's real settings.json: creating an item titled 'Build pm-brief MVP' returns warnings=[likely_duplicates:pm-brief-ogmd] and still succeeds, so advisory mode annotates without ever failing a create. Enabling it reproduced upstream pm-cli#710 again: the first 'pm config set' silently re-derived validation.parent_reference from the named 'minimal' preset and flipped warn -> strict_error with no stderr notice and nothing in --json. Pinned back with 'pm config set parent_reference_policy warn', promoting governance.preset to 'custom' and materialising this repo's own minimal-preset values (ownership_enforcement=none, close_validation_default=off, force_required_for_stale_lock=false) so behaviour is otherwise unchanged. Verified after the fix: creating an item with a nonexistent parent returns warnings=[validation_warning:parent_reference_missing:pm-brief-nope] and exits 0."
+close_reason: "Shipped and verified 2026-07-28: .agents/pm/settings.json carries validation.parent_reference set to warn alongside the duplicate-detection advisory keys. Closing the tracker."
 body: ""

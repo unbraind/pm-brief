@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- brief since redeclared host-owned --author global, failing registration on pm-cli 2026.7.27 ([pm-brief-xm71](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-xm71.toon))
+
+### Other
+
+- Enable governance duplicate-detection advisory mode and restore parent_reference=warn ([pm-brief-k39x](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-k39x.toon))
+
 ## 2026.7.28 - 2026-07-28
 
 ### Added
