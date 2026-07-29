@@ -29,7 +29,7 @@
     "prepublishOnly": "npm run release:check",
     "prepare": "node scripts/prepare-merge-driver.mjs",
     "merge:install": "pm merge install",
-    "coverage": "npm run build && node scripts/coverage-gate.ts"
+    "coverage": "npm run build && npm run build:test && node scripts/coverage-gate.ts"
   },
   "keywords": [
     "agent",
@@ -102,7 +102,7 @@
   },
   "coverageGate": {
     "sources": [
-      "index.ts"
+      "."
     ],
     "tests": [
       "test/*.test.ts"
