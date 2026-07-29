@@ -2572,15 +2572,13 @@ function deltaRefreshCommand(summary: DeltaSummary, format?: string): string {
 }
 
 /**
- * Normalize an agent-friendly bare relative window (e.g. "7d", "24h", "2w") to the
- * `pm activity --from`/`--to` accepted form ("-7d"): a leading minus means "N ago".
- * Bare forms WITHOUT the minus silently match nothing in `pm activity`, so agents
- * that naturally type `pm brief since 7d` would otherwise get an empty delta. ISO
- * timestamps, plain dates, and already-signed relatives pass through unchanged.
+ * Normalize a checkpoint value by trimming surrounding whitespace. Bare relative
+ * windows (e.g. "7d", "24h", "2w"), signed relatives ("-7d"), ISO timestamps, and
+ * plain dates all pass through unchanged — `pm activity --from` accepts every form
+ * directly (fixed in pm-cli 2026.7.29, GH-651).
  */
 export function normalizeCheckpoint(value: string): string {
-  const trimmed = value.trim();
-  return /^\d+(s|m|h|d|w|M)$/.test(trimmed) ? `-${trimmed}` : trimmed;
+  return value.trim();
 }
 
 /** Fixed render order for delta sections; each changed item appears in exactly one. */

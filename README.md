@@ -93,8 +93,8 @@ that captures the difference.
 **Checkpoint formats** (lower bound, passed to `pm activity --from`):
 
 - Relative windows treated as "ago": `7d`, `12h`, `30m`, `2w`. A leading `-` is
-  optional — `pm brief since 7d` and `pm brief since -7d` are equivalent (the
-  command signs bare windows so they are not silently read as a future bound).
+  optional — `pm brief since 7d` and `pm brief since -7d` are equivalent (`pm activity --from`
+  accepts bare windows directly since pm-cli 2026.7.29).
 - ISO timestamps / dates: `2026-07-20`, `2026-07-20T00:00:00Z`.
 
 **Filters:**
