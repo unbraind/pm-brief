@@ -1015,13 +1015,13 @@ describe("brief since / buildDelta", () => {
     assert.match(slack, /\*Created\*/);
   });
 
-  test("normalizeCheckpoint signs bare relative windows and passes timestamps through", () => {
-    assert.equal(normalizeCheckpoint("7d"), "-7d");
-    assert.equal(normalizeCheckpoint("24h"), "-24h");
-    assert.equal(normalizeCheckpoint("2w"), "-2w");
-    assert.equal(normalizeCheckpoint("30m"), "-30m");
-    assert.equal(normalizeCheckpoint("  7d  "), "-7d");
-    // already-signed, ISO timestamps, and plain dates are untouched
+  test("normalizeCheckpoint trims whitespace and passes all forms through unchanged", () => {
+    assert.equal(normalizeCheckpoint("7d"), "7d");
+    assert.equal(normalizeCheckpoint("24h"), "24h");
+    assert.equal(normalizeCheckpoint("2w"), "2w");
+    assert.equal(normalizeCheckpoint("30m"), "30m");
+    assert.equal(normalizeCheckpoint("  7d  "), "7d");
+    // signed relatives, ISO timestamps, and plain dates are untouched
     assert.equal(normalizeCheckpoint("-7d"), "-7d");
     assert.equal(normalizeCheckpoint("2026-07-20"), "2026-07-20");
     assert.equal(normalizeCheckpoint("2026-07-20T00:00:00Z"), "2026-07-20T00:00:00Z");

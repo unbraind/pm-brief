@@ -55,9 +55,9 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "@unbrained/pm-cli": "^2026.7.29",
     "pm-changelog": "^2026.7.25",
-    "typescript": "^7.0.2",
-    "@unbrained/pm-cli": "^2026.7.28"
+    "typescript": "^7.0.2"
   },
   "pm": {
     "aliases": [
@@ -97,9 +97,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
-    "@unbrained/pm-cli": "^2026.7.28"
-  },
   "coverageGate": {
     "sources": [
       "."
@@ -113,5 +110,8 @@
       "functions": 95
     },
     "ignore": []
+  },
+  "dependencies": {
+    "@unbrained/pm-cli": "^2026.7.29"
   }
 }

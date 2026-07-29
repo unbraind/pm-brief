@@ -6,6 +6,10 @@
 
 - Enforce a real coverage gate by running tests against TypeScript sources ([pm-brief-xiv0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-xiv0.toon))
 
+### Other
+
+- Adopt pm-cli 2026.7.29 ([pm-brief-3luv](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-3luv.toon))
+
 ## 2026.7.28 - 2026-07-28
 
 ### Added
