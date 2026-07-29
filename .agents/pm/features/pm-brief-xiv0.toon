@@ -1,0 +1,20 @@
+id: pm-brief-xiv0
+title: Enforce a real coverage gate by running tests against TypeScript sources
+description: ""
+type: Feature
+status: closed
+priority: 2
+tags: []
+created_at: "2026-07-28T23:44:36.803Z"
+updated_at: "2026-07-28T23:44:57.438Z"
+closed_at: "2026-07-28T23:44:57.425Z"
+author: pi-agent
+resolution: "Tests moved onto TypeScript sources and scripts/coverage-gate.ts wired into release:check and CI."
+expected_result: "A coverage gate runs in the release check and in CI on both supported Node lines, reports against TypeScript sources, and fails when a source file is untested or a threshold regresses."
+actual_result: "npm run check passes. npm run coverage passes with 160 tests, the source file present in the report, at 91.86 line, 76.37 branch and 95.50 function coverage. A negative control adding an untested source file made the gate exit 1 and name that file, so the presence check is not vacuous. Thresholds pinned at 91/76/95. The Node 22 CI leg is unobserved until the PR runs."
+comments[1]{created_at,author,text}:
+  "2026-07-28T23:44:49.472Z",pi-agent,"Negative control: added an untested __probe.ts source file to coverageGate.sources, ran node scripts/coverage-gate.ts, observed exit code 1 with the gate naming __probe.ts as never loaded. Removed the probe and re-ran: exit code 0, 1 source file reported. The presence check is not vacuous."
+learnings[1]{created_at,author,text}:
+  "2026-07-28T23:44:50.840Z",pi-agent,"Node omits never-loaded files from its coverage report rather than reporting them at zero, so a threshold flag alone is satisfiable by narrowing what the suite imports. Any coverage gate must reconcile the report against the source tree."
+close_reason: Coverage gate landed and locally verified; the Node 22 CI leg is unobserved until the pull request runs.
+body: "Baseline measured 2026-07-29 across one source file (index.ts): 91.86 line, 76.37 branch, 95.50 function. Thresholds pinned at the measured floor (91/76/95) so the numbers can only ratchet up. 160 tests, 0 failures."
