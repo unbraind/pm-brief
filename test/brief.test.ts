@@ -3084,6 +3084,65 @@ describe("brief output format contract", () => {
   });
 });
 
+describe("registered command acceptance matrix", () => {
+  test("all command families render supported formats and persist requested outputs", async () => {
+    const { commands } = await activateBrief();
+    const outputDir = await mkdtemp(join(tmpdir(), "pm-brief-command-matrix-"));
+    const run = async (
+      command: string,
+      options: Record<string, unknown> = {},
+      args: string[] = [],
+      global: { json?: boolean } = {},
+    ): Promise<{ pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string }> =>
+      (await runRegisteredCommandForTest(commands, {
+        command,
+        args,
+        options,
+        global,
+        pmRoot: ".agents/pm",
+      })).result as { pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string };
+
+    try {
+      const brief = await run("brief", { "no-governance": true, format: "slack", "include-history": true });
+      assert.equal(brief.pmBriefRendered, true);
+      assert.match(brief.output ?? "", /^\*pm brief\*/);
+
+      const promptPath = join(outputDir, "HANDOFF.md");
+      const prompt = await run("brief prompt", { "no-governance": true, output: promptPath });
+      assert.deepEqual({ ok: prompt.ok, format: prompt.format, output: prompt.output }, { ok: true, format: "prompt", output: promptPath });
+      assert.match(await readFile(promptPath, "utf8"), /Working rules:/);
+
+      const next = await run("brief next", { explain: true, confidence: true }, [], { json: true });
+      assert.equal(next.pmBriefRendered, true);
+      assert.ok(Array.isArray((JSON.parse(next.output ?? "{}") as { next?: unknown }).next));
+
+      const stale = await run("brief stale", { days: 0, format: "json" });
+      assert.ok(Array.isArray((JSON.parse(stale.output ?? "{}") as { stale?: unknown }).stale));
+
+      const momentum = await run("brief momentum", { days: 3650, format: "json" });
+      assert.equal(typeof (JSON.parse(momentum.output ?? "{}") as { momentum?: { closedCount?: unknown } }).momentum?.closedCount, "number");
+
+      const deltaPath = join(outputDir, "delta.md");
+      const since = await run("brief since", { output: deltaPath, format: "markdown", limit: 5000 }, ["3650d"]);
+      assert.equal(since.ok, true);
+      assert.match(await readFile(deltaPath, "utf8"), /^# Delta since /);
+
+      const divergence = await run("brief diverge", { base: "main", head: "HEAD", format: "json", "include-clean": true });
+      assert.equal(typeof (JSON.parse(divergence.output ?? "{}") as { verdict?: unknown }).verdict, "string");
+
+      const duplicates = await run("brief duplicates", { format: "markdown", limit: 2, since: "2026-01-01" });
+      assert.match(duplicates.output ?? "", /^# pm brief duplicates/m);
+
+      const governancePath = join(outputDir, "governance.md");
+      const governance = await run("brief governance", { format: "markdown", output: governancePath, threshold: 1, "stale-hours": 0 });
+      assert.equal(governance.ok, true);
+      assert.match(await readFile(governancePath, "utf8"), /^# pm brief governance/m);
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Regression: a CLEAN divergence must still SHOW pending merge decisions in every
 // non-JSON renderer.
