@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Resolve pm-changelog to the release that derives release dates in UTC ([pm-brief-iqbi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-iqbi.toon))
+
 ## 2026.7.29 - 2026-07-29
 
 ### Added
