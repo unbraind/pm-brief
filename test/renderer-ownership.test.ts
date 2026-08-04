@@ -128,3 +128,21 @@ test("registered resultDiscriminator accepts the package marker and rejects a fo
   }
   await ext.deactivate();
 });
+test("renderer ownership covers every command the extension registers", async () => {
+  // Every command this package registers can return a rendered result, so the
+  // ownership list and the registered command set must be the same set. The
+  // failure this catches: a new command is added, returns a marked result, and
+  // is missing from the ownership list — the host then declines the renderer
+  // and the command silently falls back to native rendering. Nothing errors,
+  // and an ownership test that restates the same omission stays green.
+  const ext = await harness();
+  const registered = ext.activation.registrations.commands
+    .map((entry) => entry.command)
+    .sort((a, b) => a.localeCompare(b));
+  const owned = [...OWNED_COMMANDS].sort((a, b) => a.localeCompare(b));
+  assert.deepEqual(
+    registered,
+    owned,
+    "the renderer ownership list must match the registered command set exactly",
+  );
+});
