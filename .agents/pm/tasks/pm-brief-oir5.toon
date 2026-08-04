@@ -1,0 +1,20 @@
+id: pm-brief-oir5
+title: Declare renderer ownership so the host enforces scoping the package only applied at runtime
+description: "The renderer overrides self-scoped by checking a private result marker and returning null, which is correct but invisible to the host. Passing the ownership argument makes commands and result ownership enforced before the callback runs."
+type: Task
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-04T21:39:21.130Z"
+updated_at: "2026-08-04T22:14:06.790Z"
+closed_at: "2026-08-04T22:14:06.776Z"
+completed_at: "2026-08-04T22:14:06.776Z"
+author: pi-agent
+acceptance_criteria: Both renderer registrations pass a shared ownership object naming the package's own commands and its result discriminator; a test proves the renderer still renders its own marked result and declines a foreign one; coverage stays at 100
+resolution: "Renderer ownership enforced by the host before the callback runs; three-axis decline test covers command rejection, result rejection, and both-foreign."
+expected_result: A renderer override claims only its own marked results emitted under its own command paths; foreign results and foreign commands fall through to native rendering.
+actual_result: "All three decline cases pass for toon and json; dropping the commands array fails the command-rejection case; coverage thresholds met (lines 92.17%, branch 76.79%, funcs 96.21%)."
+notes[1]{created_at,author,text}:
+  "2026-08-04T21:39:26.513Z",pi-agent,"Derived command paths from the nine api.registerCommand({ name }) calls in index.ts: brief (3954), brief prompt (4016), brief next (4064), brief stale (4115), brief momentum (4137), brief since (4175), brief diverge (4242), brief duplicates (4391), brief governance (4455). All nine commands can return a pmBriefRendered-marked result via renderedCommandResult(). The resultDiscriminator reuses the extracted isRenderedCommandResult predicate."
+close_reason: "Both toon and json registerRenderer calls pass a shared ownership object naming all nine brief command paths plus the isRenderedCommandResult discriminator. The decline test is split into three cases that isolate command rejection (foreign command + marked result) from result rejection (owned command + foreign/bare result), with a belt-and-braces both-foreign case, so the commands declaration is independently covered and cannot be deleted with the suite still green."
+body: ""

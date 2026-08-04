@@ -491,9 +491,20 @@ function renderedCommandResult(output: string): RenderedCommandResult {
   return { pmBriefRendered: true, output: output.endsWith("\n") ? output : `${output}\n` };
 }
 
+/** Determine whether an unknown command result carries valid pre-rendered pm-brief output. */
+function isRenderedCommandResult(value: unknown): value is RenderedCommandResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "pmBriefRendered" in value &&
+    (value as Partial<RenderedCommandResult>).pmBriefRendered === true &&
+    "output" in value &&
+    typeof (value as Partial<RenderedCommandResult>).output === "string"
+  );
+}
+
 function renderCommandResult(context: { result?: unknown }): string | null {
-  const result = context.result as Partial<RenderedCommandResult> | null | undefined;
-  return result?.pmBriefRendered === true && typeof result.output === "string" ? result.output : null;
+  return isRenderedCommandResult(context.result) ? context.result.output : null;
 }
 
 function asArray(value: unknown): string[] {
@@ -4525,8 +4536,22 @@ export default defineExtension({
   activate(api: ExtensionApi) {
     registerCommands(api);
     if (typeof api.registerRenderer === "function") {
-      api.registerRenderer("toon", renderCommandResult);
-      api.registerRenderer("json", renderCommandResult);
+      const rendererOwnership = {
+        commands: [
+          "brief",
+          "brief prompt",
+          "brief next",
+          "brief stale",
+          "brief momentum",
+          "brief since",
+          "brief diverge",
+          "brief duplicates",
+          "brief governance",
+        ],
+        resultDiscriminator: isRenderedCommandResult,
+      };
+      api.registerRenderer("toon", renderCommandResult, rendererOwnership);
+      api.registerRenderer("json", renderCommandResult, rendererOwnership);
     }
   },
 });

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Declare renderer ownership so the host enforces scoping the package only applied at runtime ([pm-brief-oir5](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-oir5.toon))
+
 ## 2026.8.4 - 2026-08-04
 
 ### Other
