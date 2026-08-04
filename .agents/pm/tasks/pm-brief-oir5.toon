@@ -1,0 +1,14 @@
+id: pm-brief-oir5
+title: Declare renderer ownership so the host enforces scoping the package only applied at runtime
+description: "The renderer overrides self-scoped by checking a private result marker and returning null, which is correct but invisible to the host. Passing the ownership argument makes commands and result ownership enforced before the callback runs."
+type: Task
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-08-04T21:39:21.130Z"
+updated_at: "2026-08-04T21:39:26.513Z"
+author: pi-agent
+acceptance_criteria: Both renderer registrations pass a shared ownership object naming the package's own commands and its result discriminator; a test proves the renderer still renders its own marked result and declines a foreign one; coverage stays at 100
+notes[1]{created_at,author,text}:
+  "2026-08-04T21:39:26.513Z",pi-agent,"Derived command paths from the nine api.registerCommand({ name }) calls in index.ts: brief (3954), brief prompt (4016), brief next (4064), brief stale (4115), brief momentum (4137), brief since (4175), brief diverge (4242), brief duplicates (4391), brief governance (4455). All nine commands can return a pmBriefRendered-marked result via renderedCommandResult(). The resultDiscriminator reuses the extracted isRenderedCommandResult predicate."
+body: ""
