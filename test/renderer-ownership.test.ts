@@ -38,6 +38,12 @@ const markedResult = { pmBriefRendered: true, output: "# pm brief\n\nbody\n" } a
 /** A foreign result no pm-brief command would ever produce. */
 const foreignResult = { pmChangelogRendered: true, output: "{}\n" } as unknown;
 
+/** A bare result carrying pm-brief's output shape but no render marker. */
+const bareResult = { output: "x" } as unknown;
+
+/** A command path pm-brief does not own, used to exercise the command filter. */
+const foreignCommand = "context-pack";
+
 test("renderer ownership is registered for both toon and json formats with the package's commands", async () => {
   const ext = await harness();
   const overrides = ext.activation.renderers.overrides;
@@ -66,13 +72,49 @@ test("renderer renders its own marked result for both formats", async () => {
   await ext.deactivate();
 });
 
-test("renderer declines a foreign result and preserves native rendering", async () => {
+test("declines a foreign result on an owned command (resultDiscriminator rejects after commands match)", async () => {
+  const ext = await harness();
+  // The command is one pm-brief owns, so the commands filter passes; the
+  // result must be rejected by resultDiscriminator alone. Exercises the
+  // discriminator after commands has already matched.
+  for (const format of ["toon", "json"] as const) {
+    for (const result of [foreignResult, bareResult]) {
+      const context: RendererOverrideContext = { format, command: "brief", result };
+      const rendered = await ext.runRendererOverride(context);
+      assert.equal(rendered.overridden, false, `${format} renderer should decline a foreign/bare result on an owned command`);
+      assert.equal(rendered.rendered, null, `${format} should leave native rendering intact`);
+      assert.deepEqual(rendered.warnings, [], `${format} should produce no warnings`);
+    }
+  }
+  await ext.deactivate();
+});
+
+test("declines its own marked result on a foreign command (commands ownership rejects)", async () => {
+  const ext = await harness();
+  // The result carries pm-brief's marker so resultDiscriminator would accept
+  // it, but the command is one pm-brief does not own. The host's commands filter
+  // must decline before the renderer runs. This is the case that protects the
+  // ownership boundary the PR introduces: it fails if the commands declaration
+  // is dropped, because then resultDiscriminator alone would let the renderer
+  // claim a marked result emitted under a foreign command path.
+  for (const format of ["toon", "json"] as const) {
+    const context: RendererOverrideContext = { format, command: foreignCommand, result: markedResult };
+    const rendered = await ext.runRendererOverride(context);
+    assert.equal(rendered.overridden, false, `${format} renderer should decline its own marked result on a foreign command`);
+    assert.equal(rendered.rendered, null, `${format} should leave native rendering intact`);
+    assert.deepEqual(rendered.warnings, [], `${format} should produce no warnings`);
+  }
+  await ext.deactivate();
+});
+
+test("declines when both command and result are foreign (belt-and-braces)", async () => {
   const ext = await harness();
   for (const format of ["toon", "json"] as const) {
-    const context: RendererOverrideContext = { format, command: "context-pack", result: foreignResult };
+    const context: RendererOverrideContext = { format, command: foreignCommand, result: foreignResult };
     const rendered = await ext.runRendererOverride(context);
-    assert.equal(rendered.overridden, false, `${format} renderer should decline a foreign result`);
+    assert.equal(rendered.overridden, false, `${format} renderer should decline a foreign result under a foreign command`);
     assert.equal(rendered.rendered, null, `${format} should leave native rendering intact`);
+    assert.deepEqual(rendered.warnings, [], `${format} should produce no warnings`);
   }
   await ext.deactivate();
 });
