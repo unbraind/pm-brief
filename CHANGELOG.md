@@ -1,10 +1,15 @@
 # Changelog
 
-## 2026.8.4 - 2026-08-04
+## Unreleased
 
 ### Other
 
 - Declare renderer ownership so the host enforces scoping the package only applied at runtime ([pm-brief-oir5](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-oir5.toon))
+
+## 2026.8.4 - 2026-08-04
+
+### Other
+
 - Resolve pm-changelog to the release that derives release dates in UTC ([pm-brief-iqbi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-iqbi.toon))
 
 ## 2026.7.29 - 2026-07-29
