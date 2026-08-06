@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Gate durable PM project health in CI on pm CLI 2026.8.6 ([pm-brief-nkfr](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-nkfr.toon))
+
 ### Other
 
 - Clear author-attribution health warning for \_workspace and pm-brief-ce55 history events ([pm-brief-3zb6](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-3zb6.toon))
