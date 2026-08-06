@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Clear author-attribution health warning for \_workspace and pm-brief-ce55 history events ([pm-brief-3zb6](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-3zb6.toon))
+
 ## 2026.8.5 - 2026-08-05
 
 ### Other
