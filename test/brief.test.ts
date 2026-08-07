@@ -263,6 +263,52 @@ test("item adapters ignore unsupported primitive relationship and link shapes", 
   assert.doesNotMatch(next[0]?.rankingReasons.join(",") ?? "", /deadline_/);
 });
 
+test("item adapters preserve legacy relationship and evidence-link object shapes", () => {
+  const item: PmItem = {
+    id: "pm-legacy-shapes",
+    title: "  ",
+    type: "  ",
+    status: "  ",
+    updated_at: "not-a-timestamp",
+    deadline: "not-a-deadline",
+    deps: [
+      { to: "pm-to", kind: "requires" },
+      { target: "pm-target", type: "relates_to" },
+      { target_id: "pm-target-id" },
+      { item_id: "pm-item-id" },
+      { id: "pm-id" },
+      { id: "" },
+      { id: "pm-legacy-shapes" },
+    ],
+    docs: [{ url: "https://example.invalid/context" }, { href: "docs/legacy.md" }, { id: "pm-doc" }, {}],
+    files: [{ path: "src/legacy.ts" }],
+  };
+  assert.deepEqual(extractRelationships(item), [
+    { from: "pm-legacy-shapes", to: "pm-to", kind: "requires" },
+    { from: "pm-legacy-shapes", to: "pm-target", kind: "relates_to" },
+    { from: "pm-legacy-shapes", to: "pm-target-id", kind: "depends_on" },
+    { from: "pm-legacy-shapes", to: "pm-item-id", kind: "depends_on" },
+    { from: "pm-legacy-shapes", to: "pm-id", kind: "depends_on" },
+  ]);
+  const [next] = selectNextItems([item], { generatedAt: "2026-08-07T00:00:00Z" });
+  assert.ok(next);
+  assert.equal(next.title, "(untitled)");
+  assert.equal(next.type, "Item");
+  assert.equal(next.status, "unknown");
+  assert.equal(next.whyNow, "active open work");
+  assert.deepEqual(next.requiredContext, [
+    "dependency:pm-to",
+    "dependency:pm-target",
+    "dependency:pm-target-id",
+    "dependency:pm-item-id",
+    "dependency:pm-id",
+    "https://example.invalid/context",
+    "docs/legacy.md",
+    "pm-doc",
+  ]);
+  assert.doesNotMatch(next.rankingReasons.join(","), /stale_days|deadline_/);
+});
+
 test("parsePmItemsOutput reports malformed CLI output as a command error", () => {
   assert.throws(
     () => parsePmItemsOutput("not-json"),
@@ -313,6 +359,96 @@ test("pm output parsers reject malformed JSON and normalize canonical envelopes"
       { id: "missing-timestamp" },
     ],
   })).map((entry) => entry.id), ["pm-a", "pm-b"]);
+});
+
+test("pm item parser accepts every supported envelope and discards malformed rows", () => {
+  assert.deepEqual(parsePmItemsOutput("null"), []);
+  assert.deepEqual(parsePmItemsOutput("42"), []);
+  assert.deepEqual(parsePmItemsOutput(JSON.stringify({ items: "invalid", results: [{ id: "pm-shadowed" }] })), []);
+  assert.deepEqual(parsePmItemsOutput(JSON.stringify({ results: [{ id: "pm-result", title: "Result" }] })), [
+    { id: "pm-result", title: "Result" },
+  ]);
+  assert.deepEqual(parsePmItemsOutput(JSON.stringify([
+    null,
+    42,
+    {},
+    { id: 42 },
+    { id: "pm-array", title: "Array" },
+  ])), [{ id: "pm-array", title: "Array" }]);
+});
+
+test("pm next parser tolerates sparse envelopes without inventing ids", () => {
+  for (const output of ["null", "42", "[]", JSON.stringify({ recommended: "pm-a", ready: {}, blocked: null })]) {
+    assert.deepEqual(parseNextOrderedIdsOutput(output), []);
+  }
+  assert.deepEqual(parseNextOrderedIdsOutput(JSON.stringify({
+    recommended: { id: 42 },
+    ready: [{ id: "pm-ready" }, { id: 42 }],
+    blocked: [{ id: "pm-blocked" }],
+  })), ["pm-ready", "pm-blocked"]);
+});
+
+test("compact activity parser supports legacy fields, defaults, bounds, and malformed envelopes", () => {
+  assert.deepEqual(parseRecentActivityOutput("null"), []);
+  assert.deepEqual(parseRecentActivityOutput(JSON.stringify({ compact_activity: "invalid" })), []);
+  const legacy = parseRecentActivityOutput(JSON.stringify({
+    activity: [
+      42,
+      { ts: "" },
+      { timestamp: "2026-08-07T08:00:00Z" },
+      { timestamp: "2026-08-07T09:00:00Z", author: "agent", operation: "create", item_id: "pm-legacy", message: "created" },
+    ],
+  }), 1000);
+  assert.deepEqual(legacy, [
+    { timestamp: "2026-08-07T08:00:00Z", author: undefined, operation: "activity", itemId: undefined, message: undefined },
+    { timestamp: "2026-08-07T09:00:00Z", author: "agent", operation: "create", itemId: "pm-legacy", message: "created" },
+  ]);
+  assert.equal(parseRecentActivityOutput(JSON.stringify({ activity: legacy }), 0).length, 1);
+});
+
+test("full activity parser validates envelopes and preserves optional evidence", () => {
+  assert.deepEqual(parseActivitySinceOutput("null"), []);
+  assert.deepEqual(parseActivitySinceOutput(JSON.stringify({ activity: "invalid" })), []);
+  const parsed = parseActivitySinceOutput(JSON.stringify({
+    activity: [
+      42,
+      { ts: "", id: "pm-no-time" },
+      { ts: "2026-08-07T10:00:00Z", id: "" },
+      {
+        ts: "2026-08-07T10:00:00Z",
+        id: "pm-full",
+        author: "agent",
+        op: "update",
+        patch: [],
+        before_hash: "before",
+        after_hash: "after",
+        message: "updated",
+      },
+      { ts: "2026-08-07T10:00:00Z", id: "pm-defaults" },
+    ],
+  }));
+  assert.deepEqual(parsed, [
+    {
+      ts: "2026-08-07T10:00:00Z",
+      author: "agent",
+      op: "update",
+      id: "pm-full",
+      patch: [],
+      before_hash: "before",
+      after_hash: "after",
+      message: "updated",
+    },
+    {
+      ts: "2026-08-07T10:00:00Z",
+      author: undefined,
+      op: "activity",
+      id: "pm-defaults",
+      patch: undefined,
+      before_hash: undefined,
+      after_hash: undefined,
+      message: undefined,
+    },
+  ]);
 });
 
 test("selectNextItems ranks unblocked priority before blocked work", () => {
