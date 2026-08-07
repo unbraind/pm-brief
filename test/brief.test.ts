@@ -306,6 +306,7 @@ test("item adapters preserve legacy relationship and evidence-link object shapes
     "docs/legacy.md",
     "pm-doc",
   ]);
+  assert.ok(!next.requiredContext.includes("src/legacy.ts"), "the eight-entry context cap excludes later file evidence");
   assert.doesNotMatch(next.rankingReasons.join(","), /stale_days|deadline_/);
 });
 
@@ -377,6 +378,13 @@ test("pm item parser accepts every supported envelope and discards malformed row
   ])), [{ id: "pm-array", title: "Array" }]);
 });
 
+test("pm item parser prefers items over results while preserving valid item order", () => {
+  assert.deepEqual(parsePmItemsOutput(JSON.stringify({
+    items: [null, { id: "pm-first" }, { title: "missing id" }, { id: 42 }, { id: "pm-second" }],
+    results: [{ id: "pm-shadowed" }],
+  })), [{ id: "pm-first" }, { id: "pm-second" }]);
+});
+
 test("pm next parser tolerates sparse envelopes without inventing ids", () => {
   for (const output of ["null", "42", "[]", JSON.stringify({ recommended: "pm-a", ready: {}, blocked: null })]) {
     assert.deepEqual(parseNextOrderedIdsOutput(output), []);
@@ -404,6 +412,13 @@ test("compact activity parser supports legacy fields, defaults, bounds, and malf
     { timestamp: "2026-08-07T09:00:00Z", author: "agent", operation: "create", itemId: "pm-legacy", message: "created" },
   ]);
   assert.equal(parseRecentActivityOutput(JSON.stringify({ activity: legacy }), 0).length, 1);
+  assert.deepEqual(parseRecentActivityOutput(JSON.stringify({
+    compact_activity: [
+      { ts: "2026-08-07T10:00:00Z", id: "pm-first" },
+      { ts: "2026-08-07T09:00:00Z", id: "pm-second" },
+      { ts: "2026-08-07T08:00:00Z", id: "pm-third" },
+    ],
+  }), 2).map((entry) => entry.itemId), ["pm-first", "pm-second"]);
 });
 
 test("full activity parser validates envelopes and preserves optional evidence", () => {
