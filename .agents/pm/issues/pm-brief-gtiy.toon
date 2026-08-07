@@ -6,7 +6,7 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-07-26T13:52:29.218Z"
-updated_at: "2026-08-07T07:39:30.502Z"
+updated_at: "2026-08-07T07:46:28.590Z"
 assignee: "harness:codex"
 claim_principal: "harness:codex#e067658fb6e4485ee2d1dfa3"
 author: codex
@@ -15,24 +15,16 @@ acceptance_criteria: "A deterministic coverage command reports 100% lines, branc
 risk: high
 severity: high
 component: testing
-dependencies[2]:
-  - id: pm-brief-q325
-    kind: related
-    created_at: "2026-07-26T13:52:29.218Z"
-    author: codex
-  - id: pm-brief-yigc
-    kind: related
-    created_at: "2026-08-07T07:32:50.376Z"
-    author: "harness:codex"
-    source_kind: privacy-audit
-    author_source: asserted
-notes[6]{created_at,author,text}:
+dependencies[1]{id,kind,created_at,author}:
+  pm-brief-q325,related,"2026-07-26T13:52:29.218Z",codex
+notes[7]{created_at,author,text}:
   "2026-07-26T13:52:41.808Z",codex,"Baseline measured 2026-07-26 with Node built-in coverage against the latest project-local pm CLI: dist/index.js 82.84% lines, 74.67% branches, 92.19% functions. The aggregate report is lower because it also observes a temporary installed extension copy; the source file row is the actionable baseline."
   "2026-07-26T14:13:07.264Z",codex,"Workflow-level acceptance evidence is now linked in addition to the reporting-only coverage baseline. This Issue remains open until release:check itself enforces all four 100% thresholds; a passing current release:check is not evidence that the acceptance criteria are met."
   "2026-08-02T00:42:20.038Z","harness:codex","TDD tranche 1: added a real registered-command acceptance matrix covering all nine command families, host-global JSON, Slack/JSON/Markdown output, output-file persistence, real PM reads, duplicate/governance SDK scans, activity deltas, and Git divergence. Targeted test passes. Full suite now passes 161 tests and source coverage improved from 91.97/76.72/95.85 to 94.86% lines, 78.71% branches, and 96.27% functions. The issue remains in progress; thresholds are intentionally unchanged until meaningful tests reach exact 100/100/100."
   "2026-08-07T07:30:38.541Z","harness:codex","TDD tranche 2 on release head v2026.08.07: rebased the registered-command acceptance matrix onto current main; removed two zero-use production helpers; added behavior-driven coverage for text ranking with confidence and explanations,typed focus parsing,staleness and momentum text output,invalid positive and non-negative integer flags,default-branch discovery through local main and origin/HEAD,and deterministic ordering across multiple real SDK duplicate clusters. The suite now covers 294/294 functions (100%),4383/4547 lines (96.39%),and 1148/1434 branches (80.06%). @unbrained/pm-cli resolves to latest 2026.8.6 and pm-changelog to latest 2026.8.7. Exact line/branch coverage remains open; thresholds intentionally remain at the existing ratchet until genuine behavior reaches 100/100/100."
   "2026-08-07T07:37:01.435Z","harness:codex","CI round 1 found a runner-topology assumption in the new acceptance matrix: actions/checkout leaves a detached HEAD without a local main ref,so the clean divergence fixture failed before later command cases ran. Production correctly rejected the unknown ref. The fixture now compares HEAD with HEAD,preserving the clean-divergence contract without assuming branch refs. Targeted registered-command test and typecheck pass."
   "2026-08-07T07:39:30.482Z","harness:codex","Review round 1 accepted three CodeRabbit findings: the privacy blocker now links explicit future fail-closed identity and all-ref content audit commands; typed-focus and ID-focus are independent behavioral assertions; and origin/HEAD points to trunk so its resolution cannot pass through the main fallback. The privacy commands are acceptance contracts and are not claimed green while the published-history blocker remains open."
+  "2026-08-07T07:46:28.551Z","harness:codex","Companion reconciliation corrected the history-identity finding: pm-cli-website-ikjv explicitly accepts the personal identities forward-only,and pm-cli-website-ktip states the approved allowlist contains exactly three addresses including the observed one. pm-brief-yigc is canceled as a false positive,its unimplemented audit contracts were removed,and it is no longer linked as a release blocker."
 files[2]{path,scope,note}:
   index.ts,project,Source coverage target
   test/brief.test.ts,project,Coverage test expansion
