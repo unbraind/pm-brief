@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -29,10 +29,18 @@ import extension, {
   scanHistoryJsonl,
   pmRootRelFromCtx,
   detectDefaultBase,
+  resolveRef,
+  resolveRepoRoot,
   mergeBase,
   readBlob,
   listChangedPaths,
   parsePmItemsOutput,
+  parseActivitySinceOutput,
+  parseNextOrderedIdsOutput,
+  parseRecentActivityOutput,
+  readActivitySince,
+  readNextOrderedIds,
+  readPmItems,
   readRecentActivity,
   renderAgentPrompt,
   renderMarkdownBrief,
@@ -239,11 +247,72 @@ test("extractRelationships dedups blocked_by edges denormalized into dependencie
   assert.deepEqual(extractRelationships(item), [{ from: "pm-x", to: "pm-y", kind: "blocked_by" }]);
 });
 
+test("item adapters ignore unsupported primitive relationship and link shapes", () => {
+  const item: PmItem = {
+    id: "pm-shapes",
+    title: "Defensive item shapes",
+    type: "Task",
+    status: "open",
+    dependencies: 42,
+    docs: 42,
+    deadline: "2027-12-31T00:00:00Z",
+  };
+  assert.deepEqual(extractRelationships(item), []);
+  const next = selectNextItems([item], { generatedAt: "2026-06-06T00:00:00Z" });
+  assert.equal(next[0]?.requiredContext.length, 0);
+  assert.doesNotMatch(next[0]?.rankingReasons.join(",") ?? "", /deadline_/);
+});
+
 test("parsePmItemsOutput reports malformed CLI output as a command error", () => {
   assert.throws(
     () => parsePmItemsOutput("not-json"),
     (error: unknown) => error instanceof Error && error.name === "CommandError" && error.message.startsWith("Unable to parse pm item JSON:"),
   );
+});
+
+test("pm readers distinguish required tracker failures from optional ranking and history", () => {
+  const missingTracker = join(tmpdir(), "pm-brief-intentionally-missing-tracker");
+  assert.throws(() => readPmItems(missingTracker), /pm list-all|tracker_not_initialized|ENOENT|not found|does not exist/i);
+  assert.throws(
+    () => readActivitySince(missingTracker, { from: "2026-01-01T00:00:00Z" }),
+    /pm activity|tracker_not_initialized|ENOENT|not found|does not exist/i,
+  );
+  assert.deepEqual(readNextOrderedIds(missingTracker, { limit: 0, assignee: "nobody" }), []);
+  assert.deepEqual(readRecentActivity(missingTracker, 0), []);
+});
+
+test("pm output parsers reject malformed JSON and normalize canonical envelopes", () => {
+  assert.deepEqual(parseNextOrderedIdsOutput("not-json"), []);
+  assert.deepEqual(parseRecentActivityOutput("not-json"), []);
+  assert.throws(() => parseActivitySinceOutput("not-json"), /Unable to parse pm activity JSON/);
+
+  assert.deepEqual(parseNextOrderedIdsOutput(JSON.stringify({
+    recommended: { id: "pm-a" },
+    ready: [null, { id: "pm-b" }, { id: "" }],
+    blocked: [{ id: "pm-a" }, { nope: true }],
+  })), ["pm-a", "pm-b"]);
+  assert.deepEqual(parseRecentActivityOutput(JSON.stringify({
+    compact_activity: [
+      null,
+      { ts: "2026-08-07T10:00:00Z", author: "agent", op: "update", id: "pm-a", msg: "done" },
+      { timestamp: "2026-08-07T09:00:00Z", operation: "create", item_id: "pm-b", message: "created" },
+      { op: "ignored-without-timestamp" },
+    ],
+  }), 1), [{
+    timestamp: "2026-08-07T10:00:00Z",
+    author: "agent",
+    operation: "update",
+    itemId: "pm-a",
+    message: "done",
+  }]);
+  assert.deepEqual(parseActivitySinceOutput(JSON.stringify({
+    activity: [
+      { ts: "2026-08-07T10:00:00Z", id: "pm-b", patch: "invalid" },
+      null,
+      { ts: "2026-08-07T09:00:00Z", id: "pm-a", op: "update", patch: [{ op: "replace", path: "/status", value: "closed" }] },
+      { id: "missing-timestamp" },
+    ],
+  })).map((entry) => entry.id), ["pm-a", "pm-b"]);
 });
 
 test("selectNextItems ranks unblocked priority before blocked work", () => {
@@ -499,6 +568,24 @@ test("buildBrief adds insights for missing focus and empty filtered results", ()
   assert.ok(suggestions.includes("pm brief --format markdown"));
 });
 
+test("buildBrief explains empty workspaces and filters that narrow a non-empty result", () => {
+  const empty = buildBrief([], { generatedAt: "2026-06-06T00:00:00Z" });
+  assert.deepEqual(empty.insights, [{
+    level: "info",
+    message: "no open work items are available in this workspace",
+    suggestion: "pm list-open --limit 20",
+  }]);
+
+  const narrowed = buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    assignee: "codex",
+    nextCount: 4,
+  });
+  assert.ok(narrowed.next.length > 0);
+  assert.ok(narrowed.next.length < 4);
+  assert.ok(narrowed.insights?.some((insight) => insight.message.includes("filters narrowed next-work candidates")));
+});
+
 test("buildBrief does not emit executable guidance for an unsafe focus id", () => {
   const brief = buildBrief(items, { focusIds: ["pm-missing;echo-pwned"] });
   const missingFocus = brief.insights?.find((insight) => insight.message.includes("requested focus id(s) were not found"));
@@ -666,6 +753,15 @@ test("renderSlackBrief emits Slack-formatted bold headers and bullet items", () 
 test("renderSlackBrief omits Recent Activity section when history is not included", () => {
   const slack = renderSlackBrief(buildBrief(items, { generatedAt: "2026-06-06T00:00:00Z", focusIds: ["pm-a"] }));
   assert.ok(!slack.includes("*Recent Activity*"));
+});
+
+test("renderSlackBrief renders actionable brief insights", () => {
+  const slack = renderSlackBrief(buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-missing"],
+  }));
+  assert.match(slack, /\*Brief Insights\*/);
+  assert.match(slack, /• warning: requested focus id\(s\) were not found: pm-missing — `pm get pm-missing`/);
 });
 
 test("renderMarkdownBrief includes Recent Activity section when history is present", () => {
@@ -1014,6 +1110,55 @@ describe("brief since / buildDelta", () => {
     const slack = renderSlackDelta(summary);
     assert.match(slack, /\*Delta since 2026-07-20 until 2026-07-22 by alice\*/);
     assert.match(slack, /\*Created\*/);
+    const text = renderTextDelta(summary);
+    assert.match(text, /^Delta since 2026-07-20 until 2026-07-22 by alice/);
+    assert.match(text, /pm-new: New — created/);
+    assert.match(text, /Refresh: pm brief since 2026-07-20/);
+  });
+
+  test("empty Slack deltas and reopened histories stay explicit", () => {
+    assert.equal(renderSlackDelta(buildDelta([], new Map(), { since: "2026-07-01" })), "No changes since 2026-07-01.\n");
+    const summary = buildDelta([
+      actEntry("pm-reopened", "update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "closed" }]),
+      actEntry("pm-reopened", "update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "open" }]),
+    ], itemsById([{ id: "pm-reopened", title: "Reopened", type: "Task", status: "open" }]), { since: "2026-07-20" });
+    assert.equal(summary.items[0]?.reopened, true);
+    assert.equal(summary.totals.reopened, 1);
+
+    const closedAgain = buildDelta([
+      actEntry("pm-closed-again", "close", "2026-07-20T01:00:00Z"),
+      actEntry("pm-closed-again", "reopen", "2026-07-20T02:00:00Z"),
+      actEntry("pm-closed-again", "close", "2026-07-20T03:00:00Z"),
+    ], itemsById([{ id: "pm-closed-again", title: "Closed again", type: "Task", status: "closed" }]), { since: "2026-07-20" });
+    assert.equal(closedAgain.items[0]?.closed, true);
+    assert.equal(closedAgain.items[0]?.reopened, false);
+    assert.equal(closedAgain.totals.closed, 1);
+  });
+
+  test("delta token budgets retain one actionable item and disclose omitted work", () => {
+    const entries = Array.from({ length: 5 }, (_, index) => actEntry(
+      `pm-budget-${index}`,
+      "create",
+      `2026-07-20T0${index + 1}:00:00Z`,
+      [{ op: "add", path: "/metadata/title", value: `Budget item ${index}` }],
+    ));
+    const budgetItems: PmItem[] = entries.map((entry, index) => ({
+      id: entry.id,
+      title: `Budget item ${index} with enough detail to consume the deliberately small output budget`,
+      type: "Task",
+      status: "open",
+    }));
+    const summary = buildDelta(entries, itemsById(budgetItems), { since: "2026-07-20", tokenBudget: 1, maxItems: 5 });
+    assert.equal(summary.items.length, 1);
+    assert.equal(summary.truncated, true);
+    assert.equal(summary.omittedItems, 4);
+  });
+
+  test("activity without a classified field change remains visible as other work", () => {
+    const summary = buildDelta([
+      actEntry("pm-other", "activity", "2026-07-20T01:00:00Z"),
+    ], itemsById([{ id: "pm-other", title: "External activity", type: "Task", status: "open" }]), { since: "2026-07-20" });
+    assert.match(renderMarkdownDelta(summary), /## Other\n\n- pm-other:/);
   });
 
   test("normalizeCheckpoint trims whitespace and passes all forms through unchanged", () => {
@@ -1314,6 +1459,59 @@ describe("brief diverge / buildDivergence", () => {
     // field-collision (rank 2) before union-safe (rank 3)
     assert.equal(summary.items[0]?.kind, "field-collision");
     assert.equal(summary.items[1]?.kind, "union-safe");
+  });
+
+  test("large high-severity divergence stays bounded without hiding safety guidance", () => {
+    const collisions = Array.from({ length: 8 }, (_, index) => classifyItemDivergence({
+      id: `pm-duplicate-${index}`,
+      ancestor: { events: [], itemPresent: false },
+      base: { events: [divEvent("create", "2026-07-20T01:00:00Z", [], { afterHash: `base-${index}` })], itemPresent: true },
+      head: { events: [divEvent("create", "2026-07-20T02:00:00Z", [], { afterHash: `head-${index}` })], itemPresent: true },
+    }));
+    const summary = buildDivergence(collisions, {
+      base: "main",
+      head: "agent-work",
+      baseSha: "base",
+      headSha: "head",
+      ancestorSha: "ancestor",
+      ancestorDate: "2026-07-20T00:00:00Z",
+      workspace: ".agents/pm",
+      pmVersion: "test",
+      fence: { attributesInstalled: false, driversConfigured: false, ok: false, missing: ["attributes", "drivers"] },
+      tokenBudget: 1,
+      maxItems: 8,
+    });
+    assert.equal(summary.items.length, 1);
+    assert.equal(summary.truncated, true);
+    assert.equal(summary.omittedItems, 7);
+    assert.ok(summary.recommendedCommands.includes("pm merge install"));
+    assert.ok(summary.recommendedCommands.some((command) => command.startsWith("pm history pm-duplicate-")));
+    assert.ok(summary.recommendedCommands.includes("pm brief since 2026-07-20T00:00:00Z"));
+
+    const unrelated = { ...summary, unrelatedHistories: true };
+    for (const output of [renderMarkdownDivergence(unrelated), renderTextDivergence(unrelated), renderSlackDivergence(unrelated)]) {
+      assert.match(output, /unrelated histories/i);
+      assert.match(output, /merge driver fence not installed/i);
+      assert.match(output, /7 .*omitted|truncated.*7/i);
+    }
+
+    const full = buildDivergence(collisions, {
+      base: "main", head: "agent-work", baseSha: "base", headSha: "head", ancestorSha: "ancestor",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+      tokenBudget: 1_000_000,
+      maxItems: 8,
+      format: "json",
+    });
+    const partiallyTrimmed = buildDivergence(collisions, {
+      base: "main", head: "agent-work", baseSha: "base", headSha: "head", ancestorSha: "ancestor",
+      workspace: ".agents/pm", pmVersion: "test",
+      fence: { attributesInstalled: true, driversConfigured: true, ok: true, missing: [] },
+      tokenBudget: Math.floor(full.budget!.estimatedTokens * 0.7),
+      maxItems: 8,
+      format: "json",
+    });
+    assert.ok(partiallyTrimmed.items.length > 1 && partiallyTrimmed.items.length < collisions.length);
   });
 
   test("buildDivergence verdict: union-safe when all both-sided items are union-safe", () => {
@@ -1796,6 +1994,56 @@ describe("brief diverge / review round 2 hardening", () => {
     assert.throws(() => listChangedPaths(missing, "aaaa", "bbbb", ".agents/pm"), /git (diff|ls-tree).*(failed|could not run)/);
     assert.throws(() => readBlob(missing, "aaaa", ".agents/pm/history/x.jsonl"), /git show.*(failed|could not run)/);
     assert.throws(() => mergeBase(missing, "aaaa", "bbbb"), /git merge-base.*(failed|could not run)/);
+    assert.throws(() => resolveRepoRoot(missing), /Unable to determine git repo root/);
+  });
+
+  test("git readers distinguish missing content from invalid revisions and commands", () => {
+    const repo = process.cwd();
+    assert.throws(() => mergeBase(repo, "HEAD", "definitely-missing-ref"), /git merge-base failed/);
+    assert.throws(() => listChangedPaths(repo, "HEAD", "definitely-missing-ref", ".agents/pm"), /git diff failed/);
+    assert.equal(readBlob(repo, "HEAD", ".agents/pm/history/definitely-missing.jsonl"), undefined);
+    assert.throws(() => readBlob(repo, "--definitely-invalid-option", "x"), /git show .* failed/);
+  });
+
+  test("check-attr failures cannot be mistaken for an installed merge fence", async () => {
+    const nonRepo = await mkdtemp(join(tmpdir(), "pm-brief-non-repo-"));
+    try {
+      assert.throws(() => checkAttrMerge(nonRepo, [".agents/pm/tasks/pm-a.toon"]), /git check-attr failed/);
+    } finally {
+      await rm(nonRepo, { recursive: true, force: true });
+    }
+  });
+
+  test("a signaled git process fails closed instead of returning an empty change set", async (t) => {
+    if (process.platform === "win32") {
+      t.skip("POSIX signal semantics are not available on Windows");
+      return;
+    }
+    const fakeBin = await mkdtemp(join(tmpdir(), "pm-brief-signaled-git-"));
+    const previousPath = process.env.PATH;
+    try {
+      const fakeGit = join(fakeBin, "git");
+      await writeFile(fakeGit, "#!/bin/sh\nkill -TERM $$\n", "utf-8");
+      await chmod(fakeGit, 0o755);
+      process.env.PATH = `${fakeBin}:${previousPath ?? ""}`;
+      assert.throws(() => listChangedPaths(process.cwd(), "HEAD", "HEAD", ".agents/pm"), /terminated by signal SIGTERM/);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      await rm(fakeBin, { recursive: true, force: true });
+    }
+  });
+
+  test("git ref and default-base discovery report actionable usage errors", () => {
+    assert.throws(() => resolveRef(process.cwd(), "refs/heads/definitely-missing-pm-brief-ref"), /Unknown git ref/);
+    const empty = mkdtempSync(join(tmpdir(), "pm-brief-no-default-base-"));
+    try {
+      const initialized = spawnSync("git", ["init", "-q", empty], { encoding: "utf-8" });
+      assert.equal(initialized.status, 0, initialized.stderr);
+      assert.throws(() => detectDefaultBase(empty), /Unable to detect a default base branch/);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 
   test("mergeBase returns undefined only for the legitimate no-merge-base case", () => {
@@ -1970,6 +2218,13 @@ describe("brief duplicates", () => {
       duplicateRemediationCommand(closed, open),
       "pm update pm-a --dep id=pm-b,kind=related",
     );
+  });
+
+  test("remediation uses the one available creation timestamp before id ordering", () => {
+    const dated: DuplicatePairItem = { id: "pm-z", title: "Dated", status: "open", type: "Task", createdAt: "2026-07-20T00:00:00Z" };
+    const undated: DuplicatePairItem = { id: "pm-a", title: "Undated", status: "open", type: "Task" };
+    assert.equal(duplicateRemediationCommand(dated, undated), "pm update pm-a --dep id=pm-z,kind=related");
+    assert.equal(duplicateRemediationCommand(undated, dated), "pm update pm-a --dep id=pm-z,kind=related");
   });
 
   test("--limit truncates the ranked pair list", () => {
@@ -2294,6 +2549,27 @@ describe("brief governance", () => {
     assert.doesNotMatch(prompt, /ghp_[A-Za-z0-9]/);
   });
 
+  test("stale governance findings retain rollups and remediation in brief renderers", () => {
+    const governance = govSummary({
+      staleInProgress: [{
+        id: "pm-stale",
+        lastActivityAt: "2026-07-20T00:00:00Z",
+        ageHours: 200,
+        remediation: "pm update pm-stale --status open",
+      }],
+      staleInProgressTotal: 3,
+    });
+    const brief = buildBrief([
+      { id: "pm-stale", title: "Reassess stale work", type: "Task", status: "in_progress" },
+    ], { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+    const markdown = renderMarkdownBrief(brief);
+    assert.match(markdown, /Stale in-progress \(72h threshold\) \(\+2 more\)/);
+    assert.match(markdown, /pm update pm-stale --status open/);
+    const prompt = renderAgentPrompt(brief);
+    assert.match(prompt, /stale in-progress pm-stale: 200h since last activity/);
+    assert.match(prompt, /pm update pm-stale --status open/);
+  });
+
   test("renderSlackBrief includes governance section", () => {
     const items: PmItem[] = [
       { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
@@ -2439,6 +2715,20 @@ describe("brief governance", () => {
     assert.equal(summary.secretFindingsTotal, 1);
   });
 
+  test("a secret-scanner traversal failure degrades only the advisory secret section", async () => {
+    const hostile = new Proxy<PmItem>({ id: "pm-hostile", title: "Hostile custom data", type: "Task", status: "open" }, {
+      ownKeys() {
+        throw new Error("custom field traversal failed");
+      },
+    });
+    const summary = await collectGovernanceSignals([hostile], {
+      pmRoot: "\0invalid-pm-root",
+      generatedAt: "2026-07-26T12:00:00Z",
+    });
+    assert.equal(summary.secretFindingsTotal, 0);
+    assert.equal(summary.storageFindingsTotal, 1, "independent storage failure remains visible");
+  });
+
   test("brief governance command is registered with the expected flags", async () => {
     assert.ok((await registeredCommandPaths()).includes("brief governance"), "brief governance command should be registered");
     const flags = await registeredFlagLongs("brief governance");
@@ -2533,6 +2823,21 @@ describe("brief governance end-to-end", () => {
       assert.ok(secretItemId, "pm create must return the created item id");
       pm(["--pm-path", pmPath, "update", secretItemId, "--description", "Use AWS key AKIAIOSFODNN7EXAMPLE for deployment", "--author", "agent-a"]);
 
+      // Seed every storage-integrity class against a real tracker. The ordinary
+      // list path must keep returning the readable items while governance names
+      // the corrupt documents and ledgers that an agent must repair before merge.
+      const featureFolder = registry.type_to_folder["Feature"] ?? "features";
+      await mkdir(join(pmPath, featureFolder), { recursive: true });
+      await writeFile(join(pmPath, featureFolder, `${staleItemId}.toon`), backdated, "utf-8");
+      await writeFile(join(pmPath, folder, "pm-broken.toon"), "not valid toon: [", "utf-8");
+      await writeFile(join(pmPath, "history", "pm-conflict.jsonl"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> agent\n", "utf-8");
+      await writeFile(join(pmPath, "history", "pm-unparseable.jsonl"), "{not-json}\n", "utf-8");
+      const secretHistoryPath = join(pmPath, "history", `${secretItemId}.jsonl`);
+      const secretHistory = await readFile(secretHistoryPath, "utf-8");
+      await writeFile(secretHistoryPath, `${secretHistory.trimEnd()}\n${JSON.stringify({ ts: "2026-07-26T12:00:00.000Z", author: "agent-a", op: "delete" })}\n`, "utf-8");
+      await mkdir(join(pmPath, "schema"), { recursive: true });
+      await writeFile(join(pmPath, "schema", "broken.json"), "{not-json}\n", "utf-8");
+
       // Commit the seeded workspace
       git(["add", "-A"]);
       git(["commit", "-m", "seed governance test workspace"]);
@@ -2573,9 +2878,21 @@ describe("brief governance end-to-end", () => {
       // The secret VALUE must NEVER appear in the JSON output
       assert.doesNotMatch(jsonOutput, /AKIAIOSFODNN7EXAMPLE/);
 
-      // 4. Text output: also verify no secret value leaks, and findings are present
+      // 4. Storage integrity: all six classes are detected even though the
+      // bounded brief renders only its first five findings.
+      assert.equal(summary.storageFindingsTotal, 6);
+      assert.deepEqual(new Set(summary.storageFindings.map((finding) => finding.kind)), new Set([
+        "unreadable_item_file",
+        "duplicate_item_id",
+        "history_conflict_marker",
+        "history_unparseable",
+        "resurrected_item",
+      ]));
+
+      // 5. Text output: also verify no secret value leaks, and findings are present
       assert.match(textOutput, /Duplicate clusters/);
       assert.match(textOutput, /Stale in-progress/);
+      assert.match(textOutput, /Storage integrity/);
       assert.match(textOutput, /Secrets in item text/);
       assert.doesNotMatch(textOutput, /AKIAIOSFODNN7EXAMPLE/);
       // The detector rule SHOULD appear
@@ -3091,18 +3408,22 @@ describe("registered command acceptance matrix", () => {
   test("all command families render supported formats and persist requested outputs", async () => {
     const { commands } = await activateBrief();
     const outputDir = await mkdtemp(join(tmpdir(), "pm-brief-command-matrix-"));
+    const emptyPmPath = join(outputDir, "pm");
+    const initialized = spawnSync(INSTALLED_PM_BIN, ["init", "--pm-path", emptyPmPath], { encoding: "utf-8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
     const run = async (
       command: string,
       options: Record<string, unknown> = {},
       args: string[] = [],
       global: { json?: boolean } = {},
+      pmRoot = ".agents/pm",
     ): Promise<{ pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string }> =>
       (await runRegisteredCommandForTest(commands, {
         command,
         args,
         options,
         global,
-        pmRoot: ".agents/pm",
+        pmRoot,
       })).result as { pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string };
 
     try {
@@ -3110,10 +3431,18 @@ describe("registered command acceptance matrix", () => {
       assert.equal(brief.pmBriefRendered, true);
       assert.match(brief.output ?? "", /^\*pm brief\*/);
 
+      const briefPath = join(outputDir, "brief.md");
+      const persistedBrief = await run("brief", { "no-governance": true, format: "markdown", output: briefPath });
+      assert.deepEqual({ ok: persistedBrief.ok, format: persistedBrief.format, output: persistedBrief.output }, { ok: true, format: "markdown", output: briefPath });
+      assert.match(await readFile(briefPath, "utf8"), /^# pm brief/);
+
       const promptPath = join(outputDir, "HANDOFF.md");
       const prompt = await run("brief prompt", { "no-governance": true, output: promptPath });
       assert.deepEqual({ ok: prompt.ok, format: prompt.format, output: prompt.output }, { ok: true, format: "prompt", output: promptPath });
       assert.match(await readFile(promptPath, "utf8"), /Working rules:/);
+      const renderedPrompt = await run("brief prompt", { threshold: 1 });
+      assert.equal(renderedPrompt.pmBriefRendered, true);
+      assert.match(renderedPrompt.output ?? "", /^You are continuing work in a pm-managed project\./);
 
       const next = await run("brief next", { explain: true, confidence: true }, [], { json: true });
       assert.equal(next.pmBriefRendered, true);
@@ -3124,22 +3453,46 @@ describe("registered command acceptance matrix", () => {
 
       const momentum = await run("brief momentum", { days: 3650, format: "json" });
       assert.equal(typeof (JSON.parse(momentum.output ?? "{}") as { momentum?: { closedCount?: unknown } }).momentum?.closedCount, "number");
+      assert.match((await run("brief momentum", { days: 1, format: "text" }, [], {}, emptyPmPath)).output ?? "", /^No items closed in the last 1 day\(s\)\./);
 
       const deltaPath = join(outputDir, "delta.md");
       const since = await run("brief since", { output: deltaPath, format: "markdown", limit: 5000 }, ["3650d"]);
       assert.equal(since.ok, true);
       assert.match(await readFile(deltaPath, "utf8"), /^# Delta since /);
 
+      const deltaJsonPath = join(outputDir, "delta.json");
+      const sinceJson = await run("brief since", { output: deltaJsonPath, format: "json", limit: 1 }, ["1d"]);
+      assert.equal(sinceJson.ok, true);
+      assert.equal(typeof (JSON.parse(await readFile(deltaJsonPath, "utf8")) as { totals?: unknown }).totals, "object");
+      assert.equal(typeof (JSON.parse((await run("brief since", { format: "json", limit: 1 }, ["1d"])).output ?? "{}") as { totals?: unknown }).totals, "object");
+
       const divergence = await run("brief diverge", { base: "HEAD", head: "HEAD", format: "json", "include-clean": true });
       assert.equal(typeof (JSON.parse(divergence.output ?? "{}") as { verdict?: unknown }).verdict, "string");
+      const divergencePath = join(outputDir, "divergence.md");
+      const persistedDivergence = await run("brief diverge", { base: "HEAD", head: "HEAD", format: "markdown", output: divergencePath });
+      assert.equal(persistedDivergence.ok, true);
+      assert.match(await readFile(divergencePath, "utf8"), /^# Divergence:/);
 
       const duplicates = await run("brief duplicates", { format: "markdown", limit: 2, since: "2026-01-01" });
       assert.match(duplicates.output ?? "", /^# pm brief duplicates/m);
+      const duplicatesJsonPath = join(outputDir, "duplicates.json");
+      const persistedDuplicates = await run("brief duplicates", { format: "json", output: duplicatesJsonPath, limit: 2, since: "2999-01-01" });
+      assert.equal(persistedDuplicates.ok, true);
+      assert.equal((JSON.parse(await readFile(duplicatesJsonPath, "utf8")) as { count?: number }).count, 0);
+      assert.equal((JSON.parse((await run("brief duplicates", { format: "json", limit: 2, since: "2999-01-01" })).output ?? "{}") as { count?: number }).count, 0);
+      const duplicatesTextPath = join(outputDir, "duplicates.txt");
+      const persistedDuplicateText = await run("brief duplicates", { format: "text", output: duplicatesTextPath, limit: 2, since: "2999-01-01" });
+      assert.equal(persistedDuplicateText.ok, true);
+      assert.match(await readFile(duplicatesTextPath, "utf8"), /No likely duplicate items found/);
 
       const governancePath = join(outputDir, "governance.md");
       const governance = await run("brief governance", { format: "markdown", output: governancePath, threshold: 1, "stale-hours": 0 });
       assert.equal(governance.ok, true);
       assert.match(await readFile(governancePath, "utf8"), /^# pm brief governance/m);
+      const governanceJsonPath = join(outputDir, "governance.json");
+      const governanceJson = await run("brief governance", { format: "json", output: governanceJsonPath, threshold: 1, "stale-hours": 0 });
+      assert.equal(governanceJson.ok, true);
+      assert.equal(typeof (JSON.parse(await readFile(governanceJsonPath, "utf8")) as { generatedAt?: unknown }).generatedAt, "string");
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
