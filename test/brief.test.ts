@@ -3174,13 +3174,22 @@ describe("registered command acceptance matrix", () => {
     assert.match(momentum, /^Closed \d+ item\(s\)/);
     assert.match(momentum, /Throughput:/);
 
-    const focused = JSON.parse(await run("brief", {
-      focus: ["type:Issue", "pm-brief-gtiy"],
+    const typeFocused = JSON.parse(await run("brief", {
+      focus: "type:Issue",
+      format: "json",
+      "no-governance": true,
+      "dependency-order": true,
+    })) as { focus: Array<{ type: string }> };
+    assert.ok(typeFocused.focus.length > 0);
+    assert.ok(typeFocused.focus.every((item) => item.type === "Issue"));
+
+    const idFocused = JSON.parse(await run("brief", {
+      focus: "pm-brief-gtiy",
       format: "json",
       "no-governance": true,
       "dependency-order": true,
     })) as { focus: Array<{ id: string }> };
-    assert.ok(focused.focus.some((item) => item.id === "pm-brief-gtiy"));
+    assert.ok(idFocused.focus.some((item) => item.id === "pm-brief-gtiy"));
   });
 
   test("registered commands reject invalid positive and non-negative integer flags", async () => {
@@ -3220,10 +3229,11 @@ test("detectDefaultBase follows origin HEAD and falls back to local main", async
     git(["commit", "-m", "fixture"]);
     assert.equal(detectDefaultBase(tmpDir), "main");
 
+    git(["branch", "trunk"]);
     git(["remote", "add", "origin", tmpDir]);
-    git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
-    git(["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    assert.equal(detectDefaultBase(tmpDir), "main");
+    git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]);
+    git(["update-ref", "refs/remotes/origin/trunk", "trunk"]);
+    assert.equal(detectDefaultBase(tmpDir), "trunk");
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }
