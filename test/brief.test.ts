@@ -419,6 +419,11 @@ test("compact activity parser supports legacy fields, defaults, bounds, and malf
       { ts: "2026-08-07T08:00:00Z", id: "pm-third" },
     ],
   }), 2).map((entry) => entry.itemId), ["pm-first", "pm-second"]);
+  const overLimit = Array.from({ length: 101 }, (_, index) => ({
+    timestamp: `2026-08-07T10:${String(index % 60).padStart(2, "0")}:00Z`,
+    item_id: `pm-${String(index).padStart(3, "0")}`,
+  }));
+  assert.equal(parseRecentActivityOutput(JSON.stringify({ activity: overLimit }), 1000).length, 100);
 });
 
 test("full activity parser validates envelopes and preserves optional evidence", () => {
