@@ -28,6 +28,7 @@ import extension, {
   countMalformedLines,
   scanHistoryJsonl,
   pmRootRelFromCtx,
+  detectDefaultBase,
   mergeBase,
   readBlob,
   listChangedPaths,
@@ -2497,6 +2498,8 @@ describe("brief governance end-to-end", () => {
       pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-a", "--json"]);
       pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-b", "--json"]);
       pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-c", "--json"]);
+      pm(["--pm-path", pmPath, "create", "--title", "Document release gate", "--type", "Task", "--author", "agent-a", "--json"]);
+      pm(["--pm-path", pmPath, "create", "--title", "Document release gate", "--type", "Task", "--author", "agent-b", "--json"]);
 
       // Seed a stale in-progress item: create, set to in_progress, then backdate it.
       const staleJson = pm(["--pm-path", pmPath, "create", "--title", "Old in-progress work", "--type", "Task", "--author", "agent-a", "--json"]);
@@ -3141,6 +3144,89 @@ describe("registered command acceptance matrix", () => {
       await rm(outputDir, { recursive: true, force: true });
     }
   });
+
+  test("text command paths expose human-readable ranking, staleness, momentum, and typed focus", async () => {
+    const { commands } = await activateBrief();
+    const run = async (
+      command: string,
+      options: Record<string, unknown> = {},
+    ): Promise<string> => {
+      const result = (await runRegisteredCommandForTest(commands, {
+        command,
+        options,
+        global: { json: false },
+        pmRoot: ".agents/pm",
+      })).result as { output?: string };
+      return String(result.output);
+    };
+
+    const next = await run("brief next", { explain: true, "dependency-order": true, count: 2 });
+    assert.match(next, /^1\. pm-/);
+    assert.match(next, /\[score -?\d/);
+    assert.match(next, /confidence \d/);
+    const conciseNext = await run("brief next", { confidence: true, "dependency-order": true, count: 2 });
+    assert.match(conciseNext, /^pm-.* \| score -?\d+ \| confidence \d+/);
+
+    const stale = await run("brief stale", { days: 0 });
+    assert.match(stale, /pm-brief-gtiy: .* - \d+ day\(s\) stale/);
+
+    const momentum = await run("brief momentum", { days: 3650 });
+    assert.match(momentum, /^Closed \d+ item\(s\)/);
+    assert.match(momentum, /Throughput:/);
+
+    const focused = JSON.parse(await run("brief", {
+      focus: ["type:Issue", "pm-brief-gtiy"],
+      format: "json",
+      "no-governance": true,
+      "dependency-order": true,
+    })) as { focus: Array<{ id: string }> };
+    assert.ok(focused.focus.some((item) => item.id === "pm-brief-gtiy"));
+  });
+
+  test("registered commands reject invalid positive and non-negative integer flags", async () => {
+    const { commands } = await activateBrief();
+    await assert.rejects(
+      runRegisteredCommandForTest(commands, {
+        command: "brief next",
+        options: { count: 0 },
+        pmRoot: ".agents/pm",
+      }),
+      /--count must be a positive integer/,
+    );
+    await assert.rejects(
+      runRegisteredCommandForTest(commands, {
+        command: "brief stale",
+        options: { days: -1 },
+        pmRoot: ".agents/pm",
+      }),
+      /--days must be zero or a positive integer/,
+    );
+  });
+});
+
+test("detectDefaultBase follows origin HEAD and falls back to local main", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-default-base-"));
+  try {
+    const git = (args: string[]): string => {
+      const result = spawnSync("git", args, { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    git(["init", "--initial-branch=main"]);
+    git(["config", "user.email", "test@example.invalid"]);
+    git(["config", "user.name", "pm-brief test"]);
+    await writeFile(join(tmpDir, "README.md"), "fixture\n");
+    git(["add", "README.md"]);
+    git(["commit", "-m", "fixture"]);
+    assert.equal(detectDefaultBase(tmpDir), "main");
+
+    git(["remote", "add", "origin", tmpDir]);
+    git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+    git(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    assert.equal(detectDefaultBase(tmpDir), "main");
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

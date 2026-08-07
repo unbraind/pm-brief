@@ -651,10 +651,6 @@ function itemUpdatedAt(item: PmItem): string {
   return text(item.updated_at) || text(item.created_at);
 }
 
-function hasVisibleDependencyBlocker(item: PmItem, rels: Relationship[]): boolean {
-  return rels.some((rel) => rel.from === item.id && (rel.kind === "blocked_by" || rel.kind === "depends_on"));
-}
-
 function ageDays(item: PmItem, now: Date): number {
   const raw = itemUpdatedAt(item);
   if (!raw) return 0;
@@ -1644,12 +1640,6 @@ function escapeLine(value: unknown): string {
 
 function formatScoreValue(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
-}
-
-function formatSignedScoreValue(value: number): string {
-  if (value === 0) return "0";
-  const abs = formatScoreValue(Math.abs(value));
-  return `${value > 0 ? "+" : "-"}${abs}`;
 }
 
 function renderNextExplanationLine(entry: NextItemExplanation): string {
