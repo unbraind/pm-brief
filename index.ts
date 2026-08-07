@@ -2239,7 +2239,6 @@ export function readActivitySince(
 }
 
 const OPEN_STATUSES = new Set(["open", "in_progress", "ready"]);
-const CLOSED_STATUSES = new Set(["closed", "done", "canceled", "cancelled"]);
 
 /** JSON-Patch paths that represent a dependency/relationship edit, across pm
  * versions and extension schemas. Real pm 2026.7.22 uses `/metadata/dependencies`. */
@@ -2292,6 +2291,7 @@ export function buildDelta(
     let closed = false;
     let canceled = false;
     let reopened = false;
+    let latestLifecycle: "closed" | "canceled" | "reopened" | undefined;
     let closeReason: string | undefined;
     let retitled = false;
     let reassignedTo: string | undefined;
@@ -2318,9 +2318,9 @@ export function buildDelta(
         }
         continue;
       }
-      if (op === "close") closed = true;
-      if (op === "cancel") canceled = true;
-      if (op === "reopen") reopened = true;
+      if (op === "close") latestLifecycle = "closed";
+      if (op === "cancel") latestLifecycle = "canceled";
+      if (op === "reopen") latestLifecycle = "reopened";
       const opCountedNote = op === "note_add";
       const opCountedComment = op === "comment_add";
       if (opCountedNote) notesAdded++;
@@ -2331,7 +2331,12 @@ export function buildDelta(
         const pop = p.op;
         if (typeof path !== "string") continue;
         if (path === "/metadata/status") {
-          if (typeof p.value === "string") statusValues.push(p.value);
+          if (typeof p.value === "string") {
+            statusValues.push(p.value);
+            if (p.value === "closed" || p.value === "done") latestLifecycle = "closed";
+            else if (p.value === "canceled" || p.value === "cancelled") latestLifecycle = "canceled";
+            else if (OPEN_STATUSES.has(p.value) && (latestLifecycle === "closed" || latestLifecycle === "canceled")) latestLifecycle = "reopened";
+          }
         }
         if (path === "/metadata/close_reason" && (pop === "add" || pop === "replace")) {
           if (typeof p.value === "string") closeReason = p.value;
@@ -2365,18 +2370,9 @@ export function buildDelta(
       }
     }
 
-    if (!closed && statusValues.some((v) => v === "closed")) closed = true;
-    if (!canceled && statusValues.some((v) => v === "canceled" || v === "cancelled")) canceled = true;
-    if (!reopened && statusValues.length >= 2) {
-      let hadClosed = false;
-      for (const v of statusValues) {
-        if (CLOSED_STATUSES.has(v)) hadClosed = true;
-        if (hadClosed && OPEN_STATUSES.has(v)) {
-          reopened = true;
-          break;
-        }
-      }
-    }
+    closed = latestLifecycle === "closed";
+    canceled = latestLifecycle === "canceled";
+    reopened = latestLifecycle === "reopened";
 
     let statusTransition: { from?: string; to: string } | undefined;
     if (statusValues.length >= 1) {
