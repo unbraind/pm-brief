@@ -6,9 +6,9 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-07-26T13:52:29.218Z"
-updated_at: "2026-08-07T16:33:55.875Z"
-assignee: "harness:codex"
-claim_principal: "harness:codex#e067658fb6e4485ee2d1dfa3"
+updated_at: "2026-08-07T23:32:53.434Z"
+assignee: codex
+claim_principal: codex
 author: codex
 estimated_minutes: 720
 acceptance_criteria: "A deterministic coverage command reports 100% lines, branches, functions, and statements for all source files; release:check fails when any source coverage dimension drops below 100%; Tests exercise observable behavior and real failure paths without coverage-only branches, mocks that bypass production behavior, ignore pragmas, or generated-code inflation; Coverage execution uses the project-local latest pm CLI and is stable in npm and bun workflows"
@@ -17,7 +17,7 @@ severity: high
 component: testing
 dependencies[1]{id,kind,created_at,author}:
   pm-brief-q325,related,"2026-07-26T13:52:29.218Z",codex
-notes[11]{created_at,author,text}:
+notes[13]{created_at,author,text}:
   "2026-07-26T13:52:41.808Z",codex,"Baseline measured 2026-07-26 with Node built-in coverage against the latest project-local pm CLI: dist/index.js 82.84% lines, 74.67% branches, 92.19% functions. The aggregate report is lower because it also observes a temporary installed extension copy; the source file row is the actionable baseline."
   "2026-07-26T14:13:07.264Z",codex,"Workflow-level acceptance evidence is now linked in addition to the reporting-only coverage baseline. This Issue remains open until release:check itself enforces all four 100% thresholds; a passing current release:check is not evidence that the acceptance criteria are met."
   "2026-08-02T00:42:20.038Z","harness:codex","TDD tranche 1: added a real registered-command acceptance matrix covering all nine command families, host-global JSON, Slack/JSON/Markdown output, output-file persistence, real PM reads, duplicate/governance SDK scans, activity deltas, and Git divergence. Targeted test passes. Full suite now passes 161 tests and source coverage improved from 91.97/76.72/95.85 to 94.86% lines, 78.71% branches, and 96.27% functions. The issue remains in progress; thresholds are intentionally unchanged until meaningful tests reach exact 100/100/100."
@@ -29,6 +29,8 @@ notes[11]{created_at,author,text}:
   "2026-08-07T08:28:25.010Z","harness:codex","Final round-3 measurement: 187 tests; index.ts 100.00% lines, 84.89% branches, 100.00% functions. Required line/function coverage is now exact, while exact branch coverage remains intentionally open; no threshold was weakened and no exclusion was added. npm run release:check passed before the final fault-injection additions (typecheck/build/coverage, 0 production vulnerabilities, pack dry-run, changelog check); the final full release check will be rerun on this exact tree."
   "2026-08-07T08:42:06.431Z","harness:codex","CodeRabbit review identified two actionable gaps on PR #58: the PM item did not link Bun CI evidence, and direct pm.cmd execution was unsafe on Windows. Added the Bun release-check command as linked evidence and changed pm execution to invoke the resolved project-local CLI entry through process.execPath without a shell. Extracted output parsers so malformed-envelope coverage remains behavior-focused without replacing the CLI executable."
   "2026-08-07T08:45:01.920Z","harness:codex","Executed the newly linked Bun gate through pm test on the exact review-remediation tree: Bun 1.3.5 installed the npm-lock-backed project and bun run release:check passed all 187 tests, 100.00% lines, 85.99% branches, 100.00% functions, production audit, package dry-run, and changelog validation. Bun emitted its known duplicate dependency warning because pm-cli is intentionally both a runtime dependency and a development dependency for an extension package; no generated bun.lock is retained."
+  "2026-08-07T23:25:50.189Z","harness:codex","2026-08-08 renderer branch-coverage tranche: added behavior-driven coverage for empty workspaces, sparse optional metadata, capped governance findings, equal-total rollups, absent storage IDs, empty remediation, and newline escaping. Fresh npm and Bun release:check both pass with 196 tests, 100.00% lines, 90.33% branches, and 100.00% functions for src/index.ts; production audit, package packing, and changelog checks pass. This removes 30 genuine zero-hit renderer branch arms (183 to 153). The exact-coverage mandate remains open: 153 branch arms remain, including line 1639's defensive null fallback for a statically non-null value; no invalid fixture, threshold weakening, or production ignore was introduced."
+  "2026-08-07T23:32:53.434Z","harness:codex","PR #60 review round 1: accepted Greptile's explicit newline-normalization assertion and CodeRabbit's prompt disclosure finding. Agent prompts now report omitted duplicate, stale, storage, and secret governance findings instead of silently hiding capped results; tests independently assert each rollup and empty-remediation omission. Rejected the proposed 2026-08-07 note-date rewrite because event 2026-08-07T23:25:50Z is 2026-08-08T01:25:50 in the repository's Europe/Vienna operating timezone. Exact-head npm and Bun release:check pass 196 tests at 100.00% lines, 90.38% branches, and 100.00% functions; 153 zero-hit branch records remain, so the exact target stays open."
 files[2]{path,scope,note}:
   index.ts,project,Source coverage target
   test/brief.test.ts,project,Coverage test expansion
