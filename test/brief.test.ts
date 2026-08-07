@@ -3130,7 +3130,7 @@ describe("registered command acceptance matrix", () => {
       assert.equal(since.ok, true);
       assert.match(await readFile(deltaPath, "utf8"), /^# Delta since /);
 
-      const divergence = await run("brief diverge", { base: "main", head: "HEAD", format: "json", "include-clean": true });
+      const divergence = await run("brief diverge", { base: "HEAD", head: "HEAD", format: "json", "include-clean": true });
       assert.equal(typeof (JSON.parse(divergence.output ?? "{}") as { verdict?: unknown }).verdict, "string");
 
       const duplicates = await run("brief duplicates", { format: "markdown", limit: 2, since: "2026-01-01" });
