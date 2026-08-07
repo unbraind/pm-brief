@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { resolve as pathResolve, relative as pathRelative, sep as pathSep, isAbsolute as pathIsAbsolute } from "node:path";
 import { defineExtension } from "@unbrained/pm-cli/sdk/authoring";
 import type { ExtensionApi, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
@@ -30,7 +31,7 @@ export type {
 } from "@unbrained/pm-cli/sdk/governance";
 export type { MergeDecisionReceipt, MergePreferredSide } from "@unbrained/pm-cli/sdk/merge";
 
-const PM_EXECUTABLE = process.platform === "win32" ? "pm.cmd" : "pm";
+const PM_CLI_ENTRY = fileURLToPath(new URL("./dist/cli.js", import.meta.resolve("@unbrained/pm-cli/package.json")));
 const PM_PATH_OPTION = "--pm-path";
 const SAFE_PM_ID = /^[a-zA-Z0-9._-]+$/;
 
@@ -2079,10 +2080,7 @@ export function renderAgentPrompt(brief: AgentBrief): string {
 }
 
 export function readPmItems(pmRoot: string): PmItem[] {
-  const result = spawnSync(PM_EXECUTABLE, [PM_PATH_OPTION, pmRoot, "list-all", "--json", "--include-body"], {
-    encoding: "utf-8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const result = spawnPm([PM_PATH_OPTION, pmRoot, "list-all", "--json", "--include-body"]);
   if (result.status !== 0) {
     throw new CommandError(result.stderr?.trim() || result.error?.message || "`pm list-all --json --include-body` failed");
   }
@@ -2105,8 +2103,16 @@ export function parsePmItemsOutput(output: string): PmItem[] {
 }
 
 function pmVersion(): string {
-  const result = spawnSync(PM_EXECUTABLE, ["--version"], { encoding: "utf-8" });
+  const result = spawnPm(["--version"]);
   return result.status === 0 ? result.stdout.trim() : "unknown";
+}
+
+/** Run the project-local pm CLI through Node so Windows never has to execute an npm `.cmd` shim. */
+function spawnPm(args: string[]): SpawnSyncReturns<string> {
+  return spawnSync(process.execPath, [PM_CLI_ENTRY, ...args], {
+    encoding: "utf-8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
 }
 
 /**
@@ -2120,11 +2126,16 @@ export function readNextOrderedIds(pmRoot: string, options: { limit?: number; as
   const args = [PM_PATH_OPTION, pmRoot, "next", "--json"];
   if (options.limit && Number.isFinite(options.limit)) args.push("--limit", String(Math.max(1, Math.floor(options.limit))));
   if (options.assignee) args.push("--assignee", options.assignee);
-  const result = spawnSync(PM_EXECUTABLE, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnPm(args);
   if (result.status !== 0) return [];
+  return parseNextOrderedIdsOutput(result.stdout);
+}
+
+/** Normalize the canonical `pm next --json` envelope into a stable, deduplicated id order. */
+export function parseNextOrderedIdsOutput(output: string): string[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(result.stdout);
+    parsed = JSON.parse(output);
   } catch {
     return [];
   }
@@ -2150,14 +2161,17 @@ export function readNextOrderedIds(pmRoot: string, options: { limit?: number; as
 
 export function readRecentActivity(pmRoot: string, limit = 10): BriefActivity[] {
   const safeLimit = Math.max(1, Math.min(limit, 100));
-  const result = spawnSync(PM_EXECUTABLE, [PM_PATH_OPTION, pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)], {
-    encoding: "utf-8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const result = spawnPm([PM_PATH_OPTION, pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)]);
   if (result.status !== 0) return [];
+  return parseRecentActivityOutput(result.stdout, safeLimit);
+}
+
+/** Parse compact `pm activity --json` output while dropping malformed advisory rows. */
+export function parseRecentActivityOutput(output: string, limit = 10): BriefActivity[] {
+  const safeLimit = Math.max(1, Math.min(limit, 100));
   let parsed: unknown;
   try {
-    parsed = JSON.parse(result.stdout);
+    parsed = JSON.parse(output);
   } catch {
     return [];
   }
@@ -2198,13 +2212,18 @@ export function readActivitySince(
   if (options.to) args.push("--to", options.to);
   if (options.author) args.push("--author", options.author);
   args.push("--limit", String(limit));
-  const result = spawnSync(PM_EXECUTABLE, args, { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnPm(args);
   if (result.status !== 0) {
     throw new CommandError(result.stderr?.trim() || result.error?.message || "`pm activity --json --full` failed");
   }
+  return parseActivitySinceOutput(result.stdout);
+}
+
+/** Parse full activity output into chronological delta entries, failing loudly on malformed JSON. */
+export function parseActivitySinceOutput(output: string): DeltaActivityEntry[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(result.stdout);
+    parsed = JSON.parse(output);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new CommandError(`Unable to parse pm activity JSON: ${detail}`);

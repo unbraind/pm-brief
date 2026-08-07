@@ -35,6 +35,9 @@ import extension, {
   readBlob,
   listChangedPaths,
   parsePmItemsOutput,
+  parseActivitySinceOutput,
+  parseNextOrderedIdsOutput,
+  parseRecentActivityOutput,
   readActivitySince,
   readNextOrderedIds,
   readPmItems,
@@ -278,38 +281,38 @@ test("pm readers distinguish required tracker failures from optional ranking and
   assert.deepEqual(readRecentActivity(missingTracker, 0), []);
 });
 
-test("pm readers reject malformed JSON and normalize canonical ranking buckets", async () => {
-  const fakeBin = await mkdtemp(join(tmpdir(), "pm-brief-fake-pm-"));
-  const previousPath = process.env.PATH;
-  const previousOutput = process.env.PM_BRIEF_FAKE_OUTPUT;
-  try {
-    if (process.platform === "win32") {
-      await writeFile(join(fakeBin, "pm.cmd"), "@node \"%~dp0\\fake-pm.cjs\"\r\n", "utf-8");
-      await writeFile(join(fakeBin, "fake-pm.cjs"), "process.stdout.write(process.env.PM_BRIEF_FAKE_OUTPUT || '')\n", "utf-8");
-    } else {
-      const fakePm = join(fakeBin, "pm");
-      await writeFile(fakePm, "#!/usr/bin/env node\nprocess.stdout.write(process.env.PM_BRIEF_FAKE_OUTPUT || '')\n", "utf-8");
-      await chmod(fakePm, 0o755);
-    }
-    process.env.PATH = `${fakeBin}${process.platform === "win32" ? ";" : ":"}${previousPath ?? ""}`;
-    process.env.PM_BRIEF_FAKE_OUTPUT = "not-json";
-    assert.deepEqual(readNextOrderedIds("unused"), []);
-    assert.deepEqual(readRecentActivity("unused"), []);
-    assert.throws(() => readActivitySince("unused", { from: "1d" }), /Unable to parse pm activity JSON/);
+test("pm output parsers reject malformed JSON and normalize canonical envelopes", () => {
+  assert.deepEqual(parseNextOrderedIdsOutput("not-json"), []);
+  assert.deepEqual(parseRecentActivityOutput("not-json"), []);
+  assert.throws(() => parseActivitySinceOutput("not-json"), /Unable to parse pm activity JSON/);
 
-    process.env.PM_BRIEF_FAKE_OUTPUT = JSON.stringify({
-      recommended: { id: "pm-a" },
-      ready: [null, { id: "pm-b" }, { id: "" }],
-      blocked: [{ id: "pm-a" }, { nope: true }],
-    });
-    assert.deepEqual(readNextOrderedIds("unused"), ["pm-a", "pm-b"]);
-  } finally {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-    if (previousOutput === undefined) delete process.env.PM_BRIEF_FAKE_OUTPUT;
-    else process.env.PM_BRIEF_FAKE_OUTPUT = previousOutput;
-    await rm(fakeBin, { recursive: true, force: true });
-  }
+  assert.deepEqual(parseNextOrderedIdsOutput(JSON.stringify({
+    recommended: { id: "pm-a" },
+    ready: [null, { id: "pm-b" }, { id: "" }],
+    blocked: [{ id: "pm-a" }, { nope: true }],
+  })), ["pm-a", "pm-b"]);
+  assert.deepEqual(parseRecentActivityOutput(JSON.stringify({
+    compact_activity: [
+      null,
+      { ts: "2026-08-07T10:00:00Z", author: "agent", op: "update", id: "pm-a", msg: "done" },
+      { timestamp: "2026-08-07T09:00:00Z", operation: "create", item_id: "pm-b", message: "created" },
+      { op: "ignored-without-timestamp" },
+    ],
+  }), 1), [{
+    timestamp: "2026-08-07T10:00:00Z",
+    author: "agent",
+    operation: "update",
+    itemId: "pm-a",
+    message: "done",
+  }]);
+  assert.deepEqual(parseActivitySinceOutput(JSON.stringify({
+    activity: [
+      { ts: "2026-08-07T10:00:00Z", id: "pm-b", patch: "invalid" },
+      null,
+      { ts: "2026-08-07T09:00:00Z", id: "pm-a", op: "update", patch: [{ op: "replace", path: "/status", value: "closed" }] },
+      { id: "missing-timestamp" },
+    ],
+  })).map((entry) => entry.id), ["pm-a", "pm-b"]);
 });
 
 test("selectNextItems ranks unblocked priority before blocked work", () => {
