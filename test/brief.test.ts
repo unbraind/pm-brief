@@ -2866,6 +2866,8 @@ describe("brief governance", () => {
     ], { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
 
     const markdown = renderMarkdownBrief(brief);
+    assert.match(markdown, /pm-a: Duplicate item/);
+    assert.doesNotMatch(markdown, /Duplicate\nitem/);
     assert.match(markdown, /Duplicate clusters.*\(\+2 more\)/);
     assert.match(markdown, /Stale in-progress.*\(\+1 more\)/);
     assert.match(markdown, /Storage integrity \(\+1 more\)/);
@@ -2884,8 +2886,15 @@ describe("brief governance", () => {
     assert.doesNotMatch(slack, /  • → ``/);
 
     const prompt = renderAgentPrompt(brief);
+    assert.match(prompt, /pm-a:Duplicate item/);
+    assert.doesNotMatch(prompt, /Duplicate\nitem/);
     assert.match(prompt, /storage unparseable_config: invalid settings/);
+    assert.match(prompt, /\+2 more duplicate cluster\(s\) not shown/);
+    assert.match(prompt, /\+1 more stale in-progress item\(s\) not shown/);
+    assert.match(prompt, /\+1 more storage finding\(s\) not shown/);
+    assert.match(prompt, /\+1 more secret finding\(s\) not shown/);
     assert.doesNotMatch(prompt, /storage unparseable_config undefined/);
+    assert.doesNotMatch(prompt, /^  - $/m);
   });
 
   test("renderTextGovernance renders a standalone summary with +N more rollup", () => {

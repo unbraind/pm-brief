@@ -1757,19 +1757,31 @@ function renderGovernanceAgentPrompt(g: GovernanceSummary | undefined): string[]
     lines.push(`- duplicate cluster ${cluster.clusterId} (score ${cluster.maxScore}, ${cluster.reason}): ${members}`);
     if (cluster.remediation) lines.push(`  - ${cluster.remediation}`);
   }
+  if (g.duplicateClustersTotal > g.duplicateClusters.length) {
+    lines.push(`- +${g.duplicateClustersTotal - g.duplicateClusters.length} more duplicate cluster(s) not shown`);
+  }
   for (const item of g.staleInProgress) {
     lines.push(`- stale in-progress ${item.id}: ${item.ageHours}h since last activity`);
     if (item.remediation) lines.push(`  - ${item.remediation}`);
+  }
+  if (g.staleInProgressTotal > g.staleInProgress.length) {
+    lines.push(`- +${g.staleInProgressTotal - g.staleInProgress.length} more stale in-progress item(s) not shown`);
   }
   for (const finding of g.storageFindings) {
     const idPart = finding.id ? ` ${finding.id}` : "";
     lines.push(`- storage ${finding.kind}${idPart}: ${finding.detail} (${finding.path})`);
     if (finding.remediation) lines.push(`  - ${finding.remediation}`);
   }
+  if (g.storageFindingsTotal > g.storageFindings.length) {
+    lines.push(`- +${g.storageFindingsTotal - g.storageFindings.length} more storage finding(s) not shown`);
+  }
   for (const finding of g.secretFindings) {
     // ⚠ Never print the secret value — only the item id, field, and detector rule.
     lines.push(`- ⚠ secret in ${finding.itemId} field \`${finding.field}\` (detector: ${finding.rule}) — remove before publishing`);
     if (finding.remediation) lines.push(`  - ${finding.remediation}`);
+  }
+  if (g.secretFindingsTotal > g.secretFindings.length) {
+    lines.push(`- +${g.secretFindingsTotal - g.secretFindings.length} more secret finding(s) not shown`);
   }
   return lines;
 }
