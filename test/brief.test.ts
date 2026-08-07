@@ -28,6 +28,7 @@ import extension, {
   countMalformedLines,
   scanHistoryJsonl,
   pmRootRelFromCtx,
+  detectDefaultBase,
   mergeBase,
   readBlob,
   listChangedPaths,
@@ -2497,6 +2498,8 @@ describe("brief governance end-to-end", () => {
       pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-a", "--json"]);
       pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-b", "--json"]);
       pm(["--pm-path", pmPath, "create", "--title", "Fix flaky auth test", "--type", "Task", "--author", "agent-c", "--json"]);
+      pm(["--pm-path", pmPath, "create", "--title", "Document release gate", "--type", "Task", "--author", "agent-a", "--json"]);
+      pm(["--pm-path", pmPath, "create", "--title", "Document release gate", "--type", "Task", "--author", "agent-b", "--json"]);
 
       // Seed a stale in-progress item: create, set to in_progress, then backdate it.
       const staleJson = pm(["--pm-path", pmPath, "create", "--title", "Old in-progress work", "--type", "Task", "--author", "agent-a", "--json"]);
@@ -3082,6 +3085,158 @@ describe("brief output format contract", () => {
       "--format json must win over a false --json global",
     );
   });
+});
+
+describe("registered command acceptance matrix", () => {
+  test("all command families render supported formats and persist requested outputs", async () => {
+    const { commands } = await activateBrief();
+    const outputDir = await mkdtemp(join(tmpdir(), "pm-brief-command-matrix-"));
+    const run = async (
+      command: string,
+      options: Record<string, unknown> = {},
+      args: string[] = [],
+      global: { json?: boolean } = {},
+    ): Promise<{ pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string }> =>
+      (await runRegisteredCommandForTest(commands, {
+        command,
+        args,
+        options,
+        global,
+        pmRoot: ".agents/pm",
+      })).result as { pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string };
+
+    try {
+      const brief = await run("brief", { "no-governance": true, format: "slack", "include-history": true });
+      assert.equal(brief.pmBriefRendered, true);
+      assert.match(brief.output ?? "", /^\*pm brief\*/);
+
+      const promptPath = join(outputDir, "HANDOFF.md");
+      const prompt = await run("brief prompt", { "no-governance": true, output: promptPath });
+      assert.deepEqual({ ok: prompt.ok, format: prompt.format, output: prompt.output }, { ok: true, format: "prompt", output: promptPath });
+      assert.match(await readFile(promptPath, "utf8"), /Working rules:/);
+
+      const next = await run("brief next", { explain: true, confidence: true }, [], { json: true });
+      assert.equal(next.pmBriefRendered, true);
+      assert.ok(Array.isArray((JSON.parse(next.output ?? "{}") as { next?: unknown }).next));
+
+      const stale = await run("brief stale", { days: 0, format: "json" });
+      assert.ok(Array.isArray((JSON.parse(stale.output ?? "{}") as { stale?: unknown }).stale));
+
+      const momentum = await run("brief momentum", { days: 3650, format: "json" });
+      assert.equal(typeof (JSON.parse(momentum.output ?? "{}") as { momentum?: { closedCount?: unknown } }).momentum?.closedCount, "number");
+
+      const deltaPath = join(outputDir, "delta.md");
+      const since = await run("brief since", { output: deltaPath, format: "markdown", limit: 5000 }, ["3650d"]);
+      assert.equal(since.ok, true);
+      assert.match(await readFile(deltaPath, "utf8"), /^# Delta since /);
+
+      const divergence = await run("brief diverge", { base: "HEAD", head: "HEAD", format: "json", "include-clean": true });
+      assert.equal(typeof (JSON.parse(divergence.output ?? "{}") as { verdict?: unknown }).verdict, "string");
+
+      const duplicates = await run("brief duplicates", { format: "markdown", limit: 2, since: "2026-01-01" });
+      assert.match(duplicates.output ?? "", /^# pm brief duplicates/m);
+
+      const governancePath = join(outputDir, "governance.md");
+      const governance = await run("brief governance", { format: "markdown", output: governancePath, threshold: 1, "stale-hours": 0 });
+      assert.equal(governance.ok, true);
+      assert.match(await readFile(governancePath, "utf8"), /^# pm brief governance/m);
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+
+  test("text command paths expose human-readable ranking, staleness, momentum, and typed focus", async () => {
+    const { commands } = await activateBrief();
+    const run = async (
+      command: string,
+      options: Record<string, unknown> = {},
+    ): Promise<string> => {
+      const result = (await runRegisteredCommandForTest(commands, {
+        command,
+        options,
+        global: { json: false },
+        pmRoot: ".agents/pm",
+      })).result as { output?: string };
+      return String(result.output);
+    };
+
+    const next = await run("brief next", { explain: true, "dependency-order": true, count: 2 });
+    assert.match(next, /^1\. pm-/);
+    assert.match(next, /\[score -?\d/);
+    assert.match(next, /confidence \d/);
+    const conciseNext = await run("brief next", { confidence: true, "dependency-order": true, count: 2 });
+    assert.match(conciseNext, /^pm-.* \| score -?\d+ \| confidence \d+/);
+
+    const stale = await run("brief stale", { days: 0 });
+    assert.match(stale, /pm-brief-gtiy: .* - \d+ day\(s\) stale/);
+
+    const momentum = await run("brief momentum", { days: 3650 });
+    assert.match(momentum, /^Closed \d+ item\(s\)/);
+    assert.match(momentum, /Throughput:/);
+
+    const typeFocused = JSON.parse(await run("brief", {
+      focus: "type:Issue",
+      format: "json",
+      "no-governance": true,
+      "dependency-order": true,
+    })) as { focus: Array<{ type: string }> };
+    assert.ok(typeFocused.focus.length > 0);
+    assert.ok(typeFocused.focus.every((item) => item.type === "Issue"));
+
+    const idFocused = JSON.parse(await run("brief", {
+      focus: "pm-brief-gtiy",
+      format: "json",
+      "no-governance": true,
+      "dependency-order": true,
+    })) as { focus: Array<{ id: string }> };
+    assert.ok(idFocused.focus.some((item) => item.id === "pm-brief-gtiy"));
+  });
+
+  test("registered commands reject invalid positive and non-negative integer flags", async () => {
+    const { commands } = await activateBrief();
+    await assert.rejects(
+      runRegisteredCommandForTest(commands, {
+        command: "brief next",
+        options: { count: 0 },
+        pmRoot: ".agents/pm",
+      }),
+      /--count must be a positive integer/,
+    );
+    await assert.rejects(
+      runRegisteredCommandForTest(commands, {
+        command: "brief stale",
+        options: { days: -1 },
+        pmRoot: ".agents/pm",
+      }),
+      /--days must be zero or a positive integer/,
+    );
+  });
+});
+
+test("detectDefaultBase follows origin HEAD and falls back to local main", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-default-base-"));
+  try {
+    const git = (args: string[]): string => {
+      const result = spawnSync("git", args, { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    git(["init", "--initial-branch=main"]);
+    git(["config", "user.email", "test@example.invalid"]);
+    git(["config", "user.name", "pm-brief test"]);
+    await writeFile(join(tmpDir, "README.md"), "fixture\n");
+    git(["add", "README.md"]);
+    git(["commit", "-m", "fixture"]);
+    assert.equal(detectDefaultBase(tmpDir), "main");
+
+    git(["branch", "trunk"]);
+    git(["remote", "add", "origin", tmpDir]);
+    git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]);
+    git(["update-ref", "refs/remotes/origin/trunk", "trunk"]);
+    assert.equal(detectDefaultBase(tmpDir), "trunk");
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
