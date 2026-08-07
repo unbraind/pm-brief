@@ -682,6 +682,31 @@ test("explainNextItems deduplicates repeated relationship signals", () => {
   assert.equal(work.score.dependencies, -20);
 });
 
+test("next-work defaults and filters preserve only matching open work", () => {
+  const candidates: PmItem[] = [
+    { id: "pm-current", title: "Current unprioritized work", type: "Task", status: "open", assignee: "agent-a" },
+    { id: "pm-stale", title: "Stale unprioritized work", type: "Task", status: "blocked", assignee: "agent-a", updated_at: "2026-01-01T00:00:00Z" },
+    { id: "pm-other", title: "Other assignee", type: "Task", status: "open", assignee: "agent-b" },
+    { id: "pm-closed", title: "Closed work", type: "Task", status: "closed", assignee: "agent-a" },
+  ];
+
+  const defaults = selectNextItems(candidates);
+  assert.equal(defaults.length, 3);
+  assert.ok(defaults.every((item) => item.id !== "pm-closed"));
+
+  const filtered = selectNextItems(candidates, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    assignee: "agent-a",
+    statuses: ["blocked"],
+  });
+  assert.deepEqual(filtered.map((item) => item.id), ["pm-stale"]);
+  assert.equal(filtered[0]?.whyNow, "updated 156 day(s) ago");
+
+  const current = selectNextItems([candidates[0]!], { generatedAt: "2026-06-06T00:00:00Z" });
+  assert.equal(current[0]?.whyNow, "active open work");
+  assert.equal(explainNextItems(candidates, { assignee: "missing" }).length, 0);
+});
+
 test("detectStaleContext reports stale open work only", () => {
   const stale = detectStaleContext(items, { generatedAt: "2026-06-06T00:00:00Z", staleDays: 7 });
   assert.deepEqual(stale.map((item) => item.itemId), ["pm-c", "pm-b"]);
@@ -741,6 +766,22 @@ test("buildBrief explains empty workspaces and filters that narrow a non-empty r
   assert.ok(narrowed.next.length > 0);
   assert.ok(narrowed.next.length < 4);
   assert.ok(narrowed.insights?.some((insight) => insight.message.includes("filters narrowed next-work candidates")));
+});
+
+test("focus selection deduplicates mixed selectors and summarizes omitted requests", () => {
+  const focused = buildBrief(items, {
+    generatedAt: "2026-06-06T00:00:00Z",
+    focusIds: ["pm-a", "pm-a", "pm-missing-a", "pm-missing-b", "pm-missing-c", "pm-missing-d", "pm-d"],
+    focusTypes: ["task", "TASK"],
+    includeClosed: true,
+    assignee: "nobody",
+    statuses: ["blocked"],
+  });
+  assert.equal(new Set(focused.focus.map((item) => item.id)).size, focused.focus.length);
+  assert.ok(focused.focus.some((item) => item.id === "pm-d"));
+  assert.ok(focused.insights?.some((insight) => insight.message.includes("pm-missing-a, pm-missing-b, pm-missing-c (+1 more)")));
+  assert.ok(focused.insights?.some((insight) => insight.message.includes("assignee=nobody, status=blocked")));
+  assert.ok(!focused.insights?.some((insight) => insight.message.includes("closed focus item(s) were omitted")));
 });
 
 test("buildBrief does not emit executable guidance for an unsafe focus id", () => {
@@ -1499,6 +1540,74 @@ describe("brief since / buildDelta", () => {
       const change = buildDelta(entries, itemsById(items), { since: "2026-07-20" }).items[0];
       assert.equal(change.statusTransition?.to, "in_progress");
     });
+  });
+
+  test("delta renderers preserve every lifecycle and sparse removed-item fallback", () => {
+    const entries: DeltaActivityEntry[] = [
+      actEntry("pm-canceled", "cancel", "2026-07-20T01:00:00Z"),
+      actEntry("pm-reopened", "close", "2026-07-20T01:00:00Z"),
+      actEntry("pm-reopened", "reopen", "2026-07-20T02:00:00Z"),
+      actEntry("pm-unblocked", "update", "2026-07-20T01:00:00Z", [{ op: "replace", path: "/metadata/status", value: "blocked" }]),
+      actEntry("pm-unblocked", "update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/status", value: "in_progress" }]),
+      actEntry("pm-priority", "update", "2026-07-20T02:00:00Z", [{ op: "replace", path: "/metadata/priority", value: 2 }]),
+      actEntry("pm-assignee", "update", "2026-07-20T02:00:00Z", [{ op: "add", path: "/metadata/assignee", value: "agent-a" }]),
+      actEntry("pm-dependency", "update", "2026-07-20T02:00:00Z", [{ op: "add", path: "/metadata/dependencies/0", value: { id: "pm-x" } }]),
+      actEntry("pm-comments", "comment_add", "2026-07-20T01:00:00Z"),
+      actEntry("pm-comments", "comment_add", "2026-07-20T02:00:00Z"),
+      actEntry("pm-removed", "create", "2026-07-20T02:00:00Z", [{ op: "add", path: "/metadata/title", value: "Removed after creation" }]),
+      actEntry("pm-unknown", "activity", "2026-07-20T02:00:00Z"),
+    ];
+    const current: PmItem[] = [
+      { id: "pm-canceled", title: "Canceled item", type: "Task", status: "canceled", priority: 1 },
+      { id: "pm-reopened", title: "Reopened item", type: "Task", status: "open", priority: 1 },
+      { id: "pm-unblocked", title: "Unblocked item", type: "Task", status: "in_progress", priority: 2 },
+      { id: "pm-priority", title: "Prioritized item", type: "Task", status: "open", priority: 2 },
+      { id: "pm-assignee", title: "Assigned item", type: "Task", status: "open", priority: 2 },
+      { id: "pm-dependency", title: "Dependency item", type: "Task", status: "open", priority: 2 },
+      { id: "pm-comments", title: "Discussed item", type: "Task", status: "open", priority: 2 },
+    ];
+    const summary = buildDelta(entries, itemsById(current), {
+      since: "2026-07-20",
+      maxItems: Number.POSITIVE_INFINITY,
+      tokenBudget: 100_000,
+    });
+    const changes = new Map(summary.items.map((change) => [change.id, change]));
+    assert.equal(changes.get("pm-canceled")?.canceled, true);
+    assert.equal(changes.get("pm-reopened")?.reopened, true);
+    assert.equal(changes.get("pm-unblocked")?.statusLabel, "unblocked");
+    assert.equal(changes.get("pm-priority")?.priorityChange?.from, undefined);
+    assert.equal(changes.get("pm-assignee")?.reassigned?.to, "agent-a");
+    assert.equal(changes.get("pm-dependency")?.depsAdded, 1);
+    assert.equal(changes.get("pm-comments")?.commentsAdded, 2);
+    assert.equal(changes.get("pm-removed")?.title, "Removed after creation");
+    assert.equal(changes.get("pm-removed")?.type, "Item");
+    assert.equal(changes.get("pm-unknown")?.title, "(unknown/removed)");
+
+    const markdown = renderMarkdownDelta(summary);
+    assert.match(markdown, /## Canceled/);
+    assert.match(markdown, /## Reopened/);
+    assert.match(markdown, /## Reprioritized/);
+    assert.match(markdown, /## Dependencies/);
+    assert.match(markdown, /assigned → agent-a/);
+    assert.match(markdown, /2 comments/);
+    assert.doesNotMatch(markdown, /until| by /);
+
+    const text = renderTextDelta(summary);
+    assert.match(text, /^Delta since 2026-07-20 \(\.agents\/pm, pm unknown\)/);
+    assert.match(text, /pm-priority: Prioritized item — priority → 2/);
+    const slack = renderSlackDelta(summary);
+    assert.match(slack, /^\*Delta since 2026-07-20\*/);
+    assert.match(slack, /\*Canceled\*/);
+
+    const truncated = buildDelta(entries, itemsById(current), {
+      since: "2026-07-20",
+      maxItems: 2,
+      tokenBudget: 100_000,
+    });
+    assert.equal(truncated.truncated, true);
+    assert.match(renderMarkdownDelta(truncated), /_truncated: 7 lower-ranked item\(s\) omitted/);
+    assert.match(renderTextDelta(truncated), /\(truncated, 7 omitted\)/);
+    assert.match(renderSlackDelta(truncated), /_\(7 omitted\)_/);
   });
 });
 
@@ -2454,6 +2563,13 @@ describe("brief duplicates", () => {
     assert.equal(duplicateRemediationCommand(undated, dated), "pm update pm-a --dep id=pm-z,kind=related");
   });
 
+  test("remediation without creation timestamps uses stable id ordering", () => {
+    const higher: DuplicatePairItem = { id: "pm-z", title: "Higher id", status: "open", type: "Task" };
+    const lower: DuplicatePairItem = { id: "pm-a", title: "Lower id", status: "open", type: "Task" };
+    assert.equal(duplicateRemediationCommand(higher, lower), "pm update pm-z --dep id=pm-a,kind=related");
+    assert.equal(duplicateRemediationCommand(lower, higher), "pm update pm-z --dep id=pm-a,kind=related");
+  });
+
   test("--limit truncates the ranked pair list", () => {
     const items: PmItem[] = [
       dupItem("pm-a", { title: "x" }),
@@ -2654,6 +2770,26 @@ describe("brief duplicates", () => {
     // rather than producing a pair with fabricated title/status/type.
     const matches = new Map<string, SimilarItemMatch[]>([["pm-a", [match("pm-ghost", 0.95, "exact_title")]]]);
     assert.deepEqual(collapseDuplicatePairs(items, matches, itemsById), []);
+  });
+
+  test("collapseDuplicatePairs ignores an SDK self-match without hiding valid peers", () => {
+    const items: PmItem[] = [dupItem("pm-a"), dupItem("pm-b")];
+    const itemsById = new Map(items.map((item) => [item.id, item]));
+    const matches = new Map<string, SimilarItemMatch[]>([
+      ["pm-a", [match("pm-a", 1, "exact_title"), match("pm-b", 0.8, "exact_title")]],
+    ]);
+    assert.deepEqual(collapseDuplicatePairs(items, matches, itemsById).map((pair) => pair.id), ["pm-a|pm-b"]);
+  });
+
+  test("buildDuplicateSweep applies documented defaults", () => {
+    const items: PmItem[] = [dupItem("pm-a"), dupItem("pm-b")];
+    const summary = buildDuplicateSweep(items, new Map([
+      ["pm-a", [match("pm-b", 0.8, "exact_title")]],
+    ]));
+    assert.equal(summary.threshold, 0.6);
+    assert.equal(summary.count, 1);
+    assert.equal(summary.truncated, false);
+    assert.match(summary.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
   });
 
   test("buildDuplicateSweep uses a caller-supplied candidate list without re-filtering", () => {
@@ -2912,6 +3048,25 @@ describe("brief governance", () => {
     assert.match(text, /Duplicate clusters/);
     assert.match(text, /\(\+4 more\)/);
     assert.match(text, /pm update pm-b --dep id=pm-a,kind=related/);
+  });
+
+  test("renderTextGovernance preserves complete findings without false rollups", () => {
+    const summary = govSummary({
+      staleInProgress: [{ id: "pm-stale", lastActivityAt: "2026-07-20T00:00:00Z", ageHours: 200, remediation: "pm update pm-stale --status open" }],
+      staleInProgressTotal: 1,
+      storageFindings: [{ kind: "history_conflict_marker", id: "pm-storage", path: "history/pm-storage.jsonl", detail: "conflict", remediation: "pm history-repair pm-storage" }],
+      storageFindingsTotal: 1,
+      secretFindings: [{ itemId: "pm-secret", field: "description", rule: "github_token", remediation: "pm update pm-secret --description redacted" }],
+      secretFindingsTotal: 1,
+    });
+    const text = renderTextGovernance(summary);
+    assert.match(text, /Stale in-progress \(72h threshold\):/);
+    assert.match(text, /pm update pm-stale --status open/);
+    assert.match(text, /history_conflict_marker pm-storage: conflict/);
+    assert.match(text, /pm history-repair pm-storage/);
+    assert.match(text, /Secrets in item text:/);
+    assert.match(text, /pm update pm-secret --description redacted/);
+    assert.doesNotMatch(text, /\(\+\d+ more\)/);
   });
 
   test("renderTextGovernance renders no-findings case cleanly", () => {
