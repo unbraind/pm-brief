@@ -79,6 +79,7 @@ import extension, {
   type GovernanceDuplicateCluster,
   type MergeDecisionsSummary,
   type MergeDecisionEntry,
+  type AgentBrief,
 } from "../index.ts";
 
 /**
@@ -781,6 +782,76 @@ test("renderMarkdownBrief includes brief insights section when available", () =>
   assert.match(markdown, /## Brief Insights/);
   assert.match(markdown, /requested focus id\(s\) were not found/);
   assert.match(markdown, /suggestion: `pm get pm-missing`/);
+});
+
+test("brief renderers explain an empty workspace without inventing context", () => {
+  const brief = buildBrief([], { generatedAt: "2026-06-06T00:00:00Z" });
+  const markdown = renderMarkdownBrief(brief);
+  assert.match(markdown, /_No open work matched the filters\._/);
+  assert.match(markdown, /_No focus items\._/);
+  assert.match(markdown, /_No visible blockers\._/);
+  assert.match(markdown, /_No risks detected from visible pm metadata\._/);
+  assert.match(markdown, /_No stale open items detected\._/);
+  assert.match(markdown, /_No update suggestions\._/);
+
+  const slack = renderSlackBrief(brief);
+  assert.match(slack, /\*Next Work\*\n_No open work matched the filters\._/);
+  assert.match(slack, /\*Focus\*\n_No focus items\._/);
+  assert.match(slack, /\*Blockers\*\n_No visible blockers\._/);
+
+  const prompt = renderAgentPrompt(brief);
+  assert.match(prompt, /Next work:\n- No open work matched the filters\./);
+  assert.match(prompt, /Focus context:\n- No explicit focus item\./);
+  assert.match(prompt, /Blockers and risks:\n- No visible blockers or metadata risks\./);
+  assert.match(prompt, /Suggested pm commands:\n- No suggested pm updates\./);
+});
+
+test("brief renderers preserve sparse optional metadata without placeholder text", () => {
+  const brief: AgentBrief = buildBrief([
+    { id: "pm-next", title: "Sparse next item", type: "Task", status: "open", priority: 1 },
+  ], { generatedAt: "2026-06-06T00:00:00Z", focusIds: ["pm-next"] });
+  brief.budget.truncated = true;
+  brief.insights = [{ level: "info", message: "Sparse insight" }];
+  brief.blockers = [{ itemId: "pm-next", blockedBy: "external-approval", kind: "blocked_by" }];
+  brief.momentum = {
+    windowDays: 7,
+    closedCount: 1,
+    byType: {},
+    throughputPerDay: 0.14,
+    recent: [{ id: "pm-closed", title: "Sparse close", type: "Task", closedAt: "2026-06-05T00:00:00Z" }],
+  };
+  brief.recentActivity = [
+    { timestamp: "2026-06-05T12:00:00Z", operation: "refresh" },
+    {
+      timestamp: "2026-06-05T13:00:00Z",
+      operation: "update",
+      author: "agent-a",
+      itemId: "pm-next",
+      message: "Changed\nmetadata",
+    },
+  ];
+
+  const markdown = renderMarkdownBrief(brief);
+  assert.match(markdown, /- info: Sparse insight\n/);
+  assert.match(markdown, /- pm-next blocked_by external-approval\n/);
+  assert.match(markdown, /Closed 1 item\(s\).*day\(s\)\n/);
+  assert.match(markdown, /- 2026-06-05T12:00:00Z refresh\n/);
+  assert.match(markdown, /- 2026-06-05T13:00:00Z by agent-a update pm-next - Changed metadata\n/);
+  assert.doesNotMatch(markdown, /undefined/);
+
+  const slack = renderSlackBrief(brief);
+  assert.match(slack, /budget \d+ ≈ \d+, trimmed/);
+  assert.match(slack, /• info: Sparse insight\n/);
+  assert.match(slack, /• `pm-next` blocked_by `external-approval`\n/);
+  assert.match(slack, /• 2026-06-05T12:00:00Z refresh\n/);
+  assert.match(slack, /• 2026-06-05T13:00:00Z by agent-a update `pm-next` — Changed metadata\n/);
+  assert.doesNotMatch(slack, /undefined/);
+
+  const prompt = renderAgentPrompt(brief);
+  assert.match(prompt, /blocker: pm-next blocked_by external-approval\n/);
+  assert.match(prompt, /- 2026-06-05T12:00:00Z refresh\n/);
+  assert.match(prompt, /- 2026-06-05T13:00:00Z by agent-a update pm-next - Changed metadata\n/);
+  assert.doesNotMatch(prompt, /undefined/);
 });
 
 test("renderAgentPrompt emits copy-pasteable next-turn instructions", () => {
@@ -2741,6 +2812,13 @@ describe("brief governance", () => {
       duplicateClustersTotal: 1,
       staleInProgress: [{ id: "pm-a", lastActivityAt: "2026-07-20T00:00:00Z", ageHours: 100, remediation: "pm update pm-a --status open" }],
       staleInProgressTotal: 1,
+      storageFindings: [{
+        kind: "unparseable_config",
+        path: ".agents/pm/settings.json",
+        detail: "invalid settings",
+        remediation: "pm config project set <key> <value>",
+      }],
+      storageFindingsTotal: 1,
     });
     const brief = buildBrief(items, { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
     const slack = renderSlackBrief(brief);
@@ -2749,6 +2827,65 @@ describe("brief governance", () => {
     assert.doesNotMatch(slack, /\*\*pm-a\*\*/);
     assert.match(slack, /Stale in-progress/);
     assert.match(slack, /pm-a.*100h/);
+    assert.match(slack, /_Storage integrity_\n/);
+    assert.doesNotMatch(slack, /Storage integrity \(\+/);
+    const markdown = renderMarkdownBrief(brief);
+    assert.match(markdown, /### Stale in-progress \(72h threshold\)\n/);
+    assert.doesNotMatch(markdown, /Stale in-progress.*\(\+/);
+  });
+
+  test("governance renderers disclose capped sparse findings without fabricating ids or remediation", () => {
+    const governance = govSummary({
+      duplicateClusters: [{
+        clusterId: "pm-duplicate",
+        items: [{ id: "pm-a", title: "Duplicate\nitem", status: "open", type: "Task" }],
+        maxScore: 0.9,
+        reason: "title_token_jaccard",
+        remediation: "",
+      }],
+      duplicateClustersTotal: 3,
+      staleInProgress: [{
+        id: "pm-stale",
+        lastActivityAt: "2026-07-20T00:00:00Z",
+        ageHours: 200,
+        remediation: "",
+      }],
+      staleInProgressTotal: 2,
+      storageFindings: [{
+        kind: "unparseable_config",
+        path: ".agents/pm/settings.json",
+        detail: "invalid settings",
+        remediation: "",
+      }],
+      storageFindingsTotal: 2,
+      secretFindings: [{ itemId: "pm-secret", field: "description", rule: "github_token", remediation: "" }],
+      secretFindingsTotal: 2,
+    });
+    const brief = buildBrief([
+      { id: "pm-a", title: "Duplicate item", type: "Task", status: "open" },
+    ], { governance, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
+
+    const markdown = renderMarkdownBrief(brief);
+    assert.match(markdown, /Duplicate clusters.*\(\+2 more\)/);
+    assert.match(markdown, /Stale in-progress.*\(\+1 more\)/);
+    assert.match(markdown, /Storage integrity \(\+1 more\)/);
+    assert.match(markdown, /Secrets in item text \(\+1 more\)/);
+    assert.match(markdown, /unparseable_config: invalid settings/);
+    assert.doesNotMatch(markdown, /unparseable_config `undefined`/);
+    assert.doesNotMatch(markdown, /  - → ``/);
+
+    const slack = renderSlackBrief(brief);
+    assert.match(slack, /Duplicate clusters.*\(\+2 more\)/);
+    assert.match(slack, /Stale in-progress.*\(\+1 more\)/);
+    assert.match(slack, /Storage integrity \(\+1 more\)/);
+    assert.match(slack, /Secrets in item text \(\+1 more\)/);
+    assert.match(slack, /• unparseable_config: invalid settings/);
+    assert.doesNotMatch(slack, /unparseable_config `undefined`/);
+    assert.doesNotMatch(slack, /  • → ``/);
+
+    const prompt = renderAgentPrompt(brief);
+    assert.match(prompt, /storage unparseable_config: invalid settings/);
+    assert.doesNotMatch(prompt, /storage unparseable_config undefined/);
   });
 
   test("renderTextGovernance renders a standalone summary with +N more rollup", () => {
