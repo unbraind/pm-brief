@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Adopt the canonical pm-ops docstring gate ([pm-brief-jmnb](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-jmnb.toon))
+
 ## 2026.8.7 - 2026-08-07
 
 ### Fixed

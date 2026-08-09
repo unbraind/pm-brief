@@ -35,12 +35,32 @@ const PM_CLI_ENTRY = fileURLToPath(new URL("./dist/cli.js", import.meta.resolve(
 const PM_PATH_OPTION = "--pm-path";
 const SAFE_PM_ID = /^[a-zA-Z0-9._-]+$/;
 
+/**
+ * Process exit codes pm-brief uses, named so a thrown {@link CommandError} can
+ * distinguish a usage mistake from any other failure instead of collapsing both
+ * to a generic 1.
+ *
+ * `USAGE` is 2 to match Node's own convention for an argument-parsing failure
+ * (the value `process` exits with when it rejects an unknown flag), keeping the
+ * CLI's exit semantics consistent for shell scripts that special-case 2.
+ */
 export const EXIT_CODE = {
   GENERIC_FAILURE: 1,
   USAGE: 2,
 } as const;
 
+/**
+ * Error carrying the process exit code its throw site intended, so a command can
+ * fail from deep inside its logic and let the single top-level handler translate
+ * the caught error into `process.exit(code)` instead of every call site exiting
+ * itself.
+ *
+ * Thrown for recoverable, user-facing failures (a bad flag, a missing git ref, a
+ * pm JSON payload that will not parse); programming errors propagate as ordinary
+ * exceptions.
+ */
 export class CommandError extends Error {
+  /** {@link EXIT_CODE} value the top-level handler passes to `process.exit`. */
   exitCode: number;
   constructor(message: string, exitCode: number = EXIT_CODE.GENERIC_FAILURE) {
     super(message);
@@ -49,6 +69,17 @@ export class CommandError extends Error {
   }
 }
 
+/**
+ * One row from the pm tracker as `pm list-all --json --include-body` returns it,
+ * typed loosely on purpose.
+ *
+ * The tracker is the source of truth for which fields exist, and different pm
+ * versions emit both a canonical name and a legacy alias for the same concept
+ * (`dependencies`/`deps`, `blockedBy`/`blocked_by`). This interface models that
+ * union with every field optional except `id`, and carries an index signature so
+ * a field the type does not name flows through unmolested rather than failing
+ * the parse; callers that need a specific field read it defensively.
+ */
 export interface PmItem {
   id: string;
   title?: string;
@@ -1425,7 +1456,16 @@ function toItemMetadata(item: PmItem): ItemMetadata {
   };
 }
 
-/** Options controlling the governance scan. */
+/**
+ * Knobs for the advisory duplicate, stale-in-progress, storage and secret scan.
+ *
+ * Every field is optional and falls back to the scanner default, so the brief
+ * can run the governance pass with no explicit tuning and still surface
+ * near-duplicate items, stale work, storage-integrity problems and
+ * credential-shaped secrets. The similarity cutoff and the stale window are the
+ * two values teams most often want to loosen or tighten for their own tracker
+ * volume, which is why they are the ones exposed.
+ */
 export interface GovernanceScanOptions {
   /** Similarity threshold on the 0..1 scale (default 0.6). */
   threshold?: number;
@@ -2544,6 +2584,22 @@ function estimateDeltaTokens(summary: DeltaSummary, format?: string): number {
   return estimateTokens(rendered);
 }
 
+/**
+ * Shrink `summary.items` in place until the rendered output fits `tokenBudget`.
+ *
+ * Keeps at most `maxItems` changes (floored at 1, since a cap of 0 would slice
+ * from the end of the array and report nothing), then drops the last item
+ * repeatedly until the estimated token count of the rendered summary is within
+ * budget — always retaining at least one item so an over-budget request still
+ * reports something. Mutates the summary's `items`, `truncated`, `omittedItems`
+ * and `budget` fields so the renderer downstream reads the same truncation the
+ * budget enforced.
+ *
+ * @param summary - Delta summary mutated in place to reflect the applied budget.
+ * @param maxItems - Hard cap on item count before token fitting; non-finite or <= 0 falls back to 40.
+ * @param tokenBudget - Upper bound on the estimated tokens of the rendered output.
+ * @param format - Output format passed to the token estimator so the probe matches the real render.
+ */
 function applyDeltaBudget(summary: DeltaSummary, maxItems: number, tokenBudget: number, format?: string): void {
   const full = summary.items;
   // Guard the exported API: maxItems <= 0 must not slice from the end.
@@ -2562,6 +2618,18 @@ function applyDeltaBudget(summary: DeltaSummary, maxItems: number, tokenBudget: 
   summary.budget = { requestedTokens: tokenBudget, estimatedTokens: probe(working) };
 }
 
+/**
+ * Render one item's change set as the human-readable summary line each renderer
+ * appends after the id and title.
+ *
+ * Joins only the transitions the change actually carries — created, closed (with
+ * its reason), canceled, reopened, status/priority moves, retitle, reassign,
+ * dependency and note/comment counts — so a quiet item still reads as its raw
+ * event count rather than an empty parenthetical.
+ *
+ * @param change - Per-item delta record summarised from the activity event log.
+ * @returns Semicolon-joined phrase such as `created; status open → in_progress`.
+ */
 function describeDeltaItem(change: DeltaItemChange): string {
   const parts: string[] = [];
   if (change.created) parts.push("created");
@@ -2591,6 +2659,19 @@ function describeDeltaItem(change: DeltaItemChange): string {
   return detail;
 }
 
+/**
+ * Build the exact `pm brief since ...` command a reader can paste to reproduce
+ * this delta, so a rendered report is self-refreshing rather than asking the
+ * reader to recall the window and format flags.
+ *
+ * Mirrors the flags the delta was built with: the `since` checkpoint is always
+ * present, `--until`/`--author` appear only when the summary carries them, and
+ * `--format` appears only when a non-default format was requested.
+ *
+ * @param summary - Delta whose window, author and format drive the command text.
+ * @param format - Output format to pin in the command, omitted when falsy.
+ * @returns Space-joined command string carrying the summary's filters.
+ */
 function deltaRefreshCommand(summary: DeltaSummary, format?: string): string {
   const parts = ["pm", "brief", "since", summary.since];
   if (summary.until) parts.push("--until", summary.until);
@@ -2652,6 +2733,19 @@ function groupDeltaSections(items: DeltaItemChange[]): Array<{ title: string; me
   return DELTA_SECTION_ORDER.filter((title) => groups.has(title)).map((title) => ({ title, members: groups.get(title)! }));
 }
 
+/**
+ * Render a delta summary as the Markdown the `brief since` command emits by
+ * default.
+ *
+ * Headers an empty change set as "No changes since <checkpoint>" so a quiet
+ * window still produces a complete document; otherwise it lays out a header, a
+ * one-line totals summary, the changes grouped by section, and a fenced refresh
+ * command. Truncation, when {@link applyDeltaBudget} dropped items, is called
+ * out inline so the reader knows the list is not exhaustive.
+ *
+ * @param summary - Delta to render; read only, never mutated.
+ * @returns Markdown text terminated with a trailing newline.
+ */
 export function renderMarkdownDelta(summary: DeltaSummary): string {
   if (summary.items.length === 0) {
     const header = `# Delta since ${summary.since}${summary.until ? ` until ${summary.until}` : ""}${summary.author ? ` by ${summary.author}` : ""}`;
@@ -2692,6 +2786,17 @@ export function renderMarkdownDelta(summary: DeltaSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Render a delta summary as plain text for terminals and pipes, mirroring
+ * {@link renderMarkdownDelta} field-for-field without the Markdown markup.
+ *
+ * Omits the per-section grouping and the generated-at/workspace meta the
+ * Markdown and Slack renderers carry, keeping the text form scannable in a
+ * narrow terminal; a quiet window reports a single "No changes" line.
+ *
+ * @param summary - Delta to render; read only.
+ * @returns Plain-text lines terminated with a trailing newline.
+ */
 export function renderTextDelta(summary: DeltaSummary): string {
   if (summary.items.length === 0) {
     return `No changes since ${summary.since}.\n`;
@@ -2710,6 +2815,17 @@ export function renderTextDelta(summary: DeltaSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Render a delta summary using Slack's mrkdwn conventions (`*bold*`, `_italic_`,
+ * backtick code) so the output pastes cleanly into a Slack message.
+ *
+ * Structurally the Markdown renderer in Slack dress: header, meta line, totals
+ * summary, section-grouped item list, and a backticked refresh command, with
+ * truncation noted inline when {@link applyDeltaBudget} shed items.
+ *
+ * @param summary - Delta to render; read only.
+ * @returns Slack-markdown text terminated with a trailing newline.
+ */
 export function renderSlackDelta(summary: DeltaSummary): string {
   if (summary.items.length === 0) {
     return `No changes since ${summary.since}.\n`;
@@ -2740,6 +2856,15 @@ export function renderSlackDelta(summary: DeltaSummary): string {
 /** Fields that change on every write and must never, on their own, cause a collision. */
 export const BENIGN_FIELDS = new Set(["/metadata/updated_at", "/metadata/updated", "/updated_at"]);
 
+/**
+ * One append-only history entry read from a pm item's `history/<id>.jsonl`,
+ * as the three-way divergence scan walks it.
+ *
+ * The fields mirror the JSONL row directly, including the snake_case hashes,
+ * because this is a parsed-not-normalised view: the divergence classifier
+ * compares event identity and field paths across the base and head sides, so the
+ * raw shape is kept rather than re-cased.
+ */
 export interface DivergeEvent {
   ts: string;
   author?: string;
@@ -2764,6 +2889,15 @@ export type DivergeKind =
   | "field-collision"
   | "union-safe";
 
+/**
+ * One item's three-way divergence verdict, the unit the divergence report lists.
+ *
+ * Carries the classified kind and a coarse severity for ordering, the specific
+ * field paths that collide (empty for one-sided or safe kinds), and a base/head
+ * pair summarising each side's new events, authors and timestamp span. Built
+ * one-per-item by {@link classifyItemDivergence} and aggregated by
+ * {@link buildDivergence}.
+ */
 export interface DivergeItem {
   id: string;
   kind: DivergeKind;
@@ -3067,6 +3201,19 @@ export function normalizeFieldPath(path: string): string {
 
 // ---- per-item classification -------------------------------------------------
 
+/**
+ * Decide how a single pm item diverged between a base and a head branch.
+ *
+ * Compares each side's events against their shared ancestor, ignores the
+ * timestamp churn that changes on every write, and classifies the result:
+ * unchanged, one-sided (head-only/base-only), a safe union of disjoint fields,
+ * or a real collision (duplicate id, delete-vs-edit, overlapping field writes).
+ * The returned record carries the kind, severity and the specific colliding
+ * field paths so the report can name them.
+ *
+ * @param input - Item id plus the ancestor, base and head event sides to compare.
+ * @returns The divergence classification for this one item.
+ */
 export function classifyItemDivergence(input: {
   id: string;
   ancestor: DivergeItemSide;
@@ -3202,6 +3349,20 @@ export function fenceProbePaths(pmRootRel: string, observedItemPath?: string): {
   };
 }
 
+/**
+ * Report whether the pm field-aware merge driver is fully wired in this clone.
+ *
+ * The divergence report treats "union-safe" items as mergeable only because the
+ * custom merge driver can union disjoint field writes; if the `.gitattributes`
+ * attributes or the `git config` drivers are missing, even union-safe items will
+ * hard-conflict. This checks both halves — the attribute lines that route
+ * `.toon`/history files to the drivers, and the driver commands themselves —
+ * and returns the missing-piece list so the renderer can tell the reader exactly
+ * what to install.
+ *
+ * @param input - Resolved `git check-attr` and `git config` values for the item and history merge drivers.
+ * @returns Whether the fence is installed and, if not, what is missing.
+ */
 export function evaluateFence(input: {
   /** Resolved `merge` attribute for an item `.toon` path, from `git check-attr`. */
   itemToonAttr?: string;
@@ -3235,6 +3396,20 @@ const DIVERGE_SEVERITY_RANK: Record<DivergeKind, number> = {
   unchanged: 6,
 };
 
+/**
+ * Fold a list of per-item divergence classifications into one reportable
+ * summary.
+ *
+ * Stamps the summary with the base/head refs and SHAs, the workspace and pm
+ * version, counts each divergence kind into a totals block, orders the items by
+ * severity (duplicate-id first, unchanged last), and applies the item/token
+ * budget through {@link applyDivergenceBudget} so the returned summary is
+ * already trimmed to what a renderer should emit.
+ *
+ * @param items - Pre-classified divergences, one per changed item.
+ * @param options - Refs, SHAs, fence status and budget/format knobs for the summary.
+ * @returns The divergence summary the format renderers consume.
+ */
 export function buildDivergence(
   items: DivergeItem[],
   options: {
@@ -3340,6 +3515,18 @@ function dedupeStrings(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+/**
+ * Estimate the token cost of rendering a divergence summary in a given format.
+ *
+ * Renders the summary with the matching renderer (or raw JSON for `json`) and
+ * runs it through {@link estimateTokens}, so the budget fitter probes the exact
+ * bytes a real render would emit rather than an approximation that could let an
+ * over-budget report slip through.
+ *
+ * @param summary - Divergence summary to render and measure.
+ * @param format - Output format selecting the renderer; defaults to Markdown.
+ * @returns Estimated token count of the rendered output.
+ */
 function estimateDivergenceTokens(summary: DivergenceSummary, format?: string): number {
   const rendered =
     format === "json" ? `${JSON.stringify(summary, null, 2)}\n`
@@ -3349,6 +3536,21 @@ function estimateDivergenceTokens(summary: DivergenceSummary, format?: string): 
   return estimateTokens(rendered);
 }
 
+/**
+ * Trim `summary.items` in place so the rendered report fits the token budget.
+ *
+ * Caps the item list at `maxItems`, then, if the rendered form still exceeds
+ * `tokenBudget`, binary-searches for the longest prefix that fits — converging
+ * in ~log2(n) probes instead of one full re-render per dropped item. Items are
+ * pre-ordered most-decision-relevant first, so a prefix is the correct slice to
+ * keep, and at least one item is always retained. Mutates the summary's `items`,
+ * `truncated`, `omittedItems` and `budget` fields to reflect what was kept.
+ *
+ * @param summary - Divergence summary mutated in place to reflect the applied budget.
+ * @param maxItems - Hard cap on item count before token fitting.
+ * @param tokenBudget - Upper bound on the estimated tokens of the rendered output.
+ * @param format - Output format forwarded to {@link estimateDivergenceTokens} so the probe matches the real render.
+ */
 function applyDivergenceBudget(summary: DivergenceSummary, maxItems: number, tokenBudget: number, format?: string): void {
   const full = summary.items;
   const capped = full.slice(0, maxItems);
@@ -3390,6 +3592,17 @@ const DIVERGE_KIND_LABELS: Record<DivergeKind, string> = {
   unchanged: "Unchanged",
 };
 
+/**
+ * Format one divergence item as the single text line the Markdown and text
+ * renderers list under each section.
+ *
+ * Joins the labelled kind, the colliding field paths (when any), and the
+ * base/head event counts and authors, so a reader can gauge the collision at a
+ * glance without expanding the structured record.
+ *
+ * @param item - One classified divergence.
+ * @returns Hyphen-joined line such as `pm-brief-1: Field Collision (medium) — fields: /title — base(2 ev, alice) head(1 ev, bob)`.
+ */
 function divergeItemLine(item: DivergeItem): string {
   const parts = [`${item.id}: ${DIVERGE_KIND_LABELS[item.kind]}`];
   if (item.collidingFields.length > 0) parts.push(`fields: ${item.collidingFields.join(", ")}`);
@@ -3397,6 +3610,19 @@ function divergeItemLine(item: DivergeItem): string {
   return parts.join(" — ");
 }
 
+/**
+ * Render a divergence summary as the Markdown the `brief diverge` command emits
+ * by default.
+ *
+ * A clean divergence (no changed items) still surfaces pending merge decisions,
+ * because that is precisely when a discarded peer value matters most; otherwise
+ * it lays out the verdict, totals, the merge-driver fence warning when the fence
+ * is not installed, the items grouped by kind in severity order, and the
+ * recommended next-step commands.
+ *
+ * @param summary - Divergence to render; read only, never mutated.
+ * @returns Markdown text terminated with a trailing newline.
+ */
 export function renderMarkdownDivergence(summary: DivergenceSummary): string {
  const header = `# Divergence: ${summary.base} ← ${summary.head}`;
   if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
@@ -3453,6 +3679,17 @@ export function renderMarkdownDivergence(summary: DivergenceSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Render a divergence summary as plain text for terminals and pipes, mirroring
+ * {@link renderMarkdownDivergence} field-for-field without the Markdown markup.
+ *
+ * Uses ASCII arrows and a flat item list (no section headings) so the output
+ * stays scannable in a narrow terminal, and surfaces the same merge-driver fence
+ * warning and pending-decision list the Markdown renderer does.
+ *
+ * @param summary - Divergence to render; read only.
+ * @returns Plain-text lines terminated with a trailing newline.
+ */
 export function renderTextDivergence(summary: DivergenceSummary): string {
   if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
     const clean = `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
@@ -3493,6 +3730,18 @@ export function renderTextDivergence(summary: DivergenceSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Render a divergence summary using Slack's mrkdwn conventions (`*bold*`,
+ * `_italic_`, backtick code) so the output pastes cleanly into a Slack message.
+ *
+ * Structurally the Markdown renderer in Slack dress: verdict and totals, the
+ * merge-driver fence warning, section-grouped items, and backticked recommended
+ * commands, keeping the pending-decision and truncation callouts the other
+ * renderers carry.
+ *
+ * @param summary - Divergence to render; read only.
+ * @returns Slack-markdown text terminated with a trailing newline.
+ */
 export function renderSlackDivergence(summary: DivergenceSummary): string {
   if (summary.items.length === 0 && summary.totals.itemsChanged === 0) {
     const clean = `No pm item divergence between ${summary.base} and ${summary.head}.\n`;
@@ -3530,6 +3779,17 @@ export function renderSlackDivergence(summary: DivergenceSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Bucket divergence items by kind, ordered most-severe first, for the section
+ * layout the Markdown and Slack renderers emit.
+ *
+ * Drops `unchanged` from the ordering on purpose so a clean item never earns a
+ * section, and kinds with no members are skipped so a section heading never
+ * appears above an empty list.
+ *
+ * @param items - Classified divergences to bucket.
+ * @returns Sections in severity order, each titled with its kind label.
+ */
 function groupDivergeItems(items: DivergeItem[]): Array<{ title: string; members: DivergeItem[] }> {
   const order: DivergeKind[] = ["duplicate-id", "delete-vs-edit", "field-collision", "union-safe", "head-only", "base-only"];
   const groups = new Map<DivergeKind, DivergeItem[]>();
@@ -3960,6 +4220,16 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * Register every `brief`, `brief prompt`, `brief since` and `brief diverge`
+ * command on the pm extension API, sharing one common-flag block.
+ *
+ * Wires the shared flags (--token-budget, --focus, --format, ...) onto each
+ * command and binds each handler to its renderer and budget applier, so the
+ * command surface is defined in one place rather than re-declared per command.
+ *
+ * @param api - Extension API the commands are registered against.
+ */
 function registerCommands(api: ExtensionApi): void {
   const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
@@ -4525,6 +4795,19 @@ function registerCommands(api: ExtensionApi): void {
   });
 }
 
+/**
+ * Read a single `git config` value, returning undefined for any non-zero or
+ * empty result.
+ *
+ * Spawns `git config --get` scoped to the repository root and normalises a
+ * missing key, a non-zero exit and a blank value all to `undefined`, so callers
+ * can treat "not configured" uniformly without distinguishing each cause. Used
+ * to probe the merge-driver fence commands during the fence evaluation.
+ *
+ * @param repoRoot - Repository root passed as the spawn cwd.
+ * @param key - Git config key to read, e.g. `merge.pm-item-toon.driver`.
+ * @returns The trimmed value, or undefined when unset or blank.
+ */
 function gitConfigGet(repoRoot: string, key: string): string | undefined {
   const result = spawnSync("git", ["config", "--get", key], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
   if (result.status !== 0) return undefined;
@@ -4532,6 +4815,19 @@ function gitConfigGet(repoRoot: string, key: string): string | undefined {
   return value || undefined;
 }
 
+/**
+ * Sort changed file paths into the id sets the divergence scan consumes.
+ *
+ * A path under `<pmRootRel>/history/*.jsonl` contributes its basename as a
+ * history id; any other `*.toon` path contributes its basename as an item id.
+ * The function mutates the two sets in place so the caller can accumulate across
+ * multiple git listings without allocating intermediate arrays.
+ *
+ * @param paths - Repository-relative file paths reported changed by git.
+ * @param pmRootRel - Repository-relative pm root, used to scope history files.
+ * @param historyIds - Set mutated by appending each history basename found.
+ * @param toonIds - Set mutated by appending each item-toon basename found.
+ */
 function classifyPaths(paths: string[], pmRootRel: string, historyIds: Set<string>, toonIds: Set<string>): void {
   const historyPrefix = `${pmRootRel}/history/`;
   for (const path of paths) {
