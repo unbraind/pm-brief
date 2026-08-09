@@ -2597,7 +2597,9 @@ function estimateDeltaTokens(summary: DeltaSummary, format?: string): number {
  * budget enforced.
  *
  * @param summary - Delta summary mutated in place to reflect the applied budget.
- * @param maxItems - Hard cap on item count before token fitting; non-finite or <= 0 falls back to 40.
+ * @param maxItems - Hard cap on item count before token fitting. A non-finite value
+ *   falls back to 40; any finite value is floored at 1, so a cap of 0 or a negative
+ *   cap still reports one item rather than slicing from the end of the array.
  * @param tokenBudget - Upper bound on the estimated tokens of the rendered output.
  * @param format - Output format passed to the token estimator so the probe matches the real render.
  */

@@ -1,0 +1,17 @@
+id: pm-brief-v4n0
+title: The delta budget docstring stated the wrong fallback for a non-positive maxItems
+description: "The parameter doc claimed non-finite or non-positive maxItems falls back to 40. The implementation floors any finite value at 1 and only substitutes 40 when the value is non-finite, so a caller implementing the documented boundary would expect 40 items where the code yields 1. Corrected the doc to describe both paths separately."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-09T12:57:47.313Z"
+updated_at: "2026-08-09T12:57:47.764Z"
+closed_at: "2026-08-09T12:57:47.752Z"
+completed_at: "2026-08-09T12:57:47.752Z"
+author: claude
+resolution: fixed
+expected_result: "The parameter documentation matches Math.max(1, Math.floor(isFinite ? maxItems : 40))."
+actual_result: Docstring rewritten to state both branches; no behavior change.
+close_reason: "Documented the two paths separately: non-finite falls back to 40, any finite value is floored at 1."
+body: ""
