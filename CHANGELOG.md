@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The delta budget docstring stated the wrong fallback for a non-positive maxItems ([pm-brief-v4n0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v4n0.toon))
+
+### Other
+
+- Adopt the canonical pm-ops docstring gate ([pm-brief-jmnb](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-jmnb.toon))
+
 ## 2026.8.7 - 2026-08-07
 
 ### Fixed
