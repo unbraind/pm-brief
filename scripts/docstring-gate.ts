@@ -57,7 +57,8 @@ const defaultRoot = resolve(import.meta.dirname, "..");
  * reporting a clean scan of nothing.
  *
  * @param root - Absolute repository root to scan.
- * @returns The exit code and the exact stdout/stderr bytes the CLI emits.
+ * @returns The exit code and the newline-free stdout/stderr content; {@link main}
+ *          appends the trailing newline when it writes them.
  */
 export function runGate(root: string): GateResult {
   const report = analyzeDocstringCoverage({ root });
