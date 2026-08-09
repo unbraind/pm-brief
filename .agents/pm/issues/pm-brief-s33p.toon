@@ -1,0 +1,34 @@
+id: pm-brief-s33p
+title: The release job generated the changelog in prepend mode and verified it in replace mode on the next line
+description: "release.yml ran npm run changelog, which renders prepend mode with a windowed selection, and then ran changelog:check, which renders replace mode over all release tags. The next release carrying closed but unreleased work would have failed its own verification step."
+type: Issue
+status: closed
+priority: 1
+tags[4]: changelog,ci,gate,release
+created_at: "2026-08-09T20:38:24.568Z"
+updated_at: "2026-08-09T20:39:29.915Z"
+deadline: "2026-08-10T00:00:00.000Z"
+closed_at: "2026-08-09T20:39:29.893Z"
+completed_at: "2026-08-09T20:39:29.893Z"
+author: claude
+estimated_minutes: 30
+acceptance_criteria: "The release workflow generates and verifies the changelog with the same renderer mode, and no script renders a mode the gate rejects"
+resolution: fixed
+expected_result: "The release workflow generates and verifies the changelog in one mode and npm run changelog:check exits 0"
+actual_result: "release.yml calls changelog:full before changelog:check, the prepend script is gone, and the changelog check reports up to date"
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-brief-edam,related,"2026-08-09T20:38:42.643Z",claude,"cli:update:dep",asserted
+comments[1]{created_at,author,text}:
+  "2026-08-09T20:38:24.568Z",claude,A fleet sweep comparing only the npm scripts missed this repo because the mismatch was between release.yml and the scripts rather than between two scripts
+notes[1]{created_at,author,text}:
+  "2026-08-09T20:38:24.568Z",claude,"Sixth repository affected by the changelog mode convergence,found after the first five had already been fixed"
+learnings[1]{created_at,author,text}:
+  "2026-08-09T20:38:24.568Z",claude,"When auditing for a configuration mismatch,compare what actually runs rather than the scripts alone,because a workflow calling a script directly is a second call site the script-to-script comparison never sees"
+files[1]{path,scope,note}:
+  package.json,project,prepend changelog script removed
+tests[1]{command,scope,timeout_seconds}:
+  "npm run changelog:check",project,120
+docs[1]{path,scope,note}:
+  .github/workflows/release.yml,project,release step that generated and verified in different modes
+close_reason: "Release now generates with changelog:full so it verifies the same rendering, and the prepend script that no gate accepts is removed"
+body: "The gate passes today only because no closed-but-unreleased item exists, so both modes happen to render the same file. That is luck, not correctness: replace mode emits an Unreleased section for closed but unreleased work and prepend mode with --until-release-tag structurally cannot, so the first release following such an item would generate a file and reject it one line later. Found while resolving a reviewer finding on pm-csv about the prepend script surviving the convergence, which is what pointed at pm-brief still calling it from the release path."

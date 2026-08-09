@@ -96,8 +96,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # For the first release (no prior tag), pm-changelog emits the full closed-item window once.
-          npm run changelog -- --github-step-summary
+          # Generate and verify in the same mode. Rendering in prepend mode here
+          # would write a file changelog:check (replace mode) rejects on the very
+          # next line, because only replace mode emits the '## Unreleased'
+          # section for closed but unreleased work.
+          npm run changelog:full -- --github-step-summary
           npm run changelog:check
           npm run release:notes > RELEASE_NOTES.md
 
