@@ -89,12 +89,18 @@ test("docstring gate main with no arguments scans this package and leaves the ex
     written.push(String(chunk));
     return true;
   }) as typeof process.stdout.write;
+  // Seeded to a failing value so the assertion below proves main drove it to 0,
+  // rather than passing on whatever a previous test happened to leave behind.
+  process.exitCode = 1;
+  let observedExitCode: typeof process.exitCode;
   try {
     main([]);
+    observedExitCode = process.exitCode;
   } finally {
     process.stdout.write = restore;
     process.exitCode = previousExitCode;
   }
+  assert.equal(observedExitCode, 0, "a clean run must clear a non-zero exit code, not merely leave it");
   assert.equal(written.length, 1, "one stdout write, newline-terminated");
   assert.match(written[0]!, /documented\.\n$/, "main appends the trailing newline runGate omits");
 });
@@ -111,6 +117,9 @@ test("docstring gate main with an explicit root writes the failure stream and se
       written.push(String(chunk));
       return true;
     }) as typeof process.stderr.write;
+    // Seeded to 0 so the assertion cannot pass on state inherited from an
+    // earlier failing test — it must be main that sets 1.
+    process.exitCode = 0;
     let observedExitCode: typeof process.exitCode;
     try {
       main([root]);

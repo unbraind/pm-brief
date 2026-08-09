@@ -40,9 +40,10 @@ const SAFE_PM_ID = /^[a-zA-Z0-9._-]+$/;
  * distinguish a usage mistake from any other failure instead of collapsing both
  * to a generic 1.
  *
- * `USAGE` is 2 to match Node's own convention for an argument-parsing failure
- * (the value `process` exits with when it rejects an unknown flag), keeping the
- * CLI's exit semantics consistent for shell scripts that special-case 2.
+ * `USAGE` is 2 by the long-standing POSIX shell convention for a usage error,
+ * which is what shell scripts wrapping this CLI special-case. It is **not**
+ * Node's own value: Node exits **9** for an unrecognised command-line option and
+ * leaves 2 unused, so do not read this constant as mirroring the runtime.
  */
 export const EXIT_CODE = {
   GENERIC_FAILURE: 1,
