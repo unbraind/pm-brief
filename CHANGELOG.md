@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- The release job generated the changelog in prepend mode and verified it in replace mode on the next line ([pm-brief-s33p](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-s33p.toon))
 - The delta budget docstring stated the wrong fallback for a non-positive maxItems ([pm-brief-v4n0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v4n0.toon))
 
 ### Other
