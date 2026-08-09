@@ -6,20 +6,22 @@ status: closed
 priority: 2
 tags: []
 created_at: "2026-08-09T06:10:07.100Z"
-updated_at: "2026-08-09T06:14:55.852Z"
+updated_at: "2026-08-09T06:36:54.297Z"
 closed_at: "2026-08-09T06:14:55.826Z"
 completed_at: "2026-08-09T06:14:55.826Z"
 author: pi-agent
 acceptance_criteria: "npm run docstring reports zero violations; npm run release:check passes in full (typecheck, build, docstring, coverage, audit, pack, changelog); CI gains a 'Verify complete docstring coverage' step without renaming any existing step; analyzer is imported from pm-ops, not vendored."
-notes[1]{created_at,author,text}:
+notes[2]{created_at,author,text}:
   "2026-08-09T06:14:48.295Z",pi-agent,"Initial scan reported 52 violations across 5 files: 26 in the tracked root index.ts (the real source) and 26 in a gitignored stale installed-extension copy at .agents/pm/extensions/pm-brief/index.ts (an old 2026.7.27 npm artifact, not tracked, absent from a fresh CI checkout like pm-linear's empty extensions dir). Fixed all 26 tracked-source violations with real JSDoc; removed the stale gitignored copy so the local gate mirrors CI. Final: 3 files, 74 declarations documented, 0 violations."
+  "2026-08-09T06:36:54.296Z","harness:claude-code","CI evidence for the workflow-level criterion: the 'Verify complete docstring coverage' step added to .github/workflows/ci.yml runs 'npm run docstring' between build and coverage, and PR #62 reports test (22) and test (26) SUCCESS with that step present. The two linked test commands are now separately executable; the earlier single entry embedded a parenthetical result and could not be run."
 files[5]{path,scope,note}:
   .github/workflows/ci.yml,project,Verify complete docstring coverage step
   index.ts,project,JSDoc for 26 flagged declarations
   package.json,project,"pm-ops devDep + docstring script + release:check wiring"
   scripts/docstring-gate.ts,project,thin pm-ops/docstrings launcher
   test/docstring-gate.test.ts,project,launcher behavior tests
-tests[1]{command,scope}:
-  "npm run docstring (0 violations) && npm run release:check",project
+tests[2]{command,scope}:
+  npm run docstring,project
+  "npm run release:check",project
 close_reason: "Adopted the canonical pm-ops/docstrings gate via a thin scripts/docstring-gate.ts launcher (no vendoring), wired the docstring npm script and CI step, and documented all 26 flagged declarations in index.ts. npm run docstring reports 0 violations (3 files, 74 declarations) and npm run release:check passes in full."
 body: ""
