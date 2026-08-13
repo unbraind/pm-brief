@@ -6,10 +6,11 @@ status: closed
 priority: 1
 tags[2]: correctness,packaging
 created_at: "2026-08-13T21:22:00.778Z"
-updated_at: "2026-08-13T21:22:06.784Z"
+updated_at: "2026-08-13T21:57:14.496Z"
 closed_at: "2026-08-13T21:22:06.759Z"
 completed_at: "2026-08-13T21:22:06.759Z"
 author: "harness:claude-code"
+resolution: "Moved the CLI out of dependencies into a concrete peer range at or above 2026.8.7, and pinned the dev declaration exactly to 2026.8.13."
 expected_result: Installing this package alongside any CLI version its declared peer range admits yields exactly one resolvable @unbrained/pm-cli.
 actual_result: "The dependency declaration is gone, a peer range of at least 2026.8.7 now states what the host must provide, and the guard in test/packaging.test.ts fails against the previous manifest shape and passes against the corrected one."
 files[3]{path,scope,note}:

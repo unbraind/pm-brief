@@ -6,10 +6,11 @@ status: closed
 priority: 1
 tags[2]: correctness,merge
 created_at: "2026-08-13T21:47:02.765Z"
-updated_at: "2026-08-13T21:47:05.592Z"
+updated_at: "2026-08-13T21:57:15.117Z"
 closed_at: "2026-08-13T21:47:05.578Z"
 completed_at: "2026-08-13T21:47:05.578Z"
 author: "harness:claude-code"
+resolution: "Merge-decision phrasing now keys off the conflict_resolution contract rather than the recorded side, so a stable-value-order receipt names no branch."
 expected_result: "A merge-decision line names the side that was actually kept, or states that no branch won."
 actual_result: "Before the change it printed the requested side as the side kept, which a real stable-value-order merge showed to be the discarded one. It now prints kept by stable value order when the resolution contract is stable_value_order."
 files[2]{path,scope,note}:
