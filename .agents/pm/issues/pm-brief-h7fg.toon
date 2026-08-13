@@ -1,0 +1,26 @@
+id: pm-brief-h7fg
+title: "The pm CLI was a runtime dependency with no peer declaration, so consumers could resolve a second copy"
+description: "This package declared @unbrained/pm-cli in dependencies and declared no peer range at all. It is a pure extension with no bin entry: the host CLI loads it, so the host copy is the one that should serve its SDK imports. As a plain dependency npm is free to install a second copy nested under this package whenever the consumer host pin falls outside the declared range, and with no peer declaration npm had no signal that the host copy was meant to satisfy it. Sixteen sibling packages import the same SDK at runtime while declaring the CLI only as a peer plus dev dependency, so peer-only is the established and working convention. Skew matters because consecutive CLI releases disagree about whether identical history bytes are fatal, a warning, or invisible, so which copy loads can decide a workspace gate verdict."
+type: Issue
+status: closed
+priority: 1
+tags[2]: correctness,packaging
+created_at: "2026-08-13T21:22:00.778Z"
+updated_at: "2026-08-13T21:57:14.496Z"
+closed_at: "2026-08-13T21:22:06.759Z"
+completed_at: "2026-08-13T21:22:06.759Z"
+author: "harness:claude-code"
+resolution: "Moved the CLI out of dependencies into a concrete peer range at or above 2026.8.7, and pinned the dev declaration exactly to 2026.8.13."
+expected_result: Installing this package alongside any CLI version its declared peer range admits yields exactly one resolvable @unbrained/pm-cli.
+actual_result: "The dependency declaration is gone, a peer range of at least 2026.8.7 now states what the host must provide, and the guard in test/packaging.test.ts fails against the previous manifest shape and passes against the corrected one."
+files[3]{path,scope,note}:
+  package-lock.json,project,resolves a single CLI copy at 2026.8.13
+  package.json,project,pm CLI moved from dependencies to a peer range and the dev pin made exact
+  test/packaging.test.ts,project,manifest guard proven to fail against the previous shape
+tests[2]{command,path,scope}:
+  "name=the host CLI is declared as a peer dependency and never as a runtime dependency,result=pass",test/packaging.test.ts,project
+  "name=the host CLI dev dependency is pinned to an exact version rather than a range,result=pass",test/packaging.test.ts,project
+docs[1]{path,scope,note}:
+  "https://github.com/unbraind/pm-cli/issues/1003",project,upstream request for host-side detection of two resolvable CLI copies
+close_reason: "Moved @unbrained/pm-cli out of dependencies and declared it as a peer at >=2026.8.7, matching the range the package previously depended on, and pinned the dev declaration exactly to 2026.8.13. A manifest guard in test/packaging.test.ts pins both properties and was proven to fail against the previous shape."
+body: ""
