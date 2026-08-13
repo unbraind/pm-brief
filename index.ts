@@ -31,6 +31,16 @@ export type {
 } from "@unbrained/pm-cli/sdk/governance";
 export type { MergeDecisionReceipt, MergePreferredSide } from "@unbrained/pm-cli/sdk/merge";
 
+/**
+ * The contract a merge receipt used to settle scalar conflicts.
+ *
+ * Derived from the receipt rather than re-declared as a literal union: the SDK
+ * repeats this union inline in several of its own declarations without
+ * exporting a name for it, and deriving keeps this in step with the SDK if a
+ * third contract is ever added.
+ */
+export type MergeConflictResolution = MergeDecisionReceipt["conflict_resolution"];
+
 const PM_CLI_ENTRY = fileURLToPath(new URL("./dist/cli.js", import.meta.resolve("@unbrained/pm-cli/package.json")));
 const PM_PATH_OPTION = "--pm-path";
 const SAFE_PM_ID = /^[a-zA-Z0-9._-]+$/;
@@ -300,8 +310,16 @@ export interface MergeDecisionEntry {
   itemId: string;
   /** Item path with one matched layer of surrounding quotes stripped (upstream #771). */
   itemPath: string;
-  /** Side the driver kept for scalar conflicts. */
-  preferred: MergePreferredSide;
+  /**
+   * Side the caller requested for scalar conflicts, when a side decided them.
+   *
+   * Absent when `conflictResolution` is `stable_value_order`: that contract
+   * picks a value by a deterministic ordering rather than by branch, so naming
+   * a side would misreport how the conflict was settled.
+   */
+  preferred?: MergePreferredSide;
+  /** Contract the driver used to settle scalar conflicts, which decides whether `preferred` is meaningful. */
+  conflictResolution: MergeConflictResolution;
   /** Scalar conflicts, each with its discarded value truncated for display. */
   conflicts: MergeDecisionConflict[];
 }
@@ -1200,13 +1218,20 @@ function truncateForBrief(value: unknown): string {
  * Only scalar conflict `decisions` carry a discarded value worth surfacing; clean
  * takes (`fields_from_theirs`) and union collections (`union_fields`) merge
  * without loss and are intentionally not reported here.
+ *
+ * The requested side is read from `requested_preference` and falls back to
+ * `preferred`. Those are the current and legacy spellings of the same field:
+ * pm-cli renamed it and kept the old key readable so receipts already written
+ * into a clone still parse. Both are optional, because a receipt settled by
+ * `stable_value_order` names no side at all.
  */
 function toMergeDecisionEntry(receipt: MergeDecisionReceipt): MergeDecisionEntry {
   return {
     receiptId: receipt.id,
     itemId: normalizeItemPath(receipt.item_id),
     itemPath: normalizeItemPath(receipt.item_path),
-    preferred: receipt.preferred,
+    preferred: receipt.requested_preference ?? receipt.preferred,
+    conflictResolution: receipt.conflict_resolution,
     conflicts: receipt.decisions.map((decision) => ({
       field: decision.field,
       discarded: truncateForBrief(decision.discarded),
@@ -1837,6 +1862,26 @@ function renderGovernanceAgentPrompt(g: GovernanceSummary | undefined): string[]
  * receipt lists its item id, the conflicting field names, and the discarded value
  * (truncated) so an agent resuming after a merge can see a peer's work was dropped.
  */
+/**
+ * How one receipt settled its scalar conflicts, phrased for a reader.
+ *
+ * The decision hangs on `conflictResolution`, never on whether a side happens
+ * to be recorded. Under `stable_value_order` the driver picks by a
+ * deterministic ordering of the values themselves, so no branch won — yet the
+ * receipt still carries the side the caller *requested*. Reading that field as
+ * the side kept is precisely the contradiction pm-cli fixed in GH-974, where a
+ * receipt reported `preferred: ours` while retaining the other branch's value.
+ * Reporting the requested side here would reintroduce it one layer up, and tell
+ * an agent its peer's edit lost when the opposite may have happened.
+ *
+ * A side is only meaningful under `preferred_side`; it is absent there only if
+ * a receipt is malformed, which reads as unknown rather than as a branch.
+ */
+function mergeDecisionKeptPhrase(entry: MergeDecisionEntry): string {
+  if (entry.conflictResolution === "stable_value_order") return "kept by stable value order";
+  return entry.preferred === undefined ? "kept side unrecorded" : `kept ${entry.preferred}`;
+}
+
 function renderMergeDecisionsMarkdown(m: MergeDecisionsSummary | undefined): string[] {
   if (mergeDecisionsIsEmpty(m)) return [];
   const lines: string[] = ["## \u26a0 Pending Merge Decisions", ""];
@@ -1844,7 +1889,7 @@ function renderMergeDecisionsMarkdown(m: MergeDecisionsSummary | undefined): str
   lines.push(`_${m!.pendingCount} pending receipt(s) — a peer agent's scalar edit was discarded by the field-aware merge driver and is not yet in committed history.${more}_`, "");
   for (const entry of m!.receipts) {
     const fields = entry.conflicts.map((c) => c.field).join(", ");
-    lines.push(`- \`${entry.itemId}\` (kept ${entry.preferred}) — fields: ${fields}`);
+    lines.push(`- \`${entry.itemId}\` (${mergeDecisionKeptPhrase(entry)}) — fields: ${fields}`);
     for (const conflict of entry.conflicts) {
       lines.push(`  - \`${conflict.field}\` discarded: ${conflict.discarded}`);
     }
@@ -1865,7 +1910,7 @@ function renderMergeDecisionsSlack(m: MergeDecisionsSummary | undefined): string
   lines.push(`_${m!.pendingCount} pending receipt(s) — a peer's scalar edit was discarded and is not yet in committed history${more}_`, "");
   for (const entry of m!.receipts) {
     const fields = entry.conflicts.map((c) => c.field).join(", ");
-    lines.push(`• \`${entry.itemId}\` (kept ${entry.preferred}) — fields: ${fields}`);
+    lines.push(`• \`${entry.itemId}\` (${mergeDecisionKeptPhrase(entry)}) — fields: ${fields}`);
     for (const conflict of entry.conflicts) {
       lines.push(`  • \`${conflict.field}\` discarded: ${conflict.discarded}`);
     }
@@ -1898,7 +1943,7 @@ function renderMergeDecisionsAgentPrompt(m: MergeDecisionsSummary | undefined): 
   const lines: string[] = ["Pending merge decisions (a peer agent's scalar edit was discarded and is NOT in committed history — your context is compromised):"];
   for (const entry of m!.receipts) {
     const conflicts = entry.conflicts.map((c) => `${c.field}=${c.discarded}`).join(", ");
-    lines.push(`- \u26a0 ${entry.itemId} (kept ${entry.preferred}): discarded ${conflicts}`);
+    lines.push(`- \u26a0 ${entry.itemId} (${mergeDecisionKeptPhrase(entry)}): discarded ${conflicts}`);
     lines.push(`  - run \`pm merge reconcile\` to record the decision in history`);
   }
   lines.push(...mergeDecisionOmittedLines(m!));
@@ -1908,7 +1953,7 @@ function renderMergeDecisionsAgentPrompt(m: MergeDecisionsSummary | undefined): 
 /** Compact text line for one merge-decision entry, shared by the text diverge renderer. */
 function mergeDecisionEntryText(entry: MergeDecisionEntry): string {
   const conflicts = entry.conflicts.map((c) => `${c.field}=${c.discarded}`).join(", ");
-  return `${entry.itemId} (kept ${entry.preferred}): ${conflicts}`;
+  return `${entry.itemId} (${mergeDecisionKeptPhrase(entry)}): ${conflicts}`;
 }
 
 /**

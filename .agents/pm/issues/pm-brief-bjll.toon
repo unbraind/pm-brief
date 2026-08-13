@@ -1,0 +1,24 @@
+id: pm-brief-bjll
+title: "The brief reported the side a merge requested as the side it kept, which under stable value order is the opposite of what happened"
+description: "Every merge-decision renderer interpolated the receipt side directly, printing kept ours or kept theirs. pm-cli GH-974 established that a receipt can record a requested side while retaining the other branch value, because the item driver settles scalar conflicts by stable value order rather than by branch. Reproduced against a real two-branch merge under 2026.8.13: the receipt records requested_preference ours and conflict_resolution stable_value_order, while the decision retains the theirs value and discards the ours value. The brief therefore told an agent its peer edit lost when the reverse had happened, reintroducing one layer up the contradiction upstream had just removed. The phrasing now keys off the resolution contract rather than the recorded side, and says kept by stable value order when no branch won."
+type: Issue
+status: closed
+priority: 1
+tags[2]: correctness,merge
+created_at: "2026-08-13T21:47:02.765Z"
+updated_at: "2026-08-13T21:47:05.592Z"
+closed_at: "2026-08-13T21:47:05.578Z"
+completed_at: "2026-08-13T21:47:05.578Z"
+author: "harness:claude-code"
+expected_result: "A merge-decision line names the side that was actually kept, or states that no branch won."
+actual_result: "Before the change it printed the requested side as the side kept, which a real stable-value-order merge showed to be the discarded one. It now prints kept by stable value order when the resolution contract is stable_value_order."
+files[2]{path,scope,note}:
+  index.ts,project,phrasing keys off conflictResolution and the requested side is read from requested_preference
+  test/brief.test.ts,project,stable-value-order renderer test plus corrected integration expectations
+tests[2]{command,path,scope}:
+  "name=a receipt settled by stable value order names no side in any renderer,result=pass",test/brief.test.ts,project
+  "name=integration: collectPendingMergeDecisions reads a real pending receipt with normalized item_path,result=pass",test/brief.test.ts,project
+docs[1]{path,scope,note}:
+  "https://github.com/unbraind/pm-cli/issues/974",project,"upstream: merge receipt preferred contradicted the retained side"
+close_reason: "Merge-decision phrasing now keys off conflict_resolution rather than the recorded side, and the requested side is read from requested_preference with a fallback to the legacy preferred key. Three integration tests that encoded the pre-GH-974 behaviour were corrected against a real two-branch merge, and a renderer test pins that a stable-value-order receipt names no side."
+body: ""
