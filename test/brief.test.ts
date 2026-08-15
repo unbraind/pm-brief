@@ -422,6 +422,16 @@ for (const [signal, override, expectedDetail] of [
   ["has_more", { has_more: true }, "has_more=true"],
   ["completeness.status", { completeness: { status: "partial", unreadable_item_count: 2, unreadable_directory_count: 0 } }, 'completeness.status="partial"'],
   ["omission_receipt.has_omissions", { omission_receipt: { has_omissions: true, omitted_field_group_count: 1, omitted_field_groups: ["body"] } }, "omission_receipt.has_omissions=true"],
+  // The receipt must be PRESENT and say no omissions, not merely fail to say
+  // otherwise. Every CLI at the declared `>=2026.8.15` peer floor emits it on
+  // this read, so an absent or malformed one is an answer that cannot prove it
+  // carried every field group -- not an older shape to tolerate.
+  ["omission_receipt absent", { omission_receipt: undefined }, "omission_receipt=<missing>"],
+  ["omission_receipt not a record", { omission_receipt: "nope" }, "omission_receipt=<missing>"],
+  ["omission_receipt.has_omissions absent", { omission_receipt: { omitted_field_group_count: 0 } }, "omission_receipt.has_omissions=<missing>"],
+  // A cursor means rows remain beyond this answer whether or not `has_more`
+  // agrees; only `has_more` was being read, so a cursor alone was consumed.
+  ["next_cursor present", { next_cursor: "eyJvZmZzZXQiOjEwfQ==" }, 'next_cursor="eyJvZmZzZXQiOjEwfQ=="'],
 ] as const) {
   test(`parsePmItemsOutput refuses a real list-all envelope whose ${signal} signal tripped`, () => {
     const envelope = captureRealListAllEnvelope();

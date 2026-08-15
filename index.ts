@@ -2219,8 +2219,28 @@ function collectIncompleteListAllSignals(record: Record<string, unknown>): strin
   if (status !== "complete") {
     signals.push(`completeness.status=${status === undefined ? "<missing>" : JSON.stringify(status)}`);
   }
-  if (asRecord(record.omission_receipt)?.has_omissions === true) {
-    signals.push("omission_receipt.has_omissions=true");
+  // The receipt must be PRESENT and say no omissions, not merely fail to say
+  // otherwise. `>=2026.8.15` is the declared peer floor and every CLI at or
+  // above it emits `omission_receipt` on this read, so an absent or malformed
+  // one is not an older-CLI shape to tolerate -- it is an answer that cannot
+  // prove it carried every field group, which is the same thing the
+  // `completeness` check above refuses.
+  const omission = asRecord(record.omission_receipt);
+  if (omission === undefined) {
+    signals.push("omission_receipt=<missing>");
+  } else if (omission.has_omissions !== false) {
+    signals.push(
+      `omission_receipt.has_omissions=${omission.has_omissions === undefined ? "<missing>" : JSON.stringify(omission.has_omissions)}`,
+    );
+  }
+  // Checked independently of `has_more`, because they are two separate claims
+  // and only one of them was being read. A cursor means rows remain beyond this
+  // answer whether or not `has_more` says so, and this package deliberately does
+  // not page: refusing loudly beats a hand-rolled resumption loop that can
+  // itself half-fail. Every CLI at the declared floor emits `next_cursor: null`
+  // when the answer is whole.
+  if (record.next_cursor !== null && record.next_cursor !== undefined) {
+    signals.push(`next_cursor=${JSON.stringify(record.next_cursor)}`);
   }
   return signals;
 }
