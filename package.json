@@ -113,6 +113,6 @@
     "ignore": []
   },
   "peerDependencies": {
-    "@unbrained/pm-cli": "2026.8.15"
+    "@unbrained/pm-cli": ">=2026.8.15"
   }
 }

@@ -26,6 +26,33 @@ const HOST_CLI = "@unbrained/pm-cli";
  * resolves one version rather than "whatever is newest and still matching".
  */
 const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
+/**
+ * Shape required of the consumer-facing peer declaration: a `>=` floor.
+ *
+ * Deliberately distinct from {@link EXACT_VERSION}. The dev pin must be exact so
+ * this package's own gates are reproducible; the peer declaration must be a floor
+ * so a consumer running any later host CLI is not a peer conflict.
+ */
+const MINIMUM_VERSION_RANGE = /^>=\d+\.\d+\.\d+$/;
+
+/**
+ * Order two dotted versions: negative when `left` precedes `right`, zero when
+ * equal, positive otherwise.
+ *
+ * Compares segment by segment and stops at the first difference. Comparing the
+ * segments independently would rank `1.0.5` above `2.0.0` on the strength of its
+ * final segment, and comparing the strings lexically would rank `2026.8.9` above
+ * `2026.8.15`.
+ */
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split(".").map((part) => Number.parseInt(part, 10));
+  const rightParts = right.split(".").map((part) => Number.parseInt(part, 10));
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
 
 /**
  * This package is a pure extension: the host CLI loads it, so the CLI must be
@@ -52,10 +79,35 @@ test("the host CLI is declared as a peer dependency and never as a runtime depen
   );
   const peer = manifest.peerDependencies?.[HOST_CLI];
   assert.ok(peer, `${HOST_CLI} must be declared as a peer dependency so the host's copy is the one that loads`);
+  // A FLOOR, not an exact pin — see companion decision pm-cli-website-j6oj.
+  //
+  // The dev and peer declarations have different audiences, so they have
+  // different correct shapes. The dev pin decides which CLI this package's own
+  // gates run against and must be exact. The peer declaration tells CONSUMERS
+  // which hosts the plugin works with, and a pm extension does not choose the
+  // host version — the user installs the CLI and this package must work with
+  // whatever they have. An exact peer pin makes every other installed CLI a peer
+  // conflict, so the next patch release breaks installs under strict peer
+  // resolution until this package republishes.
+  //
+  // The counter-argument this replaced is real but unanswerable from a manifest:
+  // npm 7+ auto-installs the newest version a peer range admits, so a floor does
+  // admit a FUTURE regressed CLI. No range declared today can exclude a
+  // regression that does not exist yet. What actually protects this package is
+  // the runtime completeness refusal on every `list-all` read, which detects a
+  // regressed host by observing `truncated` / `has_more` / `completeness` /
+  // `omission_receipt` rather than by guessing version numbers.
+  //
+  // The floor's job is narrower: exclude 2026.8.14, whose `list-all` silently
+  // returned 10 of 682 items, and everything older that predates the receipt.
   assert.match(
     peer,
-    EXACT_VERSION,
-    `${HOST_CLI} must declare an exact peer pin, not the range "${peer}": npm 7+ auto-installs the newest version a peer range admits, so a floor like >=X.Y.Z let the 2026.8.14 list-all regression reach consumers with no diff in this repo to review`,
+    MINIMUM_VERSION_RANGE,
+    `${HOST_CLI} must declare a ">=x.y.z" floor, not "${peer}": a pm extension cannot pin the host CLI a user installs, so an exact peer pin makes every later CLI patch a peer conflict`,
+  );
+  assert.ok(
+    compareVersions(peer.replace(/^>=/, ""), "2026.8.15") >= 0,
+    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.15: 2026.8.14 truncates \`list-all\` to 10 items and earlier releases predate the completeness receipt this package refuses on`,
   );
 });
 
@@ -83,12 +135,18 @@ test("the host CLI dev dependency is pinned to the exact version the peer declar
     `${HOST_CLI} must be pinned exactly, not declared as the range "${declared}": the gate verdict depends on which CLI version runs it`,
   );
 
-  // A dev pin that drifts from the peer pin would mean the gates run a
-  // different CLI than the one consumers are told to install.
-  const peer = manifest.peerDependencies?.[HOST_CLI] ?? "<missing>";
-  assert.equal(
-    declared,
+  // The dev pin must SATISFY the peer floor, not equal it. Equality would force a
+  // lockstep edit of the consumer-facing floor on every routine CLI bump; what
+  // matters is that the gates never run against a CLI older than the floor this
+  // package advertises, because then the floor would be a claim no gate tested.
+  const peer = manifest.peerDependencies?.[HOST_CLI] ?? "";
+  assert.match(
     peer,
-    `${HOST_CLI} is pinned at ${declared} in devDependencies but ${peer} in peerDependencies: the gates would exercise a CLI version this package never ships against`,
+    MINIMUM_VERSION_RANGE,
+    'the peer floor must be a concrete ">=x.y.z" range for the dev pin to be checked against it',
+  );
+  assert.ok(
+    compareVersions(declared, peer.replace(/^>=/, "")) >= 0,
+    `${HOST_CLI} dev pin ${declared} must be at or above the declared peer floor ${peer}: gating against a CLI older than the advertised floor would make that floor an untested claim`,
   );
 });
