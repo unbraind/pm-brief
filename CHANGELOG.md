@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- pm-brief consumes a truncated `pm list-all` answer as if it were complete ([pm-brief-g6ko](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-g6ko.toon))
+
 ## 2026.8.14 - 2026-08-14
 
 ### Fixed
