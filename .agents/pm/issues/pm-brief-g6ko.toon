@@ -2,12 +2,15 @@ id: pm-brief-g6ko
 title: pm-brief consumes a truncated `pm list-all` answer as if it were complete
 description: "Every brief/delta/divergence/governance read goes through readPmItems -> pm list-all --json --include-body and takes .items without checking the answer's completeness receipt. Under pm-cli 2026.8.14 the default output budget returned 10 of 682 workspace items with truncated=true, and pm-brief rendered a full brief from that silent subset and reported success. truncated can still go true under an output budget and completeness.status can go partial when item documents are unreadable, so the read itself must refuse those answers instead of exporting half a workspace."
 type: Issue
-status: open
+status: closed
 priority: 2
 tags: []
 created_at: "2026-08-15T10:38:12.076Z"
-updated_at: "2026-08-15T10:38:20.930Z"
+updated_at: "2026-08-15T10:44:10.358Z"
+closed_at: "2026-08-15T10:44:10.336Z"
+completed_at: "2026-08-15T10:44:10.336Z"
 author: pi-agent
 comments[1]{created_at,author,text}:
   "2026-08-15T10:38:20.930Z",pi-agent,"Wired refusal signals at the single list-all call site (index.ts readPmItems/parsePmItemsOutput): truncated===true, has_more===true, completeness.status!=='complete' (a missing receipt counts as incomplete), omission_receipt.has_omissions===true. The CommandError names every tripped signal plus count vs total. next_cursor is deliberately NOT followed: pm-brief has no paging consumer, refusing loudly is the contract. Also exact-pinned @unbrained/pm-cli to 2026.8.15 in devDependencies and peerDependencies (the >=2026.8.7 peer floor auto-installed whatever was newest, which is how 2026.8.14 reached consumers with no diff here). Revert-proof: with the parsePmItemsOutput refusal reverted, the new regression tests fail with 'AssertionError [ERR_ASSERTION]: Missing expected exception: the refusal must name the truncated signal and the counts' - six tests fail (no-receipt, truncated, has_more, completeness.status, omission_receipt.has_omissions, malformed-rows contract), only the happy-path test still passes."
+close_reason: "PR #69 open with the full gate green (223/223 tests, coverage 99.90/91.37/100 against thresholds 91/76/95, changelog check, release:check). readPmItems now refuses truncated/has_more/partial-completeness/omitted-fields list-all answers with signal+counts in the error, and @unbrained/pm-cli is exact-pinned at 2026.8.15 in devDependencies and peerDependencies."
 body: ""
