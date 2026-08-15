@@ -2195,14 +2195,15 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/** Collect every receipt signal that makes a `pm list-all --json` answer
- * unsafe to consume.
+/** Collect every signal that makes a `pm list-all --json` answer unsafe to
+ * consume: the receipt flags, the count-versus-total agreement, and the
+ * continuation cursor.
  *
  * The 2026.8.14 CLI regression returned ten of 682 items with `truncated: true`
  * set, and an output budget can still truncate a read while `completeness`
  * reports unreadable items as `partial`. Each of the four signals below is an
  * independent way for the CLI to say "this answer is not the whole workspace",
- * so all four are checked on every read. A missing `completeness` block counts
+ * so every one of them is checked on every read. A missing `completeness` block counts
  * as incomplete too: an answer that cannot prove its own completeness must not
  * be consumed as if it had. `next_cursor` is deliberately NOT followed - this
  * package has no paging consumer, and refusing loudly beats a hand-rolled
@@ -2232,6 +2233,22 @@ function collectIncompleteListAllSignals(record: Record<string, unknown>): strin
     signals.push(
       `omission_receipt.has_omissions=${omission.has_omissions === undefined ? "<missing>" : JSON.stringify(omission.has_omissions)}`,
     );
+  }
+  // `total` is the pre-pagination match count and `count` is the rows actually
+  // returned, so on a `list-all` with no limit they must agree. A mismatch is a
+  // SELF-CONTRADICTORY envelope: it reports a complete answer while handing back
+  // fewer rows than it says matched, which is the truncation this function
+  // exists to catch arriving without any of the flags that normally announce it.
+  // Both must also be present and numeric -- a missing count cannot be compared,
+  // and an answer whose size cannot be verified is not a verified answer.
+  const count = record.count;
+  const total = record.total;
+  if (typeof count !== "number" || typeof total !== "number") {
+    signals.push(
+      `count/total not both numeric (count=${JSON.stringify(count)}, total=${JSON.stringify(total)})`,
+    );
+  } else if (count !== total) {
+    signals.push(`count=${count} does not match total=${total}`);
   }
   // Checked independently of `has_more`, because they are two separate claims
   // and only one of them was being read. A cursor means rows remain beyond this

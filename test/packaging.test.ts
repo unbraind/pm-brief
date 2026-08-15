@@ -126,7 +126,7 @@ test("the host CLI is declared as a peer dependency and never as a runtime depen
  * consumers it requires, not that it equals the version current when this test
  * was written.
  */
-test("the host CLI dev dependency is pinned to the exact version the peer declaration requires", () => {
+test("the host CLI dev dependency is an exact pin at or above the declared peer floor", () => {
   const declared = manifest.devDependencies?.[HOST_CLI];
   assert.ok(declared, `${HOST_CLI} must be a devDependency so the gates have a CLI to run`);
   assert.match(

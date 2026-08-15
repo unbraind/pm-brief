@@ -400,6 +400,27 @@ function captureRealListAllEnvelope(): Record<string, unknown> {
     assert.equal(result.status, 0, `capturing a real list-all envelope failed: ${result.stderr}`);
     const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
     assert.ok(Array.isArray(parsed.items) && parsed.items.length > 0, "the real envelope must carry items");
+    // Assert the captured envelope is COMPLETE before the refusal table starts
+    // mutating it. The refusal tests replace one field and assert the named
+    // signal appears -- so if the live tracker ever returns a tripped signal of
+    // its own (say `truncated: true` once it grows past the CLI output budget),
+    // every one of them would still pass while refusing for the wrong reason,
+    // and only the pass-through test would fail, with a message that does not
+    // name the cause. Failing here instead names it exactly once.
+    assert.equal(parsed.truncated, false, "captured envelope must not already be truncated");
+    assert.equal(parsed.has_more, false, "captured envelope must not already report more rows");
+    assert.equal(parsed.next_cursor, null, "captured envelope must not already carry a cursor");
+    assert.equal(
+      (parsed.completeness as Record<string, unknown> | undefined)?.status,
+      "complete",
+      "captured envelope must already report a complete read",
+    );
+    assert.equal(
+      (parsed.omission_receipt as Record<string, unknown> | undefined)?.has_omissions,
+      false,
+      "captured envelope must not already report omitted field groups",
+    );
+    assert.equal(parsed.count, parsed.total, "captured envelope must return every matched row");
     realListAllEnvelope = parsed;
   }
   return realListAllEnvelope;
@@ -432,10 +453,19 @@ for (const [signal, override, expectedDetail] of [
   // A cursor means rows remain beyond this answer whether or not `has_more`
   // agrees; only `has_more` was being read, so a cursor alone was consumed.
   ["next_cursor present", { next_cursor: "eyJvZmZzZXQiOjEwfQ==" }, 'next_cursor="eyJvZmZzZXQiOjEwfQ=="'],
+  // `total` is the pre-pagination match count; a `list-all` with no limit that
+  // returns fewer rows than it says matched is self-contradictory -- truncation
+  // arriving without any of the flags that normally announce it.
+  ["count/total mismatch", { count: 3 }, "count=3 does not match total="],
+  ["count not numeric", { count: "3" }, "count/total not both numeric"],
 ] as const) {
   test(`parsePmItemsOutput refuses a real list-all envelope whose ${signal} signal tripped`, () => {
-    const envelope = captureRealListAllEnvelope();
-    const expectedCounts = `count=${envelope.count} of total=${envelope.total}`;
+    // Derive the expected counts from the MUTATED record, not the captured one:
+    // the count/total cases override those very fields, and the refusal reports
+    // what the envelope actually carried.
+    const mutated = { ...captureRealListAllEnvelope(), ...override } as Record<string, unknown>;
+    const shown = (value: unknown) => (typeof value === "number" ? value : "unknown");
+    const expectedCounts = `count=${shown(mutated.count)} of total=${shown(mutated.total)}`;
     assert.throws(
       () => parsePmItemsOutput(realEnvelopeWith(override)),
       (error: unknown) => error instanceof Error
