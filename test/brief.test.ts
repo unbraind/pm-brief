@@ -363,27 +363,112 @@ test("pm output parsers reject malformed JSON and normalize canonical envelopes"
   })).map((entry) => entry.id), ["pm-a", "pm-b"]);
 });
 
-test("pm item parser accepts every supported envelope and discards malformed rows", () => {
-  assert.deepEqual(parsePmItemsOutput("null"), []);
-  assert.deepEqual(parsePmItemsOutput("42"), []);
-  assert.deepEqual(parsePmItemsOutput(JSON.stringify({ items: "invalid", results: [{ id: "pm-shadowed" }] })), []);
-  assert.deepEqual(parsePmItemsOutput(JSON.stringify({ results: [{ id: "pm-result", title: "Result" }] })), [
-    { id: "pm-result", title: "Result" },
-  ]);
-  assert.deepEqual(parsePmItemsOutput(JSON.stringify([
-    null,
-    42,
-    {},
-    { id: 42 },
-    { id: "pm-array", title: "Array" },
-  ])), [{ id: "pm-array", title: "Array" }]);
+test("pm item parser refuses answers that carry no completeness receipt", () => {
+  // Legacy bare shapes (null, scalars, bare arrays) cannot prove completeness,
+  // and consuming them silently is exactly the 2026.8.14 failure mode.
+  for (const output of [
+    "null",
+    "42",
+    JSON.stringify([{ id: "pm-array", title: "Array" }]),
+  ]) {
+    assert.throws(
+      () => parsePmItemsOutput(output),
+      (error: unknown) => error instanceof Error
+        && error.name === "CommandError"
+        && /completeness\.status=<missing>/.test(error.message)
+        && /was refused/.test(error.message),
+      `expected a refusal for ${output}`,
+    );
+  }
 });
 
-test("pm item parser prefers items over results while preserving valid item order", () => {
-  assert.deepEqual(parsePmItemsOutput(JSON.stringify({
+/** A real `pm list-all --json --include-body` envelope captured from the
+ * installed CLI against this repository's own tracker, cached for the refusal
+ * tests so the spawn happens once. Mutating one field of this envelope is how
+ * the tests drive each refusal signal from the CLI's real answer shape rather
+ * than a hand-written mock. */
+let realListAllEnvelope: Record<string, unknown> | undefined;
+
+function captureRealListAllEnvelope(): Record<string, unknown> {
+  if (realListAllEnvelope === undefined) {
+    const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
+    const result = spawnSync(
+      pmBin,
+      ["--pm-path", join(repoRoot(), ".agents", "pm"), "list-all", "--json", "--include-body"],
+      { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 },
+    );
+    assert.equal(result.status, 0, `capturing a real list-all envelope failed: ${result.stderr}`);
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+    assert.ok(Array.isArray(parsed.items) && parsed.items.length > 0, "the real envelope must carry items");
+    realListAllEnvelope = parsed;
+  }
+  return realListAllEnvelope;
+}
+
+/** This repository's root, so the real tracker can be addressed without a cwd
+ * dependency. */
+function repoRoot(): string {
+  return fileURLToPath(new URL("..", import.meta.url));
+}
+
+/** Stringify a mutated copy of the real envelope with exactly one receipt
+ * field replaced, keeping every other byte the CLI produced. */
+function realEnvelopeWith(override: Record<string, unknown>): string {
+  return JSON.stringify({ ...captureRealListAllEnvelope(), ...override });
+}
+
+for (const [signal, override, expectedDetail] of [
+  ["truncated", { truncated: true }, "truncated=true"],
+  ["has_more", { has_more: true }, "has_more=true"],
+  ["completeness.status", { completeness: { status: "partial", unreadable_item_count: 2, unreadable_directory_count: 0 } }, 'completeness.status="partial"'],
+  ["omission_receipt.has_omissions", { omission_receipt: { has_omissions: true, omitted_field_group_count: 1, omitted_field_groups: ["body"] } }, "omission_receipt.has_omissions=true"],
+] as const) {
+  test(`parsePmItemsOutput refuses a real list-all envelope whose ${signal} signal tripped`, () => {
+    const envelope = captureRealListAllEnvelope();
+    const expectedCounts = `count=${envelope.count} of total=${envelope.total}`;
+    assert.throws(
+      () => parsePmItemsOutput(realEnvelopeWith(override)),
+      (error: unknown) => error instanceof Error
+        && error.name === "CommandError"
+        && error.message.includes(expectedDetail)
+        && error.message.includes(expectedCounts),
+      `the refusal must name the ${signal} signal and the counts`,
+    );
+  });
+}
+
+test("parsePmItemsOutput lets every item of a real complete envelope flow through unchanged", () => {
+  const envelope = captureRealListAllEnvelope();
+  const items = envelope.items as unknown[];
+  assert.deepEqual(parsePmItemsOutput(JSON.stringify(envelope)), items);
+});
+
+test("readPmItems still reads this repository's real tracker end to end", () => {
+  const items = readPmItems(join(repoRoot(), ".agents", "pm"));
+  assert.ok(items.length > 0, "the real tracker read must return its items");
+});
+
+test("pm item parser discards malformed rows and prefers items over results under a complete receipt", () => {
+  const withCompleteReceipt = (partial: Record<string, unknown>) => JSON.stringify({
+    count: 2,
+    total: 2,
+    truncated: false,
+    has_more: false,
+    completeness: { status: "complete", unreadable_item_count: 0, unreadable_directory_count: 0 },
+    omission_receipt: { has_omissions: false, omitted_field_group_count: 0, omitted_field_groups: [] },
+    ...partial,
+  });
+  assert.deepEqual(parsePmItemsOutput(withCompleteReceipt({
     items: [null, { id: "pm-first" }, { title: "missing id" }, { id: 42 }, { id: "pm-second" }],
     results: [{ id: "pm-shadowed" }],
   })), [{ id: "pm-first" }, { id: "pm-second" }]);
+  assert.deepEqual(parsePmItemsOutput(withCompleteReceipt({ results: [{ id: "pm-result", title: "Result" }] })), [
+    { id: "pm-result", title: "Result" },
+  ]);
+  assert.throws(
+    () => parsePmItemsOutput(withCompleteReceipt({ items: "invalid", results: [{ id: "pm-shadowed" }] })),
+    /no items array/,
+  );
 });
 
 test("pm next parser tolerates sparse envelopes without inventing ids", () => {
@@ -3186,6 +3271,83 @@ describe("brief governance", () => {
     assert.equal(summary.storageFindingsTotal, 1, "independent storage failure remains visible");
   });
 
+  test("storage-integrity findings cover every corruption class from a raw directory scan", async () => {
+    // Exercises the real scanStorageIntegrity -> toGovernanceStorageFindings
+    // mapping directly against corrupt directory trees, so every finding
+    // class stays covered even though `brief governance` itself now refuses
+    // (via the list-all completeness receipt) on exactly such workspaces.
+    // The document bodies must be fully valid pm items so only the intended
+    // corruption registers: the scanner classifies a document it cannot parse
+    // as unreadable, which would otherwise drown out the other finding kinds.
+    const itemDoc = (id: string): string => [
+      `id: ${id}`,
+      "title: t",
+      'description: ""',
+      "type: Issue",
+      "status: open",
+      "priority: 2",
+      "tags: []",
+      'created_at: "2026-07-20T00:00:00.000Z"',
+      'updated_at: "2026-07-20T00:00:00.000Z"',
+      "author: pi-agent",
+      'body: ""',
+      "",
+    ].join("\n");
+    const makeRoot = (): string => {
+      const root = mkdtempSync(join(tmpdir(), "pm-brief-storage-scan-"));
+      for (const folder of ["issues", "tasks", "features", "history", "schema"]) {
+        mkdirSync(join(root, folder), { recursive: true });
+      }
+      return root;
+    };
+
+    // Workspace one: unreadable item, conflicted/unparseable history, a
+    // resurrected item (live document whose newest history op is a delete) and
+    // an unparseable config file. Five findings, five distinct kinds.
+    const corrupt = makeRoot();
+    try {
+      writeFileSync(join(corrupt, "issues", "pm-broken.toon"), "not valid toon: [");
+      writeFileSync(join(corrupt, "issues", "pm-dead.toon"), itemDoc("pm-dead"));
+      writeFileSync(join(corrupt, "history", "pm-conflict.jsonl"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> agent\n");
+      writeFileSync(join(corrupt, "history", "pm-bad.jsonl"), "{not-json}\n");
+      writeFileSync(
+        join(corrupt, "history", "pm-dead.jsonl"),
+        `${JSON.stringify({ ts: "2026-07-26T12:00:00.000Z", author: "agent-a", op: "delete" })}\n`,
+      );
+      writeFileSync(join(corrupt, "schema", "broken.json"), "{not-json}\n");
+      const summary = await collectGovernanceSignals(
+        [{ id: "pm-dead", title: "Resurrected", type: "Issue", status: "open" }],
+        { pmRoot: corrupt, generatedAt: "2026-07-26T12:00:00Z" },
+      );
+      assert.deepEqual(new Set(summary.storageFindings.map((finding) => finding.kind)), new Set([
+        "unreadable_item_file",
+        "history_conflict_marker",
+        "history_unparseable",
+        "resurrected_item",
+        "unparseable_config",
+      ]));
+      assert.equal(summary.storageFindingsTotal, 5);
+    } finally {
+      rmSync(corrupt, { recursive: true, force: true });
+    }
+
+    // Workspace two: the same id claimed by documents in two type folders is
+    // the add/add collision the duplicate_item_id kind reports (the colliding
+    // documents themselves additionally classify as unreadable).
+    const collided = makeRoot();
+    try {
+      writeFileSync(join(collided, "issues", "pm-dup.toon"), itemDoc("pm-dup"));
+      writeFileSync(join(collided, "features", "pm-dup.toon"), itemDoc("pm-dup"));
+      const summary = await collectGovernanceSignals([], { pmRoot: collided, generatedAt: "2026-07-26T12:00:00Z" });
+      assert.ok(
+        summary.storageFindings.some((finding) => finding.kind === "duplicate_item_id"),
+        `expected a duplicate_item_id finding, saw ${summary.storageFindings.map((f) => f.kind).join(", ")}`,
+      );
+    } finally {
+      rmSync(collided, { recursive: true, force: true });
+    }
+  });
+
   test("brief governance command is registered with the expected flags", async () => {
     assert.ok((await registeredCommandPaths()).includes("brief governance"), "brief governance command should be registered");
     const flags = await registeredFlagLongs("brief governance");
@@ -3280,20 +3442,28 @@ describe("brief governance end-to-end", () => {
       assert.ok(secretItemId, "pm create must return the created item id");
       pm(["--pm-path", pmPath, "update", secretItemId, "--description", "Use AWS key AKIAIOSFODNN7EXAMPLE for deployment", "--author", "agent-a"]);
 
-      // Seed every storage-integrity class against a real tracker. The ordinary
-      // list path must keep returning the readable items while governance names
-      // the corrupt documents and ledgers that an agent must repair before merge.
+      // Seed every storage-integrity class against a real tracker. Since the
+      // list-all completeness refusal landed, a workspace holding unreadable
+      // items makes `brief governance` REFUSE instead of rendering a report
+      // built from the readable subset, so the corruption is seeded only after
+      // the clean-baseline governance run below and asserted as a typed
+      // refusal (the individual finding classes stay covered by the
+      // collectGovernanceSignals unit tests against synthetic workspaces).
       const featureFolder = registry.type_to_folder["Feature"] ?? "features";
-      await mkdir(join(pmPath, featureFolder), { recursive: true });
-      await writeFile(join(pmPath, featureFolder, `${staleItemId}.toon`), backdated, "utf-8");
-      await writeFile(join(pmPath, folder, "pm-broken.toon"), "not valid toon: [", "utf-8");
-      await writeFile(join(pmPath, "history", "pm-conflict.jsonl"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> agent\n", "utf-8");
-      await writeFile(join(pmPath, "history", "pm-unparseable.jsonl"), "{not-json}\n", "utf-8");
-      const secretHistoryPath = join(pmPath, "history", `${secretItemId}.jsonl`);
-      const secretHistory = await readFile(secretHistoryPath, "utf-8");
-      await writeFile(secretHistoryPath, `${secretHistory.trimEnd()}\n${JSON.stringify({ ts: "2026-07-26T12:00:00.000Z", author: "agent-a", op: "delete" })}\n`, "utf-8");
-      await mkdir(join(pmPath, "schema"), { recursive: true });
-      await writeFile(join(pmPath, "schema", "broken.json"), "{not-json}\n", "utf-8");
+      const seedCorruption = async (): Promise<void> => {
+        await mkdir(join(pmPath, featureFolder), { recursive: true });
+        await writeFile(join(pmPath, featureFolder, `${staleItemId}.toon`), backdated, "utf-8");
+        await writeFile(join(pmPath, folder, "pm-broken.toon"), "not valid toon: [", "utf-8");
+        await writeFile(join(pmPath, "history", "pm-conflict.jsonl"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> agent\n", "utf-8");
+        await writeFile(join(pmPath, "history", "pm-unparseable.jsonl"), "{not-json}\n", "utf-8");
+        const secretHistoryPath = join(pmPath, "history", `${secretItemId}.jsonl`);
+        const secretHistory = await readFile(secretHistoryPath, "utf-8");
+        await writeFile(secretHistoryPath, `${secretHistory.trimEnd()}\n${JSON.stringify({ ts: "2026-07-26T12:00:00.000Z", author: "agent-a", op: "delete" })}\n`, "utf-8");
+        await mkdir(join(pmPath, "schema"), { recursive: true });
+        await writeFile(join(pmPath, "schema", "broken.json"), "{not-json}\n", "utf-8");
+        git(["add", "-A"]);
+        git(["commit", "-m", "corrupt the governance test workspace"]);
+      };
 
       // Commit the seeded workspace
       git(["add", "-A"]);
@@ -3335,25 +3505,30 @@ describe("brief governance end-to-end", () => {
       // The secret VALUE must NEVER appear in the JSON output
       assert.doesNotMatch(jsonOutput, /AKIAIOSFODNN7EXAMPLE/);
 
-      // 4. Storage integrity: all six classes are detected even though the
-      // bounded brief renders only its first five findings.
-      assert.equal(summary.storageFindingsTotal, 6);
-      assert.deepEqual(new Set(summary.storageFindings.map((finding) => finding.kind)), new Set([
-        "unreadable_item_file",
-        "duplicate_item_id",
-        "history_conflict_marker",
-        "history_unparseable",
-        "resurrected_item",
-      ]));
+      // 4. The clean baseline carries no storage findings; every storage-integrity
+      // class is covered by the collectGovernanceSignals unit tests against
+      // synthetic workspaces, so the e2e pins the wiring rather than each class.
+      assert.equal(summary.storageFindingsTotal, 0, "a readable workspace must produce no storage findings");
 
       // 5. Text output: also verify no secret value leaks, and findings are present
       assert.match(textOutput, /Duplicate clusters/);
       assert.match(textOutput, /Stale in-progress/);
-      assert.match(textOutput, /Storage integrity/);
-      assert.match(textOutput, /Secrets in item text/);
       assert.doesNotMatch(textOutput, /AKIAIOSFODNN7EXAMPLE/);
       // The detector rule SHOULD appear
       assert.match(textOutput, /aws_access_key/);
+
+      // 6. Once the workspace holds unreadable items, `pm list-all` answers with
+      // completeness.status="partial" and the governance read must refuse
+      // instead of rendering a report built from the readable subset.
+      await seedCorruption();
+      await assert.rejects(
+        runGov({ format: "json", threshold: 0.5, "stale-hours": 1 }),
+        (error: unknown) => error instanceof Error
+          && error.name === "CommandError"
+          && /completeness\.status="partial"/.test(error.message)
+          && /count=7 of total=7/.test(error.message),
+        "a partially unreadable workspace must fail the governance read loudly",
+      );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }

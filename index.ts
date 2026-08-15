@@ -2185,6 +2185,59 @@ export function readPmItems(pmRoot: string): PmItem[] {
   return parsePmItemsOutput(result.stdout);
 }
 
+/** Narrow an `unknown` JSON value to a plain record, so receipt fields can be
+ * read without `as` casts sprinkled through the caller. Arrays are excluded on
+ * purpose: a JSON array is a legacy bare-rows answer, not a receipt-bearing
+ * envelope. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** Collect every receipt signal that makes a `pm list-all --json` answer
+ * unsafe to consume.
+ *
+ * The 2026.8.14 CLI regression returned ten of 682 items with `truncated: true`
+ * set, and an output budget can still truncate a read while `completeness`
+ * reports unreadable items as `partial`. Each of the four signals below is an
+ * independent way for the CLI to say "this answer is not the whole workspace",
+ * so all four are checked on every read. A missing `completeness` block counts
+ * as incomplete too: an answer that cannot prove its own completeness must not
+ * be consumed as if it had. `next_cursor` is deliberately NOT followed - this
+ * package has no paging consumer, and refusing loudly beats a hand-rolled
+ * resumption loop that can itself half-fail.
+ *
+ * @param record - The parsed `list-all` envelope.
+ * @returns The human-readable signals that tripped, empty when the answer is
+ * safe to consume. */
+function collectIncompleteListAllSignals(record: Record<string, unknown>): string[] {
+  const signals: string[] = [];
+  if (record.truncated === true) signals.push("truncated=true");
+  if (record.has_more === true) signals.push("has_more=true");
+  const status = asRecord(record.completeness)?.status;
+  if (status !== "complete") {
+    signals.push(`completeness.status=${status === undefined ? "<missing>" : JSON.stringify(status)}`);
+  }
+  if (asRecord(record.omission_receipt)?.has_omissions === true) {
+    signals.push("omission_receipt.has_omissions=true");
+  }
+  return signals;
+}
+
+/** Turn the tripped receipt signals into the error `parsePmItemsOutput`
+ * throws. The message names every signal and the `count` vs `total` split so
+ * the operator can see how much of the workspace the refused answer carried. */
+function refuseIncompleteListAll(signals: string[], record: Record<string, unknown> | undefined): never {
+  const count = record && typeof record.count === "number" ? record.count : "unknown";
+  const total = record && typeof record.total === "number" ? record.total : "unknown";
+  throw new CommandError(
+    `pm list-all --json answer was incomplete and was refused: ${signals.join("; ")}; count=${count} of total=${total}. `
+      + "A brief built from a partial workspace read would silently misrepresent it; make the read complete "
+      + "(for example raise or disable its output budget) and retry instead of exporting half a workspace.",
+  );
+}
+
 export function parsePmItemsOutput(output: string): PmItem[] {
   let parsed: unknown;
   try {
@@ -2193,10 +2246,22 @@ export function parsePmItemsOutput(output: string): PmItem[] {
     const detail = error instanceof Error ? error.message : String(error);
     throw new CommandError(`Unable to parse pm item JSON: ${detail}`);
   }
-  if (!parsed || typeof parsed !== "object") return [];
-  const record = parsed as Record<string, unknown>;
-  const items = Array.isArray(parsed) ? parsed : record.items ?? record.results ?? [];
-  if (!Array.isArray(items)) return [];
+  const record = asRecord(parsed);
+  if (record === undefined) {
+    refuseIncompleteListAll(
+      ["completeness.status=<missing> (answer is a bare JSON array or non-object, so it carries no receipt)"],
+      undefined,
+    );
+  }
+  const signals = collectIncompleteListAllSignals(record);
+  if (signals.length > 0) refuseIncompleteListAll(signals, record);
+  const items = record.items ?? record.results;
+  if (!Array.isArray(items)) {
+    throw new CommandError(
+      "pm list-all --json answer was malformed and was refused: it carried no items array "
+        + "while claiming to be complete, so its receipt cannot be trusted either.",
+    );
+  }
   return items.filter((item: unknown): item is PmItem => Boolean(item) && typeof item === "object" && typeof (item as PmItem).id === "string");
 }
 
