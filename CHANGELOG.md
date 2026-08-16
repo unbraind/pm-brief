@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- The pm CLI compatibility floor was declared only where npm enforces it, and absent from the field the CLI actually reads ([pm-brief-mtjj](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-mtjj.toon))
+- The pm CLI compatibility floor was declared only in peerDependencies, which only npm enforces, and not in manifest.json pm_min_version, which is the field the CLI enforces ([pm-brief-mtjj](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-mtjj.toon))
 - pm-brief consumes a truncated `pm list-all` answer as if it were complete ([pm-brief-g6ko](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-g6ko.toon))
 
 ## 2026.8.14 - 2026-08-14
