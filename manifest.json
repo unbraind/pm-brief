@@ -4,6 +4,7 @@
   "description": "Token-budgeted agent briefs and next-work plans for pm workspaces",
   "author": "@unbraind",
   "entry": "dist/index.js",
+  "pm_min_version": "2026.8.15",
   "capabilities": [
     "commands",
     "renderers",
