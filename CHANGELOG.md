@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Canonicalize the complete-corpus reader and adopt the current pm host contract ([pm-brief-v2ts](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v2ts.toon))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed
