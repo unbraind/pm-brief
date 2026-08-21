@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import {
+  checkExtensionManifestCompatibility,
+  type ExtensionManifestCompatibilityManifest,
+} from "@unbrained/pm-cli/sdk";
+import { REQUIRED_DEVELOPMENT_VERSION, REQUIRED_MINIMUM_VERSION } from "./version-contract.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
 interface PackageManifest {
   readonly devDependencies?: Record<string, string>;
   readonly peerDependencies?: Record<string, string>;
+  readonly scripts?: Record<string, string>;
 }
 
 interface ExtensionManifest {
@@ -116,6 +122,35 @@ test("the development dependency is an exact pin at or above the declared floor"
     atOrAbove(dev, declared as string),
     `the pinned development CLI ${dev} is below the declared floor ${String(declared)}`,
   );
+  assert.equal(
+    dev,
+    REQUIRED_DEVELOPMENT_VERSION,
+    `development must exact-pin the current approved pm CLI/SDK ${REQUIRED_DEVELOPMENT_VERSION}`,
+  );
+});
+
+test("the complete raw manifest metadata satisfies the current SDK checker for minimum and development versions", () => {
+  const rawManifest = JSON.parse(
+    readFileSync(resolve(repoRoot, "manifest.json"), "utf8"),
+  ) as ExtensionManifestCompatibilityManifest;
+  assert.deepEqual(
+    checkExtensionManifestCompatibility(rawManifest, { pmVersion: REQUIRED_MINIMUM_VERSION }),
+    { compatible: true, findings: [], pmVersion: REQUIRED_MINIMUM_VERSION },
+  );
+  assert.deepEqual(
+    checkExtensionManifestCompatibility(rawManifest, { pmVersion: REQUIRED_DEVELOPMENT_VERSION }),
+    { compatible: true, findings: [], pmVersion: REQUIRED_DEVELOPMENT_VERSION },
+  );
+});
+
+test("every changelog and release-note read resolves the installed CLI portably with unbounded host controls", () => {
+  for (const name of ["changelog:full", "changelog:check", "release:notes"] as const) {
+    const script = packageJson.scripts?.[name];
+    assert.ok(script, `package.json must declare ${name}`);
+    assert.doesNotMatch(script, /--pm-bin/u, "pm-changelog must resolve the installed CLI entry through Node so Windows never executes a POSIX shim");
+    assert.match(script, /--pm-arg=--output-budget\s+--pm-arg=unbounded/u);
+    assert.match(script, /--pm-arg=--output-limit\s+--pm-arg=unbounded/u);
+  }
 });
 
 test("the version comparison orders YYYY.M.D numerically, not lexicographically", () => {
@@ -124,10 +159,10 @@ test("the version comparison orders YYYY.M.D numerically, not lexicographically"
   // A comparison whose ordering branch is never executed is not verified by
   // the suite passing — V8 does not even report a branch it never reaches —
   // so the ordering is exercised here directly.
-  assert.ok(atOrAbove("2026.8.15", "2026.8.15"), "an equal pin satisfies the floor");
-  assert.ok(atOrAbove("2026.8.15", "2026.8.7"), "a later day satisfies an earlier floor");
-  assert.ok(!atOrAbove("2026.8.14", "2026.8.15"), "an earlier day must not satisfy a later floor");
-  assert.ok(!atOrAbove("2026.8.7", "2026.8.15"), "the lexicographic trap: 2026.8.7 is BELOW 2026.8.15");
+  assert.ok(atOrAbove("2026.8.20", "2026.8.20"), "an equal pin satisfies the floor");
+  assert.ok(atOrAbove("2026.8.20", "2026.8.7"), "a later day satisfies an earlier floor");
+  assert.ok(!atOrAbove("2026.8.19", "2026.8.20"), "an earlier day must not satisfy a later floor");
+  assert.ok(!atOrAbove("2026.8.7", "2026.8.20"), "the lexicographic trap: 2026.8.7 is BELOW 2026.8.20");
   assert.ok(atOrAbove("2026.9.1", "2026.8.31"), "a later month outranks any day of an earlier one");
   assert.ok(!atOrAbove("2026.7.31", "2026.8.1"), "an earlier month never satisfies a later one");
   assert.ok(atOrAbove("2027.1.1", "2026.12.31"), "a later year outranks any date of an earlier one");

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { resolve as pathResolve, relative as pathRelative, sep as pathSep, isAbsolute as pathIsAbsolute } from "node:path";
 import { defineExtension } from "@unbrained/pm-cli/sdk/authoring";
 import type { ExtensionApi, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
-import { findSimilarItems } from "@unbrained/pm-cli/sdk";
+import { certifyCompleteListResult, findSimilarItems, inspectCompleteListResult } from "@unbrained/pm-cli/sdk";
 import type { CommandHandlerContext, SimilarItemMatch, ItemMetadata } from "@unbrained/pm-cli/sdk";
 import {
   findDuplicateClusters,
@@ -81,7 +81,7 @@ export class CommandError extends Error {
 }
 
 /**
- * One row from the pm tracker as `pm list-all --json --include-body` returns it,
+ * One row from the pm tracker as canonical `pm list --all` returns it,
  * typed loosely on purpose.
  *
  * The tracker is the source of truth for which fields exist, and different pm
@@ -1137,7 +1137,7 @@ function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: F
       insights.push({
         level: "info",
         message: "no open work items are available in this workspace",
-        suggestion: "pm list-open --limit 20",
+        suggestion: "pm list --status open --limit 20",
       });
     } else if (options.assignee || options.statuses?.length) {
       const activeFilters = describeFilters(options);
@@ -1461,11 +1461,11 @@ function scanItemSecrets(items: readonly PmItem[]): GovernanceSecretFinding[] {
 }
 
 /**
- * Map a `PmItem` (the brief's loose, all-optional shape from `pm list-all`) into
+ * Map a `PmItem` (the brief's loose, all-optional canonical list shape) into
  * the `ItemMetadata` the stale-work scanner requires. The brief reads items via
- * `pm list-all --json --include-body`, which always includes the `ItemMetadata`
- * required fields, so missing values default to safe empties rather than
- * `any`-casting the array.
+ * a certified full-projection `pm list --all` request, which includes the
+ * `ItemMetadata` required fields, so missing values default to safe empties
+ * rather than `any`-casting the array.
  */
 function toItemMetadata(item: PmItem): ItemMetadata {
   const priority = item.priority;
@@ -2177,10 +2177,48 @@ export function renderAgentPrompt(brief: AgentBrief): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function readPmItems(pmRoot: string): PmItem[] {
-  const result = spawnPm([PM_PATH_OPTION, pmRoot, "list-all", "--json", "--include-body"]);
+/**
+ * Read every tracker item through the current canonical CLI contract.
+ *
+ * The command selects every lifecycle status, full metadata plus bodies,
+ * strict source reads, no row truncation, and unbounded universal output. The
+ * returned JSON is still treated as untrusted: {@link parsePmItemsOutput}
+ * requires the SDK certificate and the supplemental receipts tracked in
+ * pm-cli#1078 before any row reaches brief generation.
+ *
+ * The injectable process boundary lets tests prove the exact argv without
+ * replacing JSON parsing or completeness certification.
+ *
+ * @param pmRoot - Tracker storage root passed through the host-owned
+ * `--pm-path` option.
+ * @param spawn - Process boundary; defaults to the resolved project-local pm
+ * CLI and is replaced only by the exact-argv unit test.
+ * @returns Every certified full item row, including terminal work.
+ * @throws {CommandError} When the CLI fails or its output cannot prove a
+ * complete corpus.
+ */
+export function readPmItems(
+  pmRoot: string,
+  spawn: (args: string[]) => SpawnSyncReturns<string> = spawnPm,
+): PmItem[] {
+  const result = spawn([
+    PM_PATH_OPTION,
+    pmRoot,
+    "list",
+    "--all",
+    "--json",
+    "--include-body",
+    "--strict-read",
+    "--no-truncate",
+    "--output-budget",
+    "unbounded",
+    "--output-limit",
+    "unbounded",
+    "--output-include",
+    "full",
+  ]);
   if (result.status !== 0) {
-    throw new CommandError(result.stderr?.trim() || result.error?.message || "`pm list-all --json --include-body` failed");
+    throw new CommandError(result.stderr?.trim() || result.error?.message || "`pm list --all` complete-corpus read failed");
   }
   return parsePmItemsOutput(result.stdout);
 }
@@ -2195,86 +2233,107 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/** Collect every signal that makes a `pm list-all --json` answer unsafe to
- * consume: the receipt flags, the count-versus-total agreement, and the
- * continuation cursor.
+/** Render one receipt value for a refusal signal, preserving missing fields as
+ * an explicit marker and every present JSON value in its canonical encoding. */
+function describeSignalValue(value: unknown): string {
+  return value === undefined ? "<missing>" : JSON.stringify(value);
+}
+
+/** Collect current receipt contradictions not yet rejected by the public SDK
+ * complete-list certifier.
  *
- * The 2026.8.14 CLI regression returned ten of 682 items with `truncated: true`
- * set, and an output budget can still truncate a read while `completeness`
- * reports unreadable items as `partial`. Each of the four signals below is an
- * independent way for the CLI to say "this answer is not the whole workspace",
- * so every one of them is checked on every read. A missing `completeness` block counts
- * as incomplete too: an answer that cannot prove its own completeness must not
- * be consumed as if it had. `next_cursor` is deliberately NOT followed - this
- * package has no paging consumer, and refusing loudly beats a hand-rolled
- * resumption loop that can itself half-fail.
+ * `inspectCompleteListResult` owns source status, filters, pagination,
+ * projection, row counts, budget-compaction disclosures, and item identities.
+ * pm CLI 2026.8.21 still certifies absent/contradictory omission and read-output
+ * receipts and ignores unreadable counters behind `status: complete` (upstream
+ * issue #1078). These checks are deliberately limited to that verified delta
+ * so the SDK remains the single source of truth for the rest of the contract.
  *
- * @param record - The parsed `list-all` envelope.
- * @returns The human-readable signals that tripped, empty when the answer is
- * safe to consume. */
-function collectIncompleteListAllSignals(record: Record<string, unknown>): string[] {
+ * @param record - The parsed canonical list envelope.
+ * @returns Independently actionable receipt contradictions, empty when the
+ * supplemental contract is satisfied. */
+function collectSupplementalCompleteListSignals(record: Record<string, unknown>): string[] {
   const signals: string[] = [];
-  if (record.truncated === true) signals.push("truncated=true");
-  if (record.has_more === true) signals.push("has_more=true");
-  const status = asRecord(record.completeness)?.status;
-  if (status !== "complete") {
-    signals.push(`completeness.status=${status === undefined ? "<missing>" : JSON.stringify(status)}`);
+  const completeness = asRecord(record.completeness);
+  for (const field of ["unreadable_item_count", "unreadable_directory_count"] as const) {
+    const value = completeness?.[field];
+    if (!Number.isSafeInteger(value) || value !== 0) {
+      signals.push(`completeness.${field}=${describeSignalValue(value)}`);
+    }
   }
-  // The receipt must be PRESENT and say no omissions, not merely fail to say
-  // otherwise. `>=2026.8.15` is the declared peer floor and every CLI at or
-  // above it emits `omission_receipt` on this read, so an absent or malformed
-  // one is not an older-CLI shape to tolerate -- it is an answer that cannot
-  // prove it carried every field group, which is the same thing the
-  // `completeness` check above refuses.
+
   const omission = asRecord(record.omission_receipt);
   if (omission === undefined) {
     signals.push("omission_receipt=<missing>");
-  } else if (omission.has_omissions !== false) {
-    signals.push(
-      `omission_receipt.has_omissions=${omission.has_omissions === undefined ? "<missing>" : JSON.stringify(omission.has_omissions)}`,
-    );
+  } else {
+    if (omission.has_omissions !== false) {
+      signals.push(`omission_receipt.has_omissions=${describeSignalValue(omission.has_omissions)}`);
+    }
+    if (!Number.isSafeInteger(omission.omitted_field_group_count) || omission.omitted_field_group_count !== 0) {
+      signals.push(`omission_receipt.omitted_field_group_count=${describeSignalValue(omission.omitted_field_group_count)}`);
+    }
+    if (!Array.isArray(omission.omitted_field_groups) || omission.omitted_field_groups.length !== 0) {
+      signals.push(`omission_receipt.omitted_field_groups=${describeSignalValue(omission.omitted_field_groups)}`);
+    }
   }
-  // `total` is the pre-pagination match count and `count` is the rows actually
-  // returned, so on a `list-all` with no limit they must agree. A mismatch is a
-  // SELF-CONTRADICTORY envelope: it reports a complete answer while handing back
-  // fewer rows than it says matched, which is the truncation this function
-  // exists to catch arriving without any of the flags that normally announce it.
-  // Both must also be present and numeric -- a missing count cannot be compared,
-  // and an answer whose size cannot be verified is not a verified answer.
-  const count = record.count;
-  const total = record.total;
-  if (typeof count !== "number" || typeof total !== "number") {
-    signals.push(
-      `count/total not both numeric (count=${JSON.stringify(count)}, total=${JSON.stringify(total)})`,
-    );
-  } else if (count !== total) {
-    signals.push(`count=${count} does not match total=${total}`);
+
+  const readOutput = asRecord(record.read_output);
+  if (readOutput === undefined) {
+    signals.push("read_output=<missing>");
+  } else {
+    for (const [field, expected] of [
+      ["contract_version", 1],
+      ["command", "list"],
+      ["within_budget", true],
+      ["strings_compacted", false],
+      ["rows_compacted", false],
+      ["result_omitted", false],
+    ] as const) {
+      if (readOutput[field] !== expected) {
+        signals.push(`read_output.${field}=${describeSignalValue(readOutput[field])}`);
+      }
+    }
+    const dimensions = readOutput.requested_dimensions;
+    if (!Array.isArray(dimensions)) {
+      signals.push("read_output.requested_dimensions=<missing>");
+    } else {
+      for (const required of ["include", "amount", "cost"] as const) {
+        if (!dimensions.includes(required)) signals.push(`read_output.requested_dimensions missing ${required}`);
+      }
+    }
   }
-  // Checked independently of `has_more`, because they are two separate claims
-  // and only one of them was being read. A cursor means rows remain beyond this
-  // answer whether or not `has_more` says so, and this package deliberately does
-  // not page: refusing loudly beats a hand-rolled resumption loop that can
-  // itself half-fail. Every CLI at the declared floor emits `next_cursor: null`
-  // when the answer is whole.
-  if (record.next_cursor !== null && record.next_cursor !== undefined) {
-    signals.push(`next_cursor=${JSON.stringify(record.next_cursor)}`);
-  }
+
+  if (record.output_budget_truncation !== undefined) signals.push("output_budget_truncation=<present>");
+  if (record.output_budget_exceeded !== undefined) signals.push("output_budget_exceeded=<present>");
   return signals;
 }
 
-/** Turn the tripped receipt signals into the error `parsePmItemsOutput`
+/** Turn complete-list findings into the error `parsePmItemsOutput`
  * throws. The message names every signal and the `count` vs `total` split so
  * the operator can see how much of the workspace the refused answer carried. */
-function refuseIncompleteListAll(signals: string[], record: Record<string, unknown> | undefined): never {
+function refuseIncompleteList(signals: string[], record: Record<string, unknown> | undefined): never {
   const count = record && typeof record.count === "number" ? record.count : "unknown";
   const total = record && typeof record.total === "number" ? record.total : "unknown";
   throw new CommandError(
-    `pm list-all --json answer was incomplete and was refused: ${signals.join("; ")}; count=${count} of total=${total}. `
-      + "A brief built from a partial workspace read would silently misrepresent it; make the read complete "
-      + "(for example raise or disable its output budget) and retry instead of exporting half a workspace.",
+    `pm list --all complete-corpus answer was refused: ${signals.join("; ")}; count=${count} of total=${total}. `
+      + "A brief built from a partial workspace read would silently misrepresent it; retry with canonical full, strict, unbounded output instead of exporting half a workspace.",
   );
 }
 
+/**
+ * Parse and certify one canonical list JSON envelope.
+ *
+ * The public SDK inspection owns the shared complete-list policy. A narrow
+ * package supplement refuses the 2026.8.21 receipt gaps reproduced in
+ * pm-cli#1078; once that SDK issue ships, those checks can be removed without
+ * changing callers. Bare arrays and the historical `results` fallback are
+ * intentionally rejected because neither carries certifiable full rows.
+ *
+ * @param output - Raw stdout from the canonical complete-corpus CLI call.
+ * @returns Certified full item rows without filtering or projection.
+ * @throws {CommandError} When JSON is malformed or any completeness proof is
+ * absent, contradictory, bounded, compacted, filtered, or identity-unsafe.
+ */
 export function parsePmItemsOutput(output: string): PmItem[] {
   let parsed: unknown;
   try {
@@ -2285,21 +2344,18 @@ export function parsePmItemsOutput(output: string): PmItem[] {
   }
   const record = asRecord(parsed);
   if (record === undefined) {
-    refuseIncompleteListAll(
-      ["completeness.status=<missing> (answer is a bare JSON array or non-object, so it carries no receipt)"],
+    refuseIncompleteList(
+      ["invalid_envelope: answer is a bare JSON array or non-object, so it carries no receipt"],
       undefined,
     );
   }
-  const signals = collectIncompleteListAllSignals(record);
-  if (signals.length > 0) refuseIncompleteListAll(signals, record);
-  const items = record.items ?? record.results;
-  if (!Array.isArray(items)) {
-    throw new CommandError(
-      "pm list-all --json answer was malformed and was refused: it carried no items array "
-        + "while claiming to be complete, so its receipt cannot be trusted either.",
-    );
-  }
-  return items.filter((item: unknown): item is PmItem => Boolean(item) && typeof item === "object" && typeof (item as PmItem).id === "string");
+  const sdkInspection = inspectCompleteListResult(record);
+  const signals = [
+    ...sdkInspection.findings.map((finding) => `${finding.code}: ${finding.message}`),
+    ...collectSupplementalCompleteListSignals(record),
+  ];
+  if (signals.length > 0) refuseIncompleteList(signals, record);
+  return certifyCompleteListResult(record).items;
 }
 
 function pmVersion(): string {
