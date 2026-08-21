@@ -2233,6 +2233,12 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/** Render one receipt value for a refusal signal, preserving missing fields as
+ * an explicit marker and every present JSON value in its canonical encoding. */
+function describeSignalValue(value: unknown): string {
+  return value === undefined ? "<missing>" : JSON.stringify(value);
+}
+
 /** Collect current receipt contradictions not yet rejected by the public SDK
  * complete-list certifier.
  *
@@ -2252,7 +2258,7 @@ function collectSupplementalCompleteListSignals(record: Record<string, unknown>)
   for (const field of ["unreadable_item_count", "unreadable_directory_count"] as const) {
     const value = completeness?.[field];
     if (!Number.isSafeInteger(value) || value !== 0) {
-      signals.push(`completeness.${field}=${value === undefined ? "<missing>" : JSON.stringify(value)}`);
+      signals.push(`completeness.${field}=${describeSignalValue(value)}`);
     }
   }
 
@@ -2261,13 +2267,13 @@ function collectSupplementalCompleteListSignals(record: Record<string, unknown>)
     signals.push("omission_receipt=<missing>");
   } else {
     if (omission.has_omissions !== false) {
-      signals.push(`omission_receipt.has_omissions=${omission.has_omissions === undefined ? "<missing>" : JSON.stringify(omission.has_omissions)}`);
+      signals.push(`omission_receipt.has_omissions=${describeSignalValue(omission.has_omissions)}`);
     }
     if (!Number.isSafeInteger(omission.omitted_field_group_count) || omission.omitted_field_group_count !== 0) {
-      signals.push(`omission_receipt.omitted_field_group_count=${omission.omitted_field_group_count === undefined ? "<missing>" : JSON.stringify(omission.omitted_field_group_count)}`);
+      signals.push(`omission_receipt.omitted_field_group_count=${describeSignalValue(omission.omitted_field_group_count)}`);
     }
     if (!Array.isArray(omission.omitted_field_groups) || omission.omitted_field_groups.length !== 0) {
-      signals.push(`omission_receipt.omitted_field_groups=${omission.omitted_field_groups === undefined ? "<missing>" : JSON.stringify(omission.omitted_field_groups)}`);
+      signals.push(`omission_receipt.omitted_field_groups=${describeSignalValue(omission.omitted_field_groups)}`);
     }
   }
 
@@ -2284,7 +2290,7 @@ function collectSupplementalCompleteListSignals(record: Record<string, unknown>)
       ["result_omitted", false],
     ] as const) {
       if (readOutput[field] !== expected) {
-        signals.push(`read_output.${field}=${readOutput[field] === undefined ? "<missing>" : JSON.stringify(readOutput[field])}`);
+        signals.push(`read_output.${field}=${describeSignalValue(readOutput[field])}`);
       }
     }
     const dimensions = readOutput.requested_dimensions;

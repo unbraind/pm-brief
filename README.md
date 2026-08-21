@@ -322,9 +322,12 @@ checks supplementing SDK 2026.8.21 are tracked upstream in
 
 This package uses TypeScript, `pm-changelog`, and the same daily release shape
 as the other public pm packages. `npm run release:check` runs typecheck, build,
-tests, docstring coverage, production audit, dry-run packing, and changelog
-validation. Changelog and release-note reads resolve the project-local pm CLI
-and explicitly disable both host output bounds.
+tests, docstring coverage, production audit, dry-run packing, installed-package
+acceptance, and changelog validation. The packed acceptance matrix loads real
+tracker data through npm/npx and Bun/bunx on the current host, plus npm/npx on
+the declared minimum host. Changelog and release-note reads let `pm-changelog`
+resolve the installed pm CLI entry through Node (portable to Windows) and
+explicitly disable both host output bounds.
 
 ## Multi-agent merge safety
 

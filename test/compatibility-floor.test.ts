@@ -6,6 +6,7 @@ import {
   checkExtensionManifestCompatibility,
   type ExtensionManifestCompatibilityManifest,
 } from "@unbrained/pm-cli/sdk";
+import { REQUIRED_DEVELOPMENT_VERSION, REQUIRED_MINIMUM_VERSION } from "./version-contract.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
@@ -35,8 +36,6 @@ const extensionManifest = JSON.parse(
 
 const CLI = "@unbrained/pm-cli";
 const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
-const REQUIRED_MINIMUM_VERSION = "2026.8.20";
-const REQUIRED_DEVELOPMENT_VERSION = "2026.8.21";
 
 /**
  * Two independent systems enforce the pm CLI compatibility floor, and each reads
@@ -130,7 +129,7 @@ test("the development dependency is an exact pin at or above the declared floor"
   );
 });
 
-test("the complete raw manifest satisfies the public SDK at minimum and development hosts", () => {
+test("the complete raw manifest metadata satisfies the current SDK checker for minimum and development versions", () => {
   const rawManifest = JSON.parse(
     readFileSync(resolve(repoRoot, "manifest.json"), "utf8"),
   ) as ExtensionManifestCompatibilityManifest;
@@ -144,11 +143,11 @@ test("the complete raw manifest satisfies the public SDK at minimum and developm
   );
 });
 
-test("every changelog and release-note read uses the local CLI with unbounded host controls", () => {
+test("every changelog and release-note read resolves the installed CLI portably with unbounded host controls", () => {
   for (const name of ["changelog:full", "changelog:check", "release:notes"] as const) {
     const script = packageJson.scripts?.[name];
     assert.ok(script, `package.json must declare ${name}`);
-    assert.match(script, /--pm-bin \.\/node_modules\/\.bin\/pm/u);
+    assert.doesNotMatch(script, /--pm-bin/u, "pm-changelog must resolve the installed CLI entry through Node so Windows never executes a POSIX shim");
     assert.match(script, /--pm-arg=--output-budget\s+--pm-arg=unbounded/u);
     assert.match(script, /--pm-arg=--output-limit\s+--pm-arg=unbounded/u);
   }

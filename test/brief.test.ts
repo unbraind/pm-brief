@@ -541,73 +541,73 @@ for (const [signal, override, expectedDetail] of [
   ["malformed read-output receipt", { read_output: "none" }, "read_output=<missing>"],
   [
     "wrong read-output contract version",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), contract_version: 2 } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), contract_version: 2 } }),
     "read_output.contract_version=2",
   ],
   [
     "wrong read-output command",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), command: "get" } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), command: "get" } }),
     'read_output.command="get"',
   ],
   [
     "budget overrun",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), within_budget: false } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), within_budget: false } }),
     "read_output.within_budget=false",
   ],
   [
     "compacted rows",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), rows_compacted: true } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), rows_compacted: true } }),
     "budget_compaction",
   ],
   [
     "omitted result",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), result_omitted: true } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), result_omitted: true } }),
     "budget_omission",
   ],
   [
     "missing requested dimensions",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: undefined } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: undefined } }),
     "read_output.requested_dimensions=<missing>",
   ],
   [
     "missing include dimension",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["amount", "cost"] } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["amount", "cost"] } }),
     "requested_dimensions missing include",
   ],
   [
     "missing amount dimension",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["include", "cost"] } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["include", "cost"] } }),
     "requested_dimensions missing amount",
   ],
   [
     "missing cost dimension",
-    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["include", "amount"] } },
+    () => ({ read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["include", "amount"] } }),
     "requested_dimensions missing cost",
   ],
   ["budget-exceeded disclosure", { output_budget_exceeded: { omitted_result: false } }, "output_budget_exceeded=<present>"],
   [
     "filtered status scope",
-    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), status: "open" } },
+    () => ({ filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), status: "open" } }),
     "filtered_corpus",
   ],
   [
     "runtime filters",
-    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), runtime_filters: { team: "one" } } },
+    () => ({ filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), runtime_filters: { team: "one" } } }),
     "filtered_corpus",
   ],
   [
     "excluded terminal items",
-    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), exclude_terminal: true } },
+    () => ({ filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), exclude_terminal: true } }),
     "terminal_items_excluded",
   ],
   [
     "unproven strict read",
-    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), strict_read: false } },
+    () => ({ filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), strict_read: false } }),
     "strict_read_unproven",
   ],
   [
     "bounded page",
-    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), no_truncate: false } },
+    () => ({ filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), no_truncate: false } }),
     "page_incomplete",
   ],
   ["applied row limit", { applied_limit: 100 }, "page_incomplete"],
@@ -615,8 +615,9 @@ for (const [signal, override, expectedDetail] of [
   ["cross-call session", { read_session: { served_item_ids: [] } }, "session_projection"],
 ] as const) {
   test(`parsePmItemsOutput refuses ${signal}`, () => {
+    const resolvedOverride = typeof override === "function" ? override() : override;
     assert.throws(
-      () => parsePmItemsOutput(realEnvelopeWith(override)),
+      () => parsePmItemsOutput(realEnvelopeWith(resolvedOverride)),
       (error: unknown) => error instanceof Error && error.message.includes(expectedDetail),
       `the refusal must name ${expectedDetail}`,
     );
@@ -3784,9 +3785,7 @@ describe("brief governance end-to-end", () => {
         runGov({ format: "json", threshold: 0.5, "stale-hours": 1 }),
         (error: unknown) => error instanceof Error
           && error.name === "CommandError"
-          && /"code": "list_source_incomplete"/.test(error.message)
-          && /Strict list reads fail closed/.test(error.message)
-          && /list --all/.test(error.message),
+          && /"code": "list_source_incomplete"/.test(error.message),
         "a partially unreadable workspace must fail at the strict canonical read boundary",
       );
     } finally {

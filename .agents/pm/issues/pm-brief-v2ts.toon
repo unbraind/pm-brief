@@ -6,7 +6,7 @@ status: in_progress
 priority: 1
 tags[6]: agents,canonical-list,completeness,latest-cli,sdk,tdd
 created_at: "2026-08-21T06:18:04.769Z"
-updated_at: "2026-08-21T06:45:25.694Z"
+updated_at: "2026-08-21T07:02:50.790Z"
 author: "harness:codex"
 estimated_minutes: 300
 acceptance_criteria: "Create red-first tests proving the exact canonical argv and rejection of every independent incomplete, omitted, compacted, malformed, count-inconsistent, blank-ID, and duplicate-ID envelope; Use the public pm SDK complete-list certification primitive and add only behavior-justified supplementary validation for verified SDK gaps; Remove the ignored top-level manifest compatibility key, retain pm_min_version and peer floor 2026.8.15 unless behavior requires a higher minimum, and exact-pin development to pm CLI/SDK 2026.8.21; Update docs, docstrings, generated changelog, package/workflow changelog reads, and all canonical terminology; Run release:check, npm and Bun packed fresh-project acceptance, raw-manifest compatibility at minimum and development hosts, PM validation/reconciliation/duplicate gates, and full tracked/history privacy checks; Create a specific PR, wait for exact-head CI and every available review bot, disposition every artifact, and do not merge or publish while independent quality, privacy, or review gates remain"
@@ -17,7 +17,7 @@ reporter: codex
 severity: high
 repro_steps: Run rg for list-all in index.ts and inspect package.json/manifest.json against installed pm CLI/SDK 2026.8.21; exercise the current public complete-list certifier with missing omission/read-output receipts.
 expected_result: "Every brief command consumes either a fully certified all-status workspace or fails with actionable evidence, emits no deprecated alias diagnostic, uses current SDK primitives and development dependencies, and preserves honest independent release gates."
-actual_result: "Canonical list --all now requests all statuses, full projection, strict reads, and both output limits unbounded; the public SDK certifies each result and package-local checks fail closed on the four verified SDK gaps reported upstream as pm-cli#1078. Development exact-pins pm CLI/SDK 2026.8.21; direct execution with pm CLI 2026.8.20 proves the declared behavior floor returns all 56 rows with complete/no-omission receipts, while 2026.8.15 rejects canonical list --all. Exact-head npm and Bun release:check each pass 270 tests, 75 documented declarations, 0 production vulnerabilities, and a nine-file pack; the final npm run measures 100.00% lines, 92.09% branches, and 100.00% functions. Fresh packed npm/npx and Bun/bunx projects each returned parseable real-data JSON with zero stderr bytes. PM validation/reconciliation/duplicate/strict-health gates are structurally green apart from 26 legacy closed-item resolution warnings and three advisory legacy provenance diagnostics. Full 212-commit review found only approved author identities, no absolute host paths, no sensitive filenames, zero GitHub secret alerts, and only explicit fake-secret test fixtures in token-pattern hits."
+actual_result: "Canonical list --all now requests all statuses, full projection, strict reads, and both output limits unbounded; the public SDK certifies each result and package-local checks fail closed on the four verified SDK gaps reported upstream as pm-cli#1078. Development exact-pins pm CLI/SDK 2026.8.21. A mandatory packed acceptance matrix proves npm/npx and Bun/bunx on 2026.8.21 plus npm/npx on the declared 2026.8.20 minimum can install, load, and execute the extension against real tracker data with valid JSON and zero stderr. Exact-head release:check passes 270 tests, 76 documented declarations across four TypeScript source/script files, 0 production vulnerabilities, a nine-file pack, and source coverage of 100.00% lines, 92.12% branches, and 100.00% functions. PM governance and full-history privacy checks are linked and green with only documented legacy metadata/provenance advisories. Release item pm-brief-8754 remains truthfully closed and is attributed to v2026.08.14, the first tag containing its merged workflow repair."
 component: complete-corpus reader and host compatibility
 dependencies[3]{id,kind,created_at,author,source_kind,author_source}:
   pm-brief-g6ko,related,"2026-08-21T06:18:04.769Z","harness:codex","cli:create:dep",detected
@@ -26,23 +26,45 @@ dependencies[3]{id,kind,created_at,author,source_kind,author_source}:
 comments[2]{created_at,author,text}:
   "2026-08-21T06:20:45.450Z","harness:codex","Red-first evidence: npm run build:test passed, then node --test test/brief.test.ts failed 11 complete-reader cases under project-local pm CLI 2026.8.15. The real canonical capture returned ambiguous_list_all for list --all, proving the current development host cannot exercise the new contract. New cases also require failures for missing pagination receipts, contradictory unreadable/omission counts, absent or compacted universal-output receipts, explicit budget truncation, row-count disagreement, blank IDs, and duplicates before production changes."
   "2026-08-21T06:23:18.666Z","harness:codex","Installed SDK 2026.8.21 reproduction: certifyCompleteListResult accepted a real canonical envelope after independently deleting omission_receipt, deleting read_output, setting unreadable_item_count to 1 behind status complete, and making omission count/groups contradict has_omissions=false. PmCompleteListValidationError also suggests stale pm list-all without output-limit unbounded. Upstream pm-cli issue 1078 owns the primitive fix; pm-brief will use the SDK certifier plus narrow supplemental fail-closed checks until a corrected release exists."
-notes[4]{created_at,author,text}:
+notes[5]{created_at,author,text}:
   "2026-08-21T06:41:04.677Z",codex,"TDD evidence: against the old 2026.8.15 host, the exact canonical argv tests failed with ambiguous_list_all. After only upgrading the host, the old decoder accepted missing or contradictory omission/read-output receipts and the bounded real read failed. The production change makes those tests pass without weakening fixtures or suppressing coverage."
   "2026-08-21T06:41:05.058Z",codex,"Installed artifact acceptance: npm/npx emitted 1439 stdout bytes and Bun/bunx emitted 1457 stdout bytes; both were valid JSON, included the created fixture item, exited zero, and emitted zero stderr bytes. Temporary acceptance projects and the generated untracked Bun lock were moved to trash after verification."
   "2026-08-21T06:44:01.318Z",codex,"Direct minimum-host acceptance: npm-executed @unbrained/pm-cli 2026.8.20 ran the exact production canonical list argv against this 56-item tracker and returned completeness.status=complete with omission_receipt.has_omissions=false. This proves 2026.8.20, rather than the rejected 2026.8.15 baseline, is the narrow behavior floor."
   "2026-08-21T06:45:25.675Z",codex,PR #76 opened from f804590 as the implementation and review record. It explicitly states that exact coverage pm-brief-gtiy remains open and blocks merge/publication.
-files[8]{path,scope,note}:
+  "2026-08-21T06:58:54.902Z",codex,"CodeRabbit round 1 raised eight findings. Accepted: explicit shipped-release attribution, complete linked acceptance commands, packed extension execution on the declared 2026.8.20 host, shared signal formatting, Windows-safe pm-changelog resolution, lazy real-envelope test construction, machine-code-only upstream failure assertion, and a shared non-test version contract. The requested reopen was replaced with release=2026.8.14 because lifecycle completion is true and explicit release metadata is the correct --respect-item-release contract."
+files[10]{path,scope,note}:
+  .github/workflows/ci.yml,project,exact head Node Bun docstring coverage audit pack and changelog CI
   index.ts,project,Canonical complete-corpus reader and decoder
   manifest.json,project,Raw host compatibility contract
   package-lock.json,project,reproducible current dependency resolution
   package.json,project,Current development and release contract
   README.md,project,complete corpus safety and release readiness documentation
+  scripts/accept-packed.ts,project,reproducible npm npx Bun bunx and minimum host installed artifact gate
   test/brief.test.ts,project,red first canonical argv and fail closed receipt coverage
   test/compatibility-floor.test.ts,project,raw manifest minimum and current host compatibility proof
   test/packaging.test.ts,project,peer floor and package contract proof
-tests[2]{command,path,scope,timeout_seconds}:
-  "NPM_CONFIG_USERCONFIG=/dev/null npm run release:check",.,project,1800
-  "bun install --no-save && bun run release:check",.,project,1800
+tests[5]:
+  - command: "NPM_CONFIG_USERCONFIG=/dev/null npm run release:check"
+    path: .
+    scope: project
+    timeout_seconds: 1800
+  - command: "bun install --no-save && bun run release:check"
+    path: .
+    scope: project
+    timeout_seconds: 1800
+  - command: "npm run accept:packed"
+    path: scripts/accept-packed.ts
+    scope: project
+    timeout_seconds: 300
+  - command: "gh api repos/unbraind/pm-brief/secret-scanning/alerts --paginate --jq 'if length == 0 then true else error(\"secret alerts present\") end' >/dev/null && if git log --all -p --format= | rg -q '/home/[^/ ]+|/Users/[^/ ]+|[A-Za-z]:\\\\Users\\\\'; then exit 1; fi"
+    path: .git
+    scope: project
+    timeout_seconds: 120
+  - command: ./node_modules/.bin/pm validate && ./node_modules/.bin/pm merge reconcile --dry-run && ./node_modules/.bin/pm duplicates --since 2026-08-21 && ./node_modules/.bin/pm health --strict-exit
+    path: .agents/pm
+    scope: project
+    timeout_seconds: 120
+    pm_context_mode: tracker
 docs[2]{path,scope,note}:
   "https://github.com/unbraind/pm-brief/pull/76",global,canonical complete corpus reader implementation and review record
   "https://github.com/unbraind/pm-cli/issues/1078",global,Upstream fail-closed complete-list certification and canonical recovery defect

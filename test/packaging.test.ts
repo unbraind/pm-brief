@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { REQUIRED_MINIMUM_VERSION } from "./version-contract.ts";
 
 /**
  * Shape of the fields this suite asserts on. Only the three dependency maps
@@ -106,8 +107,8 @@ test("the host CLI is declared as a peer dependency and never as a runtime depen
     `${HOST_CLI} must declare a ">=x.y.z" floor, not "${peer}": a pm extension cannot pin the host CLI a user installs, so an exact peer pin makes every later CLI patch a peer conflict`,
   );
   assert.ok(
-    compareVersions(peer.replace(/^>=/, ""), "2026.8.20") >= 0,
-    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.20: earlier hosts do not support the canonical \`list --all\` read this package executes`,
+    compareVersions(peer.replace(/^>=/, ""), REQUIRED_MINIMUM_VERSION) >= 0,
+    `${HOST_CLI} peer floor "${peer}" must be at least ${REQUIRED_MINIMUM_VERSION}: earlier hosts do not support the canonical \`list --all\` read this package executes`,
   );
 });
 

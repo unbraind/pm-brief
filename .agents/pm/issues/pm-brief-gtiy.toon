@@ -6,7 +6,7 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-07-26T13:52:29.218Z"
-updated_at: "2026-08-21T06:44:01.802Z"
+updated_at: "2026-08-21T07:02:51.266Z"
 assignee: codex
 claim_principal: codex
 author: codex
@@ -17,7 +17,7 @@ severity: high
 component: testing
 dependencies[1]{id,kind,created_at,author}:
   pm-brief-q325,related,"2026-07-26T13:52:29.218Z",codex
-notes[16]{created_at,author,text}:
+notes[17]{created_at,author,text}:
   "2026-07-26T13:52:41.808Z",codex,"Baseline measured 2026-07-26 with Node built-in coverage against the latest project-local pm CLI: dist/index.js 82.84% lines, 74.67% branches, 92.19% functions. The aggregate report is lower because it also observes a temporary installed extension copy; the source file row is the actionable baseline."
   "2026-07-26T14:13:07.264Z",codex,"Workflow-level acceptance evidence is now linked in addition to the reporting-only coverage baseline. This Issue remains open until release:check itself enforces all four 100% thresholds; a passing current release:check is not evidence that the acceptance criteria are met."
   "2026-08-02T00:42:20.038Z","harness:codex","TDD tranche 1: added a real registered-command acceptance matrix covering all nine command families, host-global JSON, Slack/JSON/Markdown output, output-file persistence, real PM reads, duplicate/governance SDK scans, activity deltas, and Git divergence. Targeted test passes. Full suite now passes 161 tests and source coverage improved from 91.97/76.72/95.85 to 94.86% lines, 78.71% branches, and 96.27% functions. The issue remains in progress; thresholds are intentionally unchanged until meaningful tests reach exact 100/100/100."
@@ -34,6 +34,7 @@ notes[16]{created_at,author,text}:
   "2026-08-07T23:48:06.129Z","harness:codex","2026-08-08 branch-contract tranche: added behavior-driven coverage for default and filtered next-work selection, active/stale unprioritized explanations, deduplicated mixed focus selectors, include-closed behavior, four-id omission summaries, all delta lifecycle sections, removed-item fallbacks, assignment/dependency/comment details, truncation across Markdown/text/Slack, stable duplicate remediation without timestamps, SDK self-match rejection, duplicate-sweep defaults, and complete governance text without false rollups. Fresh coverage passes 203 tests at 100.00% lines, 91.94% branches, and 100.00% functions. LCOV now contains 130 zero-hit branch records, down from 153; exact coverage and threshold hardening remain open, with no exclusion, ignore pragma, invalid fixture, or threshold change."
   "2026-08-21T06:41:05.464Z",codex,"2026-08-21 complete-corpus tranche measurement: both npm and Bun release:check pass 270 behavior-driven tests with index.ts at 100.00% lines, 92.08% branches, and 100.00% functions. Node V8 does not report an independent statements metric in this gate. Exact 100/100/100/100 and threshold hardening therefore remain in progress; this scoped reader PR must not be treated as satisfying the coverage mandate."
   "2026-08-21T06:44:01.780Z",codex,"Final exact-tree npm measurement after PM/changelog regeneration is 270 tests at 100.00% lines, 92.09% branches, and 100.00% functions. The independent statement dimension is still not reported, so the item remains in progress."
+  "2026-08-21T07:02:51.235Z",codex,"Review-hardened exact-tree release gate on 2026-08-21 passes 270 tests with 5076/5076 lines, 1519/1649 branches (92.12%), and 301/301 functions. The new packed npm/Bun/minimum-host acceptance script is separately docstring-gated but is not counted as production source by the existing LCOV scope. Exact branch and independent statement coverage remain open."
 files[2]{path,scope,note}:
   index.ts,project,Source coverage target
   test/brief.test.ts,project,Coverage test expansion

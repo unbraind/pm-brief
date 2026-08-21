@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Fixed
-
-- Fix release publish ordering ahead of protected main push ([pm-brief-8754](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-8754.toon))
-
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed
@@ -17,6 +11,7 @@
 
 ### Fixed
 
+- Fix release publish ordering ahead of protected main push ([pm-brief-8754](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-8754.toon))
 - The brief reported the side a merge requested as the side it kept, which under stable value order is the opposite of what happened ([pm-brief-bjll](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-bjll.toon))
 - The pm CLI was a runtime dependency with no peer declaration, so consumers could resolve a second copy ([pm-brief-h7fg](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-h7fg.toon))
 
