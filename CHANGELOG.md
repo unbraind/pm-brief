@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Fix release publish ordering ahead of protected main push ([pm-brief-8754](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-8754.toon))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed

@@ -320,7 +320,7 @@ test("parsePmItemsOutput reports malformed CLI output as a command error", () =>
 
 test("pm readers distinguish required tracker failures from optional ranking and history", () => {
   const missingTracker = join(tmpdir(), "pm-brief-intentionally-missing-tracker");
-  assert.throws(() => readPmItems(missingTracker), /pm list-all|tracker_not_initialized|ENOENT|not found|does not exist/i);
+  assert.throws(() => readPmItems(missingTracker), /pm list --all|tracker_not_initialized|ENOENT|not found|does not exist/i);
   assert.throws(
     () => readActivitySince(missingTracker, { from: "2026-01-01T00:00:00Z" }),
     /pm activity|tracker_not_initialized|ENOENT|not found|does not exist/i,
@@ -375,14 +375,14 @@ test("pm item parser refuses answers that carry no completeness receipt", () => 
       () => parsePmItemsOutput(output),
       (error: unknown) => error instanceof Error
         && error.name === "CommandError"
-        && /completeness\.status=<missing>/.test(error.message)
+        && /invalid_envelope/.test(error.message)
         && /was refused/.test(error.message),
       `expected a refusal for ${output}`,
     );
   }
 });
 
-/** A real `pm list-all --json --include-body` envelope captured from the
+/** A real canonical complete-list envelope captured from the
  * installed CLI against this repository's own tracker, cached for the refusal
  * tests so the spawn happens once. Mutating one field of this envelope is how
  * the tests drive each refusal signal from the CLI's real answer shape rather
@@ -394,10 +394,25 @@ function captureRealListAllEnvelope(): Record<string, unknown> {
     const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
     const result = spawnSync(
       pmBin,
-      ["--pm-path", join(repoRoot(), ".agents", "pm"), "list-all", "--json", "--include-body"],
+      [
+        "--pm-path",
+        join(repoRoot(), ".agents", "pm"),
+        "list",
+        "--all",
+        "--json",
+        "--include-body",
+        "--strict-read",
+        "--no-truncate",
+        "--output-budget",
+        "unbounded",
+        "--output-limit",
+        "unbounded",
+        "--output-include",
+        "full",
+      ],
       { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 },
     );
-    assert.equal(result.status, 0, `capturing a real list-all envelope failed: ${result.stderr}`);
+    assert.equal(result.status, 0, `capturing a real canonical list envelope failed: ${result.stderr}`);
     const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
     assert.ok(Array.isArray(parsed.items) && parsed.items.length > 0, "the real envelope must carry items");
     // Assert the captured envelope is COMPLETE before the refusal table starts
@@ -421,6 +436,21 @@ function captureRealListAllEnvelope(): Record<string, unknown> {
       "captured envelope must not already report omitted field groups",
     );
     assert.equal(parsed.count, parsed.total, "captured envelope must return every matched row");
+    assert.equal(
+      (parsed.filters as Record<string, unknown> | undefined)?.status,
+      "all",
+      "captured envelope must explicitly select every lifecycle status",
+    );
+    assert.equal(
+      (parsed.filters as Record<string, unknown> | undefined)?.strict_read,
+      true,
+      "captured envelope must prove strict source reads",
+    );
+    assert.equal(
+      (parsed.filters as Record<string, unknown> | undefined)?.no_truncate,
+      true,
+      "captured envelope must prove its row ceiling was disabled",
+    );
     realListAllEnvelope = parsed;
   }
   return realListAllEnvelope;
@@ -439,12 +469,12 @@ function realEnvelopeWith(override: Record<string, unknown>): string {
 }
 
 for (const [signal, override, expectedDetail] of [
-  ["truncated", { truncated: true }, "truncated=true"],
-  ["has_more", { has_more: true }, "has_more=true"],
-  ["completeness.status", { completeness: { status: "partial", unreadable_item_count: 2, unreadable_directory_count: 0 } }, 'completeness.status="partial"'],
+  ["truncated", { truncated: true }, "page_incomplete"],
+  ["has_more", { has_more: true }, "page_incomplete"],
+  ["completeness.status", { completeness: { status: "partial", unreadable_item_count: 2, unreadable_directory_count: 0 } }, "source_incomplete"],
   ["omission_receipt.has_omissions", { omission_receipt: { has_omissions: true, omitted_field_group_count: 1, omitted_field_groups: ["body"] } }, "omission_receipt.has_omissions=true"],
   // The receipt must be PRESENT and say no omissions, not merely fail to say
-  // otherwise. Every CLI at the declared `>=2026.8.15` peer floor emits it on
+  // otherwise. Every CLI at the declared `>=2026.8.20` peer floor emits it on
   // this read, so an absent or malformed one is an answer that cannot prove it
   // carried every field group -- not an older shape to tolerate.
   ["omission_receipt absent", { omission_receipt: undefined }, "omission_receipt=<missing>"],
@@ -452,14 +482,14 @@ for (const [signal, override, expectedDetail] of [
   ["omission_receipt.has_omissions absent", { omission_receipt: { omitted_field_group_count: 0 } }, "omission_receipt.has_omissions=<missing>"],
   // A cursor means rows remain beyond this answer whether or not `has_more`
   // agrees; only `has_more` was being read, so a cursor alone was consumed.
-  ["next_cursor present", { next_cursor: "eyJvZmZzZXQiOjEwfQ==" }, 'next_cursor="eyJvZmZzZXQiOjEwfQ=="'],
-  // `total` is the pre-pagination match count; a `list-all` with no limit that
+  ["next_cursor present", { next_cursor: "eyJvZmZzZXQiOjEwfQ==" }, "page_incomplete"],
+  // `total` is the pre-pagination match count; a canonical unbounded list that
   // returns fewer rows than it says matched is self-contradictory -- truncation
   // arriving without any of the flags that normally announce it.
-  ["count/total mismatch", { count: 3 }, "count=3 does not match total="],
-  ["count not numeric", { count: "3" }, "count/total not both numeric"],
+  ["count/total mismatch", { count: 3 }, "count_mismatch"],
+  ["count not numeric", { count: "3" }, "count_mismatch"],
 ] as const) {
-  test(`parsePmItemsOutput refuses a real list-all envelope whose ${signal} signal tripped`, () => {
+  test(`parsePmItemsOutput refuses a real canonical list envelope whose ${signal} signal tripped`, () => {
     // Derive the expected counts from the MUTATED record, not the captured one:
     // the count/total cases override those very fields, and the refusal reports
     // what the envelope actually carried.
@@ -477,10 +507,183 @@ for (const [signal, override, expectedDetail] of [
   });
 }
 
+for (const [signal, override, expectedDetail] of [
+  [
+    "nonzero unreadable directory count",
+    { completeness: { status: "complete", unreadable_item_count: 0, unreadable_directory_count: 1 } },
+    "unreadable_directory_count=1",
+  ],
+  [
+    "missing unreadable counters",
+    { completeness: { status: "complete" } },
+    "unreadable_item_count=<missing>",
+  ],
+  [
+    "non-integer unreadable counter",
+    { completeness: { status: "complete", unreadable_item_count: 0.5, unreadable_directory_count: 0 } },
+    "unreadable_item_count=0.5",
+  ],
+  [
+    "missing omission count",
+    { omission_receipt: { has_omissions: false, omitted_field_groups: [] } },
+    "omitted_field_group_count=<missing>",
+  ],
+  [
+    "missing omission groups",
+    { omission_receipt: { has_omissions: false, omitted_field_group_count: 0 } },
+    "omitted_field_groups=<missing>",
+  ],
+  [
+    "malformed omission groups",
+    { omission_receipt: { has_omissions: false, omitted_field_group_count: 0, omitted_field_groups: "none" } },
+    'omitted_field_groups="none"',
+  ],
+  ["malformed read-output receipt", { read_output: "none" }, "read_output=<missing>"],
+  [
+    "wrong read-output contract version",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), contract_version: 2 } },
+    "read_output.contract_version=2",
+  ],
+  [
+    "wrong read-output command",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), command: "get" } },
+    'read_output.command="get"',
+  ],
+  [
+    "budget overrun",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), within_budget: false } },
+    "read_output.within_budget=false",
+  ],
+  [
+    "compacted rows",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), rows_compacted: true } },
+    "budget_compaction",
+  ],
+  [
+    "omitted result",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), result_omitted: true } },
+    "budget_omission",
+  ],
+  [
+    "missing requested dimensions",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: undefined } },
+    "read_output.requested_dimensions=<missing>",
+  ],
+  [
+    "missing include dimension",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["amount", "cost"] } },
+    "requested_dimensions missing include",
+  ],
+  [
+    "missing amount dimension",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["include", "cost"] } },
+    "requested_dimensions missing amount",
+  ],
+  [
+    "missing cost dimension",
+    { read_output: { ...(captureRealListAllEnvelope().read_output as Record<string, unknown>), requested_dimensions: ["include", "amount"] } },
+    "requested_dimensions missing cost",
+  ],
+  ["budget-exceeded disclosure", { output_budget_exceeded: { omitted_result: false } }, "output_budget_exceeded=<present>"],
+  [
+    "filtered status scope",
+    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), status: "open" } },
+    "filtered_corpus",
+  ],
+  [
+    "runtime filters",
+    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), runtime_filters: { team: "one" } } },
+    "filtered_corpus",
+  ],
+  [
+    "excluded terminal items",
+    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), exclude_terminal: true } },
+    "terminal_items_excluded",
+  ],
+  [
+    "unproven strict read",
+    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), strict_read: false } },
+    "strict_read_unproven",
+  ],
+  [
+    "bounded page",
+    { filters: { ...(captureRealListAllEnvelope().filters as Record<string, unknown>), no_truncate: false } },
+    "page_incomplete",
+  ],
+  ["applied row limit", { applied_limit: 100 }, "page_incomplete"],
+  ["projected rows", { projection: { mode: "compact", fields: ["id"] } }, "projection_incomplete"],
+  ["cross-call session", { read_session: { served_item_ids: [] } }, "session_projection"],
+] as const) {
+  test(`parsePmItemsOutput refuses ${signal}`, () => {
+    assert.throws(
+      () => parsePmItemsOutput(realEnvelopeWith(override)),
+      (error: unknown) => error instanceof Error && error.message.includes(expectedDetail),
+      `the refusal must name ${expectedDetail}`,
+    );
+  });
+}
+
 test("parsePmItemsOutput lets every item of a real complete envelope flow through unchanged", () => {
   const envelope = captureRealListAllEnvelope();
   const items = envelope.items as unknown[];
   assert.deepEqual(parsePmItemsOutput(JSON.stringify(envelope)), items);
+});
+
+for (const [signal, override, expectedDetail] of [
+  ["missing truncated receipt", { truncated: undefined }, "page_incomplete"],
+  ["missing has_more receipt", { has_more: undefined }, "page_incomplete"],
+  ["missing next_cursor receipt", { next_cursor: undefined }, "page_incomplete"],
+  [
+    "nonzero unreadable item count behind complete status",
+    { completeness: { status: "complete", unreadable_item_count: 1, unreadable_directory_count: 0 } },
+    "unreadable_item_count=1",
+  ],
+  [
+    "contradictory omission count",
+    { omission_receipt: { has_omissions: false, omitted_field_group_count: 1, omitted_field_groups: ["body"] } },
+    "omitted_field_group_count=1",
+  ],
+  ["missing universal-output receipt", { read_output: undefined }, "read_output=<missing>"],
+  [
+    "compacted strings",
+    {
+      read_output: {
+        ...(captureRealListAllEnvelope().read_output as Record<string, unknown>),
+        strings_compacted: true,
+      },
+    },
+    "budget_compaction",
+  ],
+  [
+    "budget-truncation disclosure",
+    { output_budget_truncation: { reason: "output_budget_reached" } },
+    "output_budget_truncation=<present>",
+  ],
+] as const) {
+  test(`parsePmItemsOutput refuses a real complete-list envelope with ${signal}`, () => {
+    assert.throws(
+      () => parsePmItemsOutput(realEnvelopeWith(override)),
+      (error: unknown) => error instanceof Error && error.message.includes(expectedDetail),
+      `the refusal must name ${expectedDetail}`,
+    );
+  });
+}
+
+test("parsePmItemsOutput refuses row-count disagreement and unusable identities", () => {
+  const envelope = captureRealListAllEnvelope();
+  const items = envelope.items as Array<Record<string, unknown>>;
+  assert.throws(
+    () => parsePmItemsOutput(realEnvelopeWith({ items: items.slice(1) })),
+    /count_mismatch/,
+  );
+  assert.throws(
+    () => parsePmItemsOutput(realEnvelopeWith({ items: [{ ...items[0], id: " " }, ...items.slice(1)] })),
+    /invalid_item_id/,
+  );
+  assert.throws(
+    () => parsePmItemsOutput(realEnvelopeWith({ items: [items[0], ...items], count: items.length + 1, total: items.length + 1 })),
+    /duplicate_item_id/,
+  );
 });
 
 test("readPmItems still reads this repository's real tracker end to end", () => {
@@ -488,26 +691,43 @@ test("readPmItems still reads this repository's real tracker end to end", () => 
   assert.ok(items.length > 0, "the real tracker read must return its items");
 });
 
-test("pm item parser discards malformed rows and prefers items over results under a complete receipt", () => {
-  const withCompleteReceipt = (partial: Record<string, unknown>) => JSON.stringify({
-    count: 2,
-    total: 2,
-    truncated: false,
-    has_more: false,
-    completeness: { status: "complete", unreadable_item_count: 0, unreadable_directory_count: 0 },
-    omission_receipt: { has_omissions: false, omitted_field_group_count: 0, omitted_field_groups: [] },
-    ...partial,
+test("readPmItems invokes the exact canonical complete-corpus command", () => {
+  const envelope = captureRealListAllEnvelope();
+  let invoked: string[] | undefined;
+  const items = readPmItems("/tracker", (args) => {
+    invoked = args;
+    const stdout = JSON.stringify(envelope);
+    return { pid: 1, output: [null, stdout, ""], stdout, stderr: "", status: 0, signal: null };
   });
-  assert.deepEqual(parsePmItemsOutput(withCompleteReceipt({
-    items: [null, { id: "pm-first" }, { title: "missing id" }, { id: 42 }, { id: "pm-second" }],
-    results: [{ id: "pm-shadowed" }],
-  })), [{ id: "pm-first" }, { id: "pm-second" }]);
-  assert.deepEqual(parsePmItemsOutput(withCompleteReceipt({ results: [{ id: "pm-result", title: "Result" }] })), [
-    { id: "pm-result", title: "Result" },
+  assert.deepEqual(invoked, [
+    "--pm-path",
+    "/tracker",
+    "list",
+    "--all",
+    "--json",
+    "--include-body",
+    "--strict-read",
+    "--no-truncate",
+    "--output-budget",
+    "unbounded",
+    "--output-limit",
+    "unbounded",
+    "--output-include",
+    "full",
   ]);
+  assert.deepEqual(items, envelope.items);
+});
+
+test("pm item parser refuses malformed rows and never falls back to an uncertified results array", () => {
+  const envelope = captureRealListAllEnvelope();
+  const items = envelope.items as Array<Record<string, unknown>>;
   assert.throws(
-    () => parsePmItemsOutput(withCompleteReceipt({ items: "invalid", results: [{ id: "pm-shadowed" }] })),
-    /no items array/,
+    () => parsePmItemsOutput(realEnvelopeWith({ items: [null, ...items.slice(1)] })),
+    /invalid_item_id/,
+  );
+  assert.throws(
+    () => parsePmItemsOutput(realEnvelopeWith({ items: undefined, results: items })),
+    /invalid_envelope/,
   );
 });
 
@@ -880,7 +1100,7 @@ test("buildBrief explains empty workspaces and filters that narrow a non-empty r
   assert.deepEqual(empty.insights, [{
     level: "info",
     message: "no open work items are available in this workspace",
-    suggestion: "pm list-open --limit 20",
+    suggestion: "pm list --status open --limit 20",
   }]);
 
   const narrowed = buildBrief(items, {
@@ -2309,7 +2529,7 @@ describe("brief diverge end-to-end", () => {
       const ancestorSha = git(["rev-parse", "HEAD"]);
 
       // get item ids
-      const listOutput = pm(["--pm-path", pmPath, "list-all", "--json"]);
+      const listOutput = pm(["--pm-path", pmPath, "list", "--all", "--json", "--strict-read", "--no-truncate", "--output-budget", "unbounded", "--output-limit", "unbounded", "--output-include", "full"]);
       const parsed = JSON.parse(listOutput) as { items?: Array<{ id: string; title: string }> };
       const itemList = parsed.items ?? (parsed as unknown as Array<{ id: string; title: string }>);
       const item1 = itemList.find((i) => i.title === "Item 1")?.id;
@@ -3315,7 +3535,7 @@ describe("brief governance", () => {
     // Exercises the real scanStorageIntegrity -> toGovernanceStorageFindings
     // mapping directly against corrupt directory trees, so every finding
     // class stays covered even though `brief governance` itself now refuses
-    // (via the list-all completeness receipt) on exactly such workspaces.
+    // (via the canonical complete-list contract) on exactly such workspaces.
     // The document bodies must be fully valid pm items so only the intended
     // corruption registers: the scanner classifies a document it cannot parse
     // as unreadable, which would otherwise drown out the other finding kinds.
@@ -3483,7 +3703,7 @@ describe("brief governance end-to-end", () => {
       pm(["--pm-path", pmPath, "update", secretItemId, "--description", "Use AWS key AKIAIOSFODNN7EXAMPLE for deployment", "--author", "agent-a"]);
 
       // Seed every storage-integrity class against a real tracker. Since the
-      // list-all completeness refusal landed, a workspace holding unreadable
+      // complete-list refusal landed, a workspace holding unreadable
       // items makes `brief governance` REFUSE instead of rendering a report
       // built from the readable subset, so the corruption is seeded only after
       // the clean-baseline governance run below and asserted as a typed
@@ -3557,17 +3777,17 @@ describe("brief governance end-to-end", () => {
       // The detector rule SHOULD appear
       assert.match(textOutput, /aws_access_key/);
 
-      // 6. Once the workspace holds unreadable items, `pm list-all` answers with
-      // completeness.status="partial" and the governance read must refuse
-      // instead of rendering a report built from the readable subset.
+      // 6. Once the workspace holds unreadable items, the strict canonical list
+      // read must refuse instead of rendering a report from the readable subset.
       await seedCorruption();
       await assert.rejects(
         runGov({ format: "json", threshold: 0.5, "stale-hours": 1 }),
         (error: unknown) => error instanceof Error
           && error.name === "CommandError"
-          && /completeness\.status="partial"/.test(error.message)
-          && /count=7 of total=7/.test(error.message),
-        "a partially unreadable workspace must fail the governance read loudly",
+          && /"code": "list_source_incomplete"/.test(error.message)
+          && /Strict list reads fail closed/.test(error.message)
+          && /list --all/.test(error.message),
+        "a partially unreadable workspace must fail at the strict canonical read boundary",
       );
     } finally {
       await rm(tmpDir, { recursive: true, force: true });

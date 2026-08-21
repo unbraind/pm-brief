@@ -42,7 +42,7 @@ const MINIMUM_VERSION_RANGE = /^>=\d+\.\d+\.\d+$/;
  * Compares segment by segment and stops at the first difference. Comparing the
  * segments independently would rank `1.0.5` above `2.0.0` on the strength of its
  * final segment, and comparing the strings lexically would rank `2026.8.9` above
- * `2026.8.15`.
+ * `2026.8.20`.
  */
 function compareVersions(left: string, right: string): number {
   const leftParts = left.split(".").map((part) => Number.parseInt(part, 10));
@@ -94,20 +94,20 @@ test("the host CLI is declared as a peer dependency and never as a runtime depen
   // npm 7+ auto-installs the newest version a peer range admits, so a floor does
   // admit a FUTURE regressed CLI. No range declared today can exclude a
   // regression that does not exist yet. What actually protects this package is
-  // the runtime completeness refusal on every `list-all` read, which detects a
+  // the runtime completeness refusal on every whole-corpus read, which detects a
   // regressed host by observing `truncated` / `has_more` / `completeness` /
   // `omission_receipt` rather than by guessing version numbers.
   //
-  // The floor's job is narrower: exclude 2026.8.14, whose `list-all` silently
-  // returned 10 of 682 items, and everything older that predates the receipt.
+  // The floor's job is narrower: exclude hosts before 2026.8.20, which do not
+  // support the canonical `list --all` contract this package now executes.
   assert.match(
     peer,
     MINIMUM_VERSION_RANGE,
     `${HOST_CLI} must declare a ">=x.y.z" floor, not "${peer}": a pm extension cannot pin the host CLI a user installs, so an exact peer pin makes every later CLI patch a peer conflict`,
   );
   assert.ok(
-    compareVersions(peer.replace(/^>=/, ""), "2026.8.15") >= 0,
-    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.15: 2026.8.14 truncates \`list-all\` to 10 items and earlier releases predate the completeness receipt this package refuses on`,
+    compareVersions(peer.replace(/^>=/, ""), "2026.8.20") >= 0,
+    `${HOST_CLI} peer floor "${peer}" must be at least 2026.8.20: earlier hosts do not support the canonical \`list --all\` read this package executes`,
   );
 });
 

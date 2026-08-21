@@ -302,11 +302,29 @@ const brief = buildBrief(items, {
 console.log(renderMarkdownBrief(brief));
 ```
 
+### Complete-corpus safety
+
+Every brief command starts from the canonical all-status reader:
+
+```console
+pm --pm-path <tracker> list --all --json --include-body --strict-read --no-truncate \
+  --output-budget unbounded --output-limit unbounded --output-include full
+```
+
+pm-brief passes that envelope through the public pm SDK complete-list
+certifier, then rejects any missing or contradictory source, omission,
+projection, pagination, universal-output, count, or item-identity receipt. It
+never follows a partial cursor or falls back to a bare row array. The narrow
+checks supplementing SDK 2026.8.21 are tracked upstream in
+[pm-cli#1078](https://github.com/unbraind/pm-cli/issues/1078).
+
 ## Release Readiness
 
 This package uses TypeScript, `pm-changelog`, and the same daily release shape
 as the other public pm packages. `npm run release:check` runs typecheck, build,
-tests, production audit, dry-run packing, and changelog validation.
+tests, docstring coverage, production audit, dry-run packing, and changelog
+validation. Changelog and release-note reads resolve the project-local pm CLI
+and explicitly disable both host output bounds.
 
 ## Multi-agent merge safety
 
