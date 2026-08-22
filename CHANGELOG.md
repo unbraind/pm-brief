@@ -6,6 +6,10 @@
 
 - Canonicalize the complete-corpus reader and adopt the current pm host contract ([pm-brief-v2ts](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v2ts.toon))
 
+### Other
+
+- Alert on daily release failure and require merge drivers in CI ([pm-brief-javk](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-javk.toon))
+
 ## 2026.8.16 - 2026-08-16
 
 ### Fixed
