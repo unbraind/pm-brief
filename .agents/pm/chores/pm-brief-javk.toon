@@ -1,0 +1,23 @@
+id: pm-brief-javk
+title: Alert on daily release failure and require merge drivers in CI
+description: "Two CI fixes: (1) release.yml gets an if:failure() job that opens or updates one deduplicated tracking issue (label release-failure, stable title) with job name, run URL, commit SHA and date; issues:write only, never blocks a release. (2) ci.yml installs pm merge drivers before the health gate and passes --require-merge-drivers so a fresh clone without clone-local driver config fails the gate instead of silently passing. Motivated by five unnoticed failed daily releases (2026-08-17..2026-08-22) caused by an expired npm token."
+type: Chore
+status: closed
+priority: 1
+tags: []
+created_at: "2026-08-22T18:44:47.348Z"
+updated_at: "2026-08-22T18:47:50.023Z"
+closed_at: "2026-08-22T18:47:50.012Z"
+completed_at: "2026-08-22T18:47:50.012Z"
+claim_principal: ox-alpha
+author: ox-alpha
+notes[1]{created_at,author,text}:
+  "2026-08-22T18:44:52.174Z",ox-alpha,"Gate proof: removed all five merge.pm-* config sections, ./node_modules/.bin/pm health --strict-exit --require-merge-drivers exited 1; after ./node_modules/.bin/pm merge install it exited 0. Plain --strict-exit stays 0 both ways."
+files[2]{path,scope}:
+  .github/workflows/ci.yml,project
+  .github/workflows/release.yml,project
+tests[2]{command,path,scope,note}:
+  git config --local --remove-section merge.pm-item-toon && ./node_modules/.bin/pm health --strict-exit --require-merge-drivers,.,project,health gate exits non-zero when clone-local merge drivers are absent
+  python3 .agents/pm/verify-release-yaml.py,.github/workflows/release.yml,project,"release.yml parses as YAML; alert-on-release-failure job has if: failure(), needs: release, permissions issues:write"
+close_reason: "Both fixes implemented, YAML-verified and gate proven (RC 1 without drivers, 0 after pm merge install); npm test 270 pass; release:check green"
+body: ""
