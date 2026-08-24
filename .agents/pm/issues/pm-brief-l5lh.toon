@@ -6,7 +6,7 @@ status: closed
 priority: 1
 tags: []
 created_at: "2026-08-24T15:42:34.069Z"
-updated_at: "2026-08-24T16:18:56.996Z"
+updated_at: "2026-08-24T16:28:57.370Z"
 closed_at: "2026-08-24T16:18:56.936Z"
 completed_at: "2026-08-24T16:18:56.936Z"
 claim_principal: "harness:codex#ab1e57eb956a1904d394f7ca"
@@ -24,9 +24,10 @@ actual_result: The executable verifier and all five focused alert scenarios pass
 affected_version: 2026.8.24
 component: release-workflow
 regression: true
-notes[2]{created_at,author,text}:
+notes[3]{created_at,author,text}:
   "2026-08-24T15:50:01.224Z","harness:codex","Review audit also found the merged reference coerced a failed dedup lookup to an empty result and could create a duplicate. Hardened both invariants: default-branch checkout and fail-closed lookup."
   "2026-08-24T16:18:35.702Z","harness:codex","author=harness:codex,created_at=now,text=Exact-head review found that the parsed workflow verifier was not executed by the normal release gate and that failed-lookup proof did not explicitly cover label mutation. The fleet fix replaces the undeclared PyYAML verifier with a Node ESM parsed-YAML verifier backed by exact yaml 2.9.0, wires it into release:check, and asserts zero label creation after lookup failure."
+  "2026-08-24T16:28:57.319Z","harness:codex","Final exact-head review found release:check was not invoked by normal pull-request CI. Added an explicit verify:release-workflow step immediately after npm ci and made the parsed verifier self-check that CI contains the exact command. Package-local executable verification passes."
 files[2]{path,scope,note}:
   .github/workflows/release.yml,project,Trusted default-branch checkout
   scripts/alert-on-release-failure.sh,project,Fail-closed dedup lookup
