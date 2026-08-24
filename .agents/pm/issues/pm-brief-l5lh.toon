@@ -6,9 +6,9 @@ status: closed
 priority: 1
 tags: []
 created_at: "2026-08-24T15:42:34.069Z"
-updated_at: "2026-08-24T15:50:24.936Z"
-closed_at: "2026-08-24T15:50:24.927Z"
-completed_at: "2026-08-24T15:50:24.927Z"
+updated_at: "2026-08-24T16:03:40.499Z"
+closed_at: "2026-08-24T16:03:40.491Z"
+completed_at: "2026-08-24T16:03:40.491Z"
 author: "harness:codex"
 estimated_minutes: 45
 acceptance_criteria: "The alert checkout explicitly uses github.event.repository.default_branch; The YAML verifier and runtime tests fail if the trusted ref wiring is removed; Full release:check, packed acceptance, coverage, audit, PM validation, and reconciliation pass"
@@ -17,11 +17,10 @@ confidence: high
 severity: medium
 environment: GitHub Actions workflow_dispatch on a divergent ref
 repro_steps: "Dispatch .github/workflows/release.yml from a ref predating the tracked alert script, then force the release job to fail; the alert checkout follows the event ref and cannot invoke the script."
-resolution: Pinned the alert checkout to the repository default branch without persisted credentials; made failed issue lookup skip mutation; upgraded the exact development CLI/SDK contract to 2026.8.24.
-expected_result: "Divergent manual dispatches execute the trusted alert script, lookup failures cannot create duplicate issues, and alert failures remain nonblocking."
-actual_result: Five hermetic alert tests and the YAML verifier pass; the 2026.8.24 compatibility contract passes and the remaining initial full-suite tests were green.
+resolution: "Restricted alerts to scheduled failures, added repository-scoped non-canceling alert concurrency, and made both validators require the exact checkout SHA, default-branch ref, disabled credentials, and exact script command."
+expected_result: Expected manual-dispatch failures do not mutate Daily Release issues; concurrent scheduled failures cannot race issue creation; mutable or non-executing workflow wiring is rejected.
+actual_result: "All five focused alert scenarios and the parsed YAML verifier pass with the complete schedule, concurrency, immutable checkout, and exact-command contract."
 affected_version: 2026.8.24
-fixed_version: 2026.8.24
 component: release-workflow
 regression: true
 notes[1]{created_at,author,text}:
@@ -31,5 +30,5 @@ files[2]{path,scope,note}:
   scripts/alert-on-release-failure.sh,project,Fail-closed dedup lookup
 tests[1]{command,path,scope,provenance{author,created_at,source_kind,source_ref}}:
   node --test test/alert-on-release-failure.test.ts,test/alert-on-release-failure.test.ts,project,"harness:codex","2026-08-24T15:50:01.224Z",local_mutation,codex/release-alert-default-branch
-close_reason: The trusted checkout and fail-closed deduplication invariants are implemented with package-local proof.
+close_reason: CodeRabbit fleet hardening is implemented and verified package-locally.
 body: ""
