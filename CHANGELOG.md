@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.8.22 - 2026-08-22
+## 2026.8.22 - 2026-08-24
 
 ### Fixed
 
@@ -8,6 +8,7 @@
 
 ### Other
 
+- Resolve PR \#79 review threads: hermetic release-alert evidence and audit timestamp correction ([pm-brief-zrpv](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-zrpv.toon))
 - Alert on daily release failure and require merge drivers in CI ([pm-brief-javk](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-javk.toon))
 
 ## 2026.8.16 - 2026-08-16

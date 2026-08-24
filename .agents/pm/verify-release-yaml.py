@@ -17,13 +17,22 @@ assert alert["if"] == "failure()", f"unexpected if: {alert['if']!r}"
 needs = alert["needs"]
 needs = [needs] if isinstance(needs, str) else list(needs)
 assert needs == ["release"], f"unexpected needs: {needs!r}"
-assert alert["permissions"] == {"issues": "write"}, (
+assert alert["permissions"] == {"contents": "read", "issues": "write"}, (
     f"unexpected permissions: {alert['permissions']!r}"
 )
 
 steps = alert["steps"]
 assert any(
-    "release-failure" in (step.get("run") or "") for step in steps
-), "dedup marker label not used in the alert script"
+    step.get("uses", "").startswith("actions/checkout@") for step in steps
+), "alert job must check out the repository to fetch its alert script"
+assert any(
+    "scripts/alert-on-release-failure.sh" in (step.get("run") or "")
+    for step in steps
+), "alert job must execute the checked-in scripts/alert-on-release-failure.sh"
+with open("scripts/alert-on-release-failure.sh", encoding="utf-8") as handle:
+    script = handle.read()
+assert "release-failure" in script, (
+    "dedup marker label not used in the alert script"
+)
 
 print("release.yml alert job verified")

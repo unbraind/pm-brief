@@ -1,0 +1,30 @@
+id: pm-brief-zrpv
+title: "Resolve PR #79 review threads: hermetic release-alert evidence and audit timestamp correction"
+description: "Clears the two unresolved CodeRabbit threads on unbraind/pm-brief PR #79. Thread 1 (3836774695): replace YAML-parse-only evidence for the alert-on-release-failure job with a hermetic test of the actual script, extracted verbatim into scripts/alert-on-release-failure.sh. Thread 2 (3836774697): append-only timestamp correction on pm-brief-v2ts."
+type: Task
+status: closed
+priority: 2
+tags[3]: ci,code-review,evidence
+created_at: "2026-08-24T08:36:30.950Z"
+updated_at: "2026-08-24T08:37:24.582Z"
+closed_at: "2026-08-24T08:37:24.567Z"
+completed_at: "2026-08-24T08:37:24.567Z"
+claim_principal: pi-agent
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-08-24T08:37:24.113Z",pi-agent,"Findings. Thread 1 (CodeRabbit 3836774695, correct): the alert-on-release-failure job's whole behaviour was an inline bash script whose only recorded evidence was a YAML parse check. A real release run cannot serve as evidence because it merges a release commit into protected main and burns a version before reaching any failing publish step. Resolution: extracted the step's run block verbatim into scripts/alert-on-release-failure.sh; the job now checks out the repository (permissions gained contents: read for that checkout only) and runs 'bash scripts/alert-on-release-failure.sh', so workflow and tests execute identical bytes. test/alert-on-release-failure.test.ts stubs gh on PATH and asserts: (a) no existing issue -> exactly one gh issue create with label release-failure and title 'Daily Release workflow is failing' plus body containing job name, run URL, commit SHA, UTC date; (b) existing open issue #77 -> one gh issue comment on 77, zero creates (cross-run dedup); (c) every gh call fails -> exit 0 with ::warning:: line (non-blocking). Mutation proof: breaking the dedup lookup (existing_number emptied) makes 3/4 tests fail; restored, 4/4 pass - the suite is not vacuous. shellcheck v0.10.0 clean. Gates after change: npm test 274 pass, npm run coverage thresholds met (100/92.15/100), pm health --strict-exit ok, changelog:full + changelog:check green. Thread 2 (CodeRabbit 3836774697, correct): pm-brief-v2ts note dated 2026-08-22T18:49:40.600Z claimed 'as of 2026-08-22T19:00Z'. Fixed append-only via pm comments on pm-brief-v2ts stating the misstatement, the actual observation time, and reaffirming that pm-brief-gtiy was in_progress when PR #76 merged; history entry untouched so the hash chain stays intact; pm health --strict-exit re-verified green."
+files[4]{path,scope,note}:
+  .agents/pm/verify-release-yaml.py,project,updated to assert checkout plus script wiring and contents read permission
+  .github/workflows/release.yml,project,alert job now checks out the repo and runs the checked-in script
+  scripts/alert-on-release-failure.sh,project,extracted alert step executed by release.yml and tested directly
+  test/alert-on-release-failure.test.ts,project,hermetic stub-gh suite covering create dedup and non-blocking paths
+tests[5]{command,path,scope,note}:
+  npm test,test/alert-on-release-failure.test.ts,project,"hermetic alert script test: creates the deduplicated release-failure issue with run URL, commit, and date when no open issue exists"
+  npm run test,test/alert-on-release-failure.test.ts,project,"hermetic alert script test: comments on the existing open release-failure issue instead of creating a second one"
+  npm --silent test,test/alert-on-release-failure.test.ts,project,"hermetic alert script test: stays non-blocking (exit 0) and emits ::warning:: when every gh call fails"
+  "npm run build:test && npm test",test/alert-on-release-failure.test.ts,project,"release.yml wiring: the alert job checks out the repository and executes scripts/alert-on-release-failure.sh"
+  npm test,.agents/pm/verify-release-yaml.py,project,"release.yml parses as YAML; alert job has if failure(), needs release, permissions contents read + issues write, checkout step, and executes the checked-in script"
+docs[1]{path,scope,note}:
+  "https://github.com/unbraind/pm-brief/pull/79",global,PR carrying both thread resolutions
+close_reason: "Both threads addressed: hermetic same-bytes alert-script evidence added and mutation-proven (3/4 fail broken, 4/4 pass fixed), append-only timestamp correction appended to pm-brief-v2ts; all gates green (npm test 274, coverage thresholds met, pm health --strict-exit ok, changelog full+check green, shellcheck clean)"
+body: ""
