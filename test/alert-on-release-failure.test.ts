@@ -120,7 +120,7 @@ test("hermetic alert script test: creates the deduplicated release-failure issue
     const calls = readLog(log);
     // The dedup lookup ran against the marker label + stable title.
     assert.match(calls, new RegExp(`CALL: issue list .*--label ${MARKER_LABEL}`));
-    assert.match(calls, new RegExp(`CALL: issue list .*${STABLE_TITLE.replace(/ /g, " ")} in:title`));
+    assert.match(calls, new RegExp(`CALL: issue list .*${STABLE_TITLE} in:title`));
     // Exactly one create, with the stable title and marker label.
     assert.equal(countCalls(calls, "issue create"), 1);
     assert.match(calls, new RegExp(`CALL: issue create .*--title ${STABLE_TITLE}`));
