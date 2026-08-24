@@ -181,6 +181,7 @@ test("hermetic alert script test: does not mutate when the dedup lookup fails", 
     const calls = readLog(log);
     assert.equal(countCalls(calls, "issue create"), 0, "must not risk a duplicate issue");
     assert.equal(countCalls(calls, "issue comment"), 0, "must not mutate an unknown issue");
+    assert.equal(countCalls(calls, "label create"), 0, "must not mutate labels after a failed lookup");
     assert.match(`${run.stdout}\n${run.stderr}`, /::warning::.*duplicate/);
   } finally {
     cleanup();
