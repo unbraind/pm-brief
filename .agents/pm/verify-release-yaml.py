@@ -23,8 +23,11 @@ assert alert["permissions"] == {"contents": "read", "issues": "write"}, (
 
 steps = alert["steps"]
 assert any(
-    step.get("uses", "").startswith("actions/checkout@") for step in steps
-), "alert job must check out the repository to fetch its alert script"
+    step.get("uses", "").startswith("actions/checkout@")
+    and step.get("with", {}).get("ref") == "${{ github.event.repository.default_branch }}"
+    and step.get("with", {}).get("persist-credentials") is False
+    for step in steps
+), "alert job must check out the default branch without persisted credentials"
 assert any(
     "scripts/alert-on-release-failure.sh" in (step.get("run") or "")
     for step in steps
