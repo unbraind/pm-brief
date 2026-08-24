@@ -1,0 +1,37 @@
+id: pm-brief-javk
+title: Alert on daily release failure and require merge drivers in CI
+description: "Two CI fixes: (1) release.yml gets an if:failure() job that opens or updates one deduplicated tracking issue (label release-failure, stable title) with job name, run URL, commit SHA and date; issues:write only, never blocks a release. (2) ci.yml installs pm merge drivers before the health gate and passes --require-merge-drivers so a fresh clone without clone-local driver config fails the gate instead of silently passing. Motivated by five unnoticed failed daily releases (2026-08-17..2026-08-22) caused by an expired npm token."
+type: Chore
+status: closed
+priority: 1
+tags: []
+created_at: "2026-08-22T18:44:47.348Z"
+updated_at: "2026-08-24T08:36:24.529Z"
+closed_at: "2026-08-22T18:47:50.012Z"
+completed_at: "2026-08-22T18:47:50.012Z"
+claim_principal: ox-alpha
+author: ox-alpha
+comments[1]{created_at,author,text}:
+  "2026-08-24T08:36:24.529Z",pi-agent,"CodeRabbit PR #79 thread 3836774695 resolved with real evidence instead of a live release run: the alert step's inline script was extracted verbatim into scripts/alert-on-release-failure.sh and the workflow job now checks out the repo and runs it, so workflow and tests execute the same bytes. New hermetic suite test/alert-on-release-failure.test.ts stubs gh on PATH and proves all three behaviours the YAML verifier could not: single create with release-failure label + stable title + run URL/commit/date body; comment-on-existing-#77 deduplication without a second create; and exit 0 plus ::warning:: when every gh call fails. Mutation proof: with the dedup lookup broken (existing_number emptied), the suite fails 3/4 tests; restored, 4/4 pass. shellcheck v0.10.0 clean; npm test 274 pass; coverage thresholds met (100 lines/92.15 branches/100 functions); pm health --strict-exit green; changelog:full+check green."
+notes[1]{created_at,author,text}:
+  "2026-08-22T18:44:52.174Z",ox-alpha,"Gate proof: removed all five merge.pm-* config sections, ./node_modules/.bin/pm health --strict-exit --require-merge-drivers exited 1; after ./node_modules/.bin/pm merge install it exited 0. Plain --strict-exit stays 0 both ways."
+files[4]:
+  - path: .github/workflows/ci.yml
+    scope: project
+  - path: .github/workflows/release.yml
+    scope: project
+  - path: scripts/alert-on-release-failure.sh
+    scope: project
+    note: extracted alert step script; workflow and tests execute the same bytes
+  - path: test/alert-on-release-failure.test.ts
+    scope: project
+    note: "hermetic stub-gh proof of create,dedup comment,and non-blocking warning paths"
+tests[6]{command,path,scope,note}:
+  git config --local --remove-section merge.pm-item-toon && ./node_modules/.bin/pm health --strict-exit --require-merge-drivers,.,project,health gate exits non-zero when clone-local merge drivers are absent
+  python3 .agents/pm/verify-release-yaml.py,.github/workflows/release.yml,project,"release.yml parses as YAML; alert-on-release-failure job has if: failure(), needs: release, permissions issues:write"
+  npm test,test/alert-on-release-failure.test.ts,project,"hermetic alert script test: creates the deduplicated release-failure issue with run URL, commit, and date when no open issue exists"
+  npm run test,test/alert-on-release-failure.test.ts,project,"hermetic alert script test: comments on the existing open release-failure issue instead of creating a second one"
+  npm --silent test,test/alert-on-release-failure.test.ts,project,"hermetic alert script test: stays non-blocking (exit 0) and emits ::warning:: when every gh call fails"
+  "npm run build:test && npm test",test/alert-on-release-failure.test.ts,project,"release.yml wiring: the alert job checks out the repository and executes scripts/alert-on-release-failure.sh"
+close_reason: "Both fixes implemented, YAML-verified and gate proven (RC 1 without drivers, 0 after pm merge install); npm test 270 pass; release:check green"
+body: ""

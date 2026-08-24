@@ -548,3 +548,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ steps.decide.outputs.tag }}" --title "pm-brief ${{ steps.decide.outputs.tag }}" --notes-file RELEASE_NOTES.md --verify-tag
+
+  # A scheduled workflow that fails produces a red run in the Actions tab and
+  # nothing else: five consecutive daily-release failures went unnoticed here
+  # because no signal reached the tracker. This job runs only when the release
+  # job fails and opens or updates one deduplicated tracking issue. It can
+  # never block a release: it is not a required status check and holds only
+  # read plus issues:write on its own restricted token scope.
+  alert-on-release-failure:
+    needs: release
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      # actions/checkout needs read access to fetch the script below.
+      contents: read
+      issues: write
+    steps:
+      # The alert logic lives in a checked-in shell script rather than an
+      # inline `run:` block so test/alert-on-release-failure.test.ts can
+      # execute the exact bytes this job runs, under a stub `gh`.
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Open or update the release-failure tracking issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/alert-on-release-failure.sh
