@@ -49,12 +49,12 @@ interface AlertRun {
 }
 
 /**
- * Write a fake `gh` that logs every invocation (and any `--body-file`
- * payload) to `${ALERT_GH_LOG}`, then behaves according to mode: `existing`
- * answers the dedup lookup with issue #77, `fail` fails every call, and the
- * default succeeds while producing no lookup result.
+ * Write a fake `gh` whose runtime behaviour is selected by the injected
+ * `ALERT_GH_MODE` environment variable: `existing` answers the dedup lookup
+ * with issue #77, `fail` fails every call, and the default succeeds while
+ * producing no lookup result.
  */
-function makeStubGh(binDir: string, mode: "fresh" | "existing" | "fail"): void {
+function makeStubGh(binDir: string): void {
   const stub = `#!/usr/bin/env bash
 {
   echo "CALL: $*"
@@ -91,7 +91,7 @@ function runAlertScript(mode: "fresh" | "existing" | "fail"): {
   const binDir = path.join(workspace, "bin");
   mkdirSync(binDir);
   const logPath = path.join(workspace, "gh-calls.log");
-  makeStubGh(binDir, mode);
+  makeStubGh(binDir);
   const run = spawnSync("bash", [SCRIPT.pathname], {
     encoding: "utf8",
     env: {
