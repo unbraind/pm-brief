@@ -16,15 +16,18 @@ trap 'rm -f "$body"' EXIT
   echo "- Commit: ${GITHUB_SHA}"
   echo "- Date (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$body"
-# Deduplicate: one open tracking issue per repo, found by the fixed
-# marker label plus the stable title; each additional failure appends
-# a comment with the new run URL instead of opening a second issue.
-existing_number="$(gh issue list \
+# Deduplicate by the fixed marker label and stable title. A failed lookup is
+# not evidence that no issue exists, so skip alerting rather than risk opening
+# a duplicate after a transient GitHub API failure.
+if ! existing_number="$(gh issue list \
   --repo "${GITHUB_REPOSITORY}" \
   --state open \
   --label release-failure \
   --search "Daily Release workflow is failing in:title" \
-  --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+  --json number --jq '.[0].number // empty' 2>/dev/null)"; then
+  echo "::warning::Could not determine whether a release-failure tracking issue is already open; skipped alerting to avoid opening a duplicate."
+  exit 0
+fi
 if [[ -n "$existing_number" ]]; then
   if gh issue comment "$existing_number" \
     --repo "${GITHUB_REPOSITORY}" \
@@ -32,8 +35,6 @@ if [[ -n "$existing_number" ]]; then
     exit 0
   fi
 else
-  # Best-effort label creation so first use does not fail on a
-  # missing label.
   gh label create release-failure \
     --repo "${GITHUB_REPOSITORY}" \
     --description "Daily Release workflow failures" \

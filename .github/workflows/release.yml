@@ -557,7 +557,10 @@ jobs:
   # read plus issues:write on its own restricted token scope.
   alert-on-release-failure:
     needs: release
-    if: failure()
+    if: failure() && github.event_name == 'schedule'
+    concurrency:
+      group: release-failure-alert-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       # actions/checkout needs read access to fetch the script below.
@@ -567,8 +570,11 @@ jobs:
       # The alert logic lives in a checked-in shell script rather than an
       # inline `run:` block so test/alert-on-release-failure.test.ts can
       # execute the exact bytes this job runs, under a stub `gh`.
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Checkout alert script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
 
       - name: Open or update the release-failure tracking issue
         shell: bash

@@ -13,8 +13,9 @@
  *    date in the body;
  * 2. an existing open issue      -> a comment on THAT number and no second
  *    create (cross-run deduplication);
- * 3. every `gh` call failing     -> exit 0 (non-blocking) plus a `::warning::`
- *    annotation.
+ * 3. every mutation failing      -> exit 0 (non-blocking) plus a `::warning::`
+ *    annotation;
+ * 4. the dedup lookup failing    -> no create or comment, avoiding duplicates.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -51,8 +52,8 @@ interface AlertRun {
 /**
  * Write a fake `gh` whose runtime behaviour is selected by the injected
  * `ALERT_GH_MODE` environment variable: `existing` answers the dedup lookup
- * with issue #77, `fail` fails every call, and the default succeeds while
- * producing no lookup result.
+ * with issue #77, `fail` fails every call, `list-fail` fails only the dedup
+ * lookup, and the default succeeds while producing no lookup result.
  */
 function makeStubGh(binDir: string): void {
   const stub = `#!/usr/bin/env bash
@@ -68,8 +69,12 @@ function makeStubGh(binDir: string): void {
     prev="$arg"
   done
 } >> "\${ALERT_GH_LOG}"
-if [[ "\${ALERT_GH_MODE}" == "fail" ]]; then
+if [[ "\${ALERT_GH_MODE}" == "fail" && "\${1:-}" == "issue" && "\${2:-}" != "list" ]]; then
   echo "stub gh: simulated failure" >&2
+  exit 1
+fi
+if [[ "\${ALERT_GH_MODE}" == "list-fail" && "\${1:-}" == "issue" && "\${2:-}" == "list" ]]; then
+  echo "stub gh: simulated lookup failure" >&2
   exit 1
 fi
 if [[ "\${1:-}" == "issue" && "\${2:-}" == "list" && "\${ALERT_GH_MODE}" == "existing" ]]; then
@@ -82,7 +87,7 @@ exit 0
   chmodSync(ghPath, 0o755);
 }
 
-function runAlertScript(mode: "fresh" | "existing" | "fail"): {
+function runAlertScript(mode: "fresh" | "existing" | "fail" | "list-fail"): {
   run: AlertRun;
   log: string;
   cleanup: () => void;
@@ -154,7 +159,7 @@ test("hermetic alert script test: comments on the existing open release-failure 
   }
 });
 
-test("hermetic alert script test: stays non-blocking (exit 0) and emits ::warning:: when every gh call fails", () => {
+test("hermetic alert script test: stays non-blocking (exit 0) and emits ::warning:: when issue mutation fails", () => {
   const { run, cleanup } = runAlertScript("fail");
   try {
     // Alerting must never mask the original release failure's exit code.
@@ -169,13 +174,32 @@ test("hermetic alert script test: stays non-blocking (exit 0) and emits ::warnin
   }
 });
 
+test("hermetic alert script test: does not mutate when the dedup lookup fails", () => {
+  const { run, log, cleanup } = runAlertScript("list-fail");
+  try {
+    assert.equal(run.status, 0, `script must stay non-blocking, got ${run.status}`);
+    const calls = readLog(log);
+    assert.equal(countCalls(calls, "issue create"), 0, "must not risk a duplicate issue");
+    assert.equal(countCalls(calls, "issue comment"), 0, "must not mutate an unknown issue");
+    assert.equal(countCalls(calls, "label create"), 0, "must not mutate labels after a failed lookup");
+    assert.match(`${run.stdout}\n${run.stderr}`, /::warning::.*duplicate/);
+  } finally {
+    cleanup();
+  }
+});
+
 test("release.yml wiring: the alert job checks out the repository and executes scripts/alert-on-release-failure.sh", () => {
   const yaml = readFileSync(WORKFLOW_YAML, "utf8");
   const jobStart = yaml.indexOf("alert-on-release-failure:");
   assert.notEqual(jobStart, -1, "alert-on-release-failure job missing from release.yml");
   const job = yaml.slice(jobStart);
-  assert.match(job, /uses: actions\/checkout@/, "alert job must check out the repository");
-  assert.match(job, /run: bash scripts\/alert-on-release-failure\.sh/);
+  assert.match(job, /^\s+if: failure\(\) && github\.event_name == 'schedule'$/m);
+  assert.match(job, /^\s+group: release-failure-alert-\$\{\{ github\.repository \}\}$/m);
+  assert.match(job, /^\s+cancel-in-progress: false$/m);
+  assert.match(job, /^\s+uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7$/m);
+  assert.match(job, /^\s+ref: \$\{\{ github\.event\.repository\.default_branch \}\}$/m);
+  assert.match(job, /^\s+persist-credentials: false$/m);
+  assert.match(job, /^\s+run: bash scripts\/alert-on-release-failure\.sh$/m);
 });
 
 /** Read the stub call log written by {@link makeStubGh}. */

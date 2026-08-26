@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Checkout release alert script from the default branch ([pm-brief-l5lh](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-l5lh.toon))
 - Canonicalize the complete-corpus reader and adopt the current pm host contract ([pm-brief-v2ts](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v2ts.toon))
 
 ### Other
