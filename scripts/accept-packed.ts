@@ -136,8 +136,18 @@ try {
     if (!brief.stdout.includes(fixtureTitle)) {
       throw new Error(`${scenario.name} pm brief omitted its real tracker fixture`);
     }
-    if (brief.stderr !== "") {
-      throw new Error(`${scenario.name} pm brief emitted unexpected stderr: ${brief.stderr.trim()}`);
+    // What this asserts is that the INSTALLED extension is silent on stderr, so
+    // a consumer piping `pm --json brief` gets clean output. npm's own runner
+    // writes progress notices there ("npm notice run <pkg> npx" from npm 11
+    // onward), which say nothing about the package and would make this gate
+    // pass on Node 22's npm 10 and fail on Node 26's npm 12 -- both of which
+    // are in this repository's CI matrix.
+    const briefStderr = brief.stderr
+      .split("\n")
+      .filter((line) => line.trim() !== "" && !line.startsWith("npm notice"))
+      .join("\n");
+    if (briefStderr !== "") {
+      throw new Error(`${scenario.name} pm brief emitted unexpected stderr: ${briefStderr.trim()}`);
     }
     receipts.push({
       scenario: scenario.name,
