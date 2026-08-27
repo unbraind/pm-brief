@@ -83,8 +83,14 @@ function run(command: string, args: string[], cwd: string): SpawnSyncReturns<str
  * @returns Captured pm process result.
  */
 function runPm(scenario: AcceptanceScenario, cwd: string, args: string[]): SpawnSyncReturns<string> {
+  // --silent keeps npm's own runner off stderr. From npm 11 the runner writes a
+  // progress notice there, which says nothing about the package; silencing the
+  // runner is better than filtering its output afterwards, because any filter
+  // wide enough to catch the notice is also wide enough to discard a diagnostic
+  // the installed host or extension printed -- exactly what this gate exists to
+  // catch.
   return scenario.manager === "npm"
-    ? run(npxCommand, ["--no-install", "pm", ...args], cwd)
+    ? run(npxCommand, ["--no-install", "--silent", "pm", ...args], cwd)
     : run(bunxCommand, ["--no-install", "pm", ...args], cwd);
 }
 
@@ -137,17 +143,11 @@ try {
       throw new Error(`${scenario.name} pm brief omitted its real tracker fixture`);
     }
     // What this asserts is that the INSTALLED extension is silent on stderr, so
-    // a consumer piping `pm --json brief` gets clean output. npm's own runner
-    // writes progress notices there ("npm notice run <pkg> npx" from npm 11
-    // onward), which say nothing about the package and would make this gate
-    // pass on Node 22's npm 10 and fail on Node 26's npm 12 -- both of which
-    // are in this repository's CI matrix.
-    const briefStderr = brief.stderr
-      .split("\n")
-      .filter((line) => line.trim() !== "" && !line.startsWith("npm notice"))
-      .join("\n");
-    if (briefStderr !== "") {
-      throw new Error(`${scenario.name} pm brief emitted unexpected stderr: ${briefStderr.trim()}`);
+    // a consumer piping `pm --json brief` gets clean output.
+    // Nothing is filtered out of this: the runner is silenced at the source, so
+    // anything left on stderr came from the installed package.
+    if (brief.stderr !== "") {
+      throw new Error(`${scenario.name} pm brief emitted unexpected stderr: ${brief.stderr.trim()}`);
     }
     receipts.push({
       scenario: scenario.name,
