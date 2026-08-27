@@ -7,6 +7,10 @@
 - Checkout release alert script from the default branch ([pm-brief-l5lh](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-l5lh.toon))
 - Canonicalize the complete-corpus reader and adopt the current pm host contract ([pm-brief-v2ts](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v2ts.toon))
 
+### Security
+
+- The identity gate deadlocks the one remediation its own failure message prescribes ([pm-brief-4yx9](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-4yx9.toon))
+
 ### Other
 
 - Resolve PR \#79 review threads: hermetic release-alert evidence and audit timestamp correction ([pm-brief-zrpv](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-zrpv.toon))

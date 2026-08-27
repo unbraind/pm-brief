@@ -83,8 +83,14 @@ function run(command: string, args: string[], cwd: string): SpawnSyncReturns<str
  * @returns Captured pm process result.
  */
 function runPm(scenario: AcceptanceScenario, cwd: string, args: string[]): SpawnSyncReturns<string> {
+  // --silent keeps npm's own runner off stderr. From npm 11 the runner writes a
+  // progress notice there, which says nothing about the package; silencing the
+  // runner is better than filtering its output afterwards, because any filter
+  // wide enough to catch the notice is also wide enough to discard a diagnostic
+  // the installed host or extension printed -- exactly what this gate exists to
+  // catch.
   return scenario.manager === "npm"
-    ? run(npxCommand, ["--no-install", "pm", ...args], cwd)
+    ? run(npxCommand, ["--no-install", "--silent", "pm", ...args], cwd)
     : run(bunxCommand, ["--no-install", "pm", ...args], cwd);
 }
 
@@ -136,6 +142,10 @@ try {
     if (!brief.stdout.includes(fixtureTitle)) {
       throw new Error(`${scenario.name} pm brief omitted its real tracker fixture`);
     }
+    // What this asserts is that the INSTALLED extension is silent on stderr, so
+    // a consumer piping `pm --json brief` gets clean output.
+    // Nothing is filtered out of this: the runner is silenced at the source, so
+    // anything left on stderr came from the installed package.
     if (brief.stderr !== "") {
       throw new Error(`${scenario.name} pm brief emitted unexpected stderr: ${brief.stderr.trim()}`);
     }

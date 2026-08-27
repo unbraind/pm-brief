@@ -13,3 +13,8 @@ RELEASE_NOTES.md
 .env.*
 !.env.example
 coverage/
+
+# SDK workspace-transaction journals are runtime state, not tracked data.
+# pm health fails closed on these (tracked_runtime_cache_files); two were
+# committed on 2026-08-24 and made the health gate red in three repos.
+.agents/pm/transactions/

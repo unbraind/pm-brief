@@ -88,6 +88,9 @@ jobs:
       - name: Verify npm package contents
         run: npm run pack:dry-run
 
+      - name: Accept the packed tarball under npm, bun and the minimum host
+        run: npm run accept:packed
+
       - name: Verify generated changelog
         run: npm run changelog:check
 
