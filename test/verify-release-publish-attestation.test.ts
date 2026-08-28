@@ -98,6 +98,19 @@ test("a shared bash array holding the flag is expanded rather than read as an ab
   assert.deepEqual(result.failures, []);
 });
 
+test("a commented-out array cannot supply an attestation flag", () => {
+  // CodeRabbit: a raw array regex accepted declarations inside comments before
+  // tokenisation, so an unset shell array could make an unattested publish look
+  // flagged. The declaration must be ignored and the expanded reference must
+  // leave the audit red.
+  const result = auditPublishAttestation([{
+    file: "release.yml",
+    text: `          # flags=( ${ATTESTATION_FLAG} )\n          npm publish \${flags[@]}`,
+  }]);
+  assert.equal(result.failures.length, 1);
+  assert.match(result.failures[0]!, /does not enable --provenance/);
+});
+
 test("a prose mention of the command inside quotes is not treated as an invocation", () => {
   // This repository's own workflow echoes advice naming the command. Reading
   // that echo as a publish makes the gate report a defect that is not there,
@@ -191,6 +204,16 @@ test("npm run publish is a script runner, not a publish", () => {
   assert.equal(isPublishCommand(onlyCommand("npm exec publish")), false, "exec runs a binary, it does not publish");
   assert.equal(isPublishCommand(onlyCommand("npm --access public publish")), true, "a flag value is not the subcommand");
   assert.equal(isPublishCommand(onlyCommand("npm --ignore-scripts publish")), true);
+  assert.equal(isPublishCommand(onlyCommand("npm --tag run publish")), true, "an option value is not the subcommand");
+  assert.equal(isPublishCommand(onlyCommand("npm --tag stable run publish")), false, "run after its option value is the subcommand");
+  assert.equal(
+    auditPublishAttestation([{
+      file: "release.yml",
+      text: `          npm publish --provenance\n          npm --tag run publish`,
+    }]).failures.length,
+    1,
+    "an option value must not hide the unattested publish",
+  );
 });
 
 test("finding no publish at all fails, because an empty scan and a clean tree look identical", () => {
@@ -423,14 +446,17 @@ test("a publish in any tracked executable is audited, not only workflows and the
   // reported that every invocation was attested.
   const root = trackedFixture({
     ".github/workflows/release.yml": `          ${ATTESTED}`,
+    ".github/actions/publish/action.yml": `runs:\n  using: composite\n  steps:\n    - run: ${UNATTESTED}\n      shell: bash\n`,
     "package.json": "{}",
     "scripts/ship.sh": `#!/usr/bin/env bash\n${UNATTESTED}\n`,
   });
   try {
     assert.ok(trackedPublishSources(root).includes("scripts/ship.sh"));
+    assert.ok(trackedPublishSources(root).includes(".github/actions/publish/action.yml"));
     const failures = verify(root).failures;
-    assert.equal(failures.length, 1, JSON.stringify(failures));
-    assert.match(failures[0]!, /scripts\/ship\.sh/);
+    assert.equal(failures.length, 2, JSON.stringify(failures));
+    assert.ok(failures.some((failure) => failure.includes("scripts/ship.sh")));
+    assert.ok(failures.some((failure) => failure.includes(".github/actions/publish/action.yml")));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -466,7 +492,7 @@ test("committed build output is not audited, because it is generated from source
 });
 
 test("isExecutableSource recognises the shapes that can run a command", () => {
-  for (const path of [".github/workflows/ci.yml", ".github/workflows/ci.yaml", "package.json", "web/package.json", "x.sh", "Makefile", "build/rules.mk", "Dockerfile", "Dockerfile.ci", "docker-compose.yml", "docker-compose.prod.yaml"]) {
+  for (const path of [".github/workflows/ci.yml", ".github/workflows/ci.yaml", ".github/actions/publish/action.yml", "package.json", "web/package.json", "x.sh", "Makefile", "build/rules.mk", "Dockerfile", "Dockerfile.ci", "docker-compose.yml", "docker-compose.prod.yaml"]) {
     assert.equal(isExecutableSource(path, ""), true, path);
   }
   for (const path of ["README.md", "src/index.ts", ".github/dependabot.yml", "package.json.bak"]) {
@@ -508,7 +534,10 @@ test("runIfMain runs only as the entry point, and reports when it does", () => {
   try {
     // isMainInvocation canonicalises both sides, so a non-entry argument must
     // name a file that exists; a missing path is a different failure entirely.
+    process.exitCode = 0;
     assert.equal(runIfMain(["node", "scripts/main-invocation.ts"], pathToFileURL(resolve("scripts/verify-release-publish-attestation.ts")).href, root), false);
+    assert.equal(process.exitCode, 0, "a non-entry invocation must not change the exit code");
+    process.exitCode = 0;
     assert.equal(
       runIfMain(
         ["node", "scripts/verify-release-publish-attestation.ts"],
@@ -517,15 +546,18 @@ test("runIfMain runs only as the entry point, and reports when it does", () => {
       ),
       true,
     );
-    assert.equal(process.exitCode, previous, "an attested tree must not set a failing exit code");
+    const cleanExitCode = process.exitCode;
+    assert.equal(cleanExitCode, 0, "an attested tree must not set a failing exit code");
     const failing = trackedFixture({ ".github/workflows/release.yml": `          ${UNATTESTED}`, "package.json": "{}" });
     try {
+      process.exitCode = 0;
       runIfMain(
         ["node", "scripts/verify-release-publish-attestation.ts"],
         pathToFileURL(resolve("scripts/verify-release-publish-attestation.ts")).href,
         failing,
       );
-      assert.equal(process.exitCode, 1, "an unattested tree must set a failing exit code");
+      const failingExitCode = process.exitCode;
+      assert.equal(failingExitCode, 1, "an unattested tree must set a failing exit code");
     } finally {
       rmSync(failing, { recursive: true, force: true });
     }

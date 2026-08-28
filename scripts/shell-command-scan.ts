@@ -533,6 +533,53 @@ export function joinContinuations(text: string): string {
 }
 
 /**
+ * Remove shell comments while preserving quoted hashes and line boundaries.
+ *
+ * Array declarations are indexed before command tokenisation, so the normal
+ * comment handling in `tokenizeCommands` cannot protect them. A declaration in
+ * `# flags=(--provenance)` must not satisfy a later `${flags[@]}` expansion,
+ * while a hash in a quoted value or an escaped hash remains data.
+ *
+ * @param text - Shell text whose comments should be removed.
+ * @returns The text with unquoted comments replaced by their line breaks.
+ */
+function stripShellComments(text: string): string {
+  let result = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (escaped) {
+      result += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      result += character;
+      escaped = true;
+      continue;
+    }
+    if (quote !== undefined) {
+      result += character;
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      result += character;
+      quote = character;
+      continue;
+    }
+    if (character === "#" && (index === 0 || /[\s;&|(){}]/.test(text[index - 1]!))) {
+      while (index < text.length && text[index] !== "\n") index += 1;
+      if (index < text.length) result += "\n";
+      continue;
+    }
+    result += character;
+  }
+  return result;
+}
+
+/**
  * Index bash array assignments so a shared options array can be expanded.
  *
  * The release workflows declare `common=( ... )` once and pass `"${common[@]}"`
@@ -544,7 +591,8 @@ export function joinContinuations(text: string): string {
  */
 export function bashArrays(text: string): Map<string, string> {
   const arrays = new Map<string, string>();
-  for (const match of text.matchAll(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=\(([\s\S]*?)\)/g)) {
+  const uncommented = stripShellComments(text);
+  for (const match of uncommented.matchAll(/(?:^|[\n;&|])\s*([A-Za-z_][A-Za-z0-9_]*)=\(([\s\S]*?)\)/g)) {
     arrays.set(match[1], match[2].replace(/\s+/g, " ").trim());
   }
   return arrays;

@@ -23,6 +23,18 @@ test("an unknown array reference is left in place rather than erased", () => {
   assert.equal(expandArrays('cmd "${known[@]}"', new Map([["known", "--a --b"]])), "cmd --a --b");
 });
 
+test("bashArrays ignores comments but keeps active declarations and quoted hashes", () => {
+  const arrays = bashArrays([
+    "# flags=(--provenance)",
+    "active=(--a # this is not an array value",
+    "  --b)",
+    "quoted=(\"value#literal\" \\#escaped)",
+  ].join("\n"));
+  assert.equal(arrays.get("flags"), undefined);
+  assert.equal(arrays.get("active"), "--a --b");
+  assert.equal(arrays.get("quoted"), '\"value#literal\" \\#escaped');
+});
+
 test("bashArrays collapses whitespace so a multi-line declaration is one flag string", () => {
   assert.equal(bashArrays("common=(\n  --a\n  --b\n)").get("common"), "--a --b");
 });

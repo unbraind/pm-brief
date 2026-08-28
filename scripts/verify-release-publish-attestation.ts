@@ -59,6 +59,7 @@ const GENERATED_PREFIXES = ["dist/", "coverage/", "node_modules/", ".agents/pm/r
 /** Tracked paths that can execute a command, matched against the repository-relative path. */
 const EXECUTABLE_PATHS = [
   /^\.github\/workflows\/[^/]+\.ya?ml$/,
+  /^\.github\/actions\/.+\/action\.ya?ml$/,
   /(^|\/)package\.json$/,
   /\.(sh|bash|zsh|ksh)$/,
   /(^|\/)(Makefile|makefile|GNUmakefile)$/,
@@ -122,11 +123,11 @@ const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]
  *
  * Reading the first non-flag word as the subcommand does not work either,
  * because npm has flags that take a separate value (`--access public`) and
- * flags that do not (`--ignore-scripts`), and telling them apart needs npm's
- * own option table. So the word is looked for anywhere in the arguments, and
- * only a preceding runner subcommand rules it out -- `npm run publish` runs a
- * package script whose body is scanned from the manifest, and requiring the
- * flag on the runner would report a defect that is not there.
+ * flags that do not (`--ignore-scripts`). The runner lookup skips known
+ * separate option values, so `npm --tag run publish` remains a direct publish
+ * while `npm run publish` runs a package script whose body is scanned from the
+ * manifest. Requiring the flag on the runner would report a defect that is not
+ * there.
  *
  * The residual imprecision is `npm --tag publish ...`, a dist-tag named after
  * the subcommand, which this reads as a publish. That direction is deliberate:
@@ -140,11 +141,22 @@ const RUNNER_SUBCOMMANDS = new Set(["run", "run-script", "exec", "explore", "x"]
  * @returns True when the command publishes.
  */
 export function isPublishCommand(command: ShellCommand): boolean {
-  for (const token of commandArguments(command)) {
-    if (RUNNER_SUBCOMMANDS.has(token.value)) return false;
-    if (token.value === "publish") return true;
-  }
-  return false;
+  const args = commandArguments(command);
+  const publishIndex = args.findIndex((token) => token.value === "publish");
+  if (publishIndex === -1) return false;
+  // A runner immediately after an option may be that option's separate value:
+  // `npm --tag run publish` publishes with tag `run`. Treating it as a runner
+  // would hide the real publish. A runner after a non-option value is in the
+  // subcommand position (`npm --tag stable run publish`), while an option with
+  // an inline value (`--tag=stable`) is also unambiguous. When the distinction
+  // is uncertain, this deliberately reports the command as a publish rather
+  // than allowing an unattested path through the gate.
+  const runnerIndex = args.findIndex((token, index) => {
+    if (!RUNNER_SUBCOMMANDS.has(token.value)) return false;
+    const previous = args[index - 1]?.value;
+    return index === 0 || previous === undefined || !previous.startsWith("-") || previous.includes("=");
+  });
+  return runnerIndex === -1 || publishIndex < runnerIndex;
 }
 
 /**
