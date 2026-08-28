@@ -59,7 +59,7 @@ const GENERATED_PREFIXES = ["dist/", "coverage/", "node_modules/", ".agents/pm/r
 /** Tracked paths that can execute a command, matched against the repository-relative path. */
 const EXECUTABLE_PATHS = [
   /^\.github\/workflows\/[^/]+\.ya?ml$/,
-  /^\.github\/actions\/.+\/action\.ya?ml$/,
+  /(^|\/)action\.ya?ml$/,
   /(^|\/)package\.json$/,
   /\.(sh|bash|zsh|ksh)$/,
   /(^|\/)(Makefile|makefile|GNUmakefile)$/,

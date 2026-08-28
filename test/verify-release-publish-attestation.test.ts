@@ -447,16 +447,19 @@ test("a publish in any tracked executable is audited, not only workflows and the
   const root = trackedFixture({
     ".github/workflows/release.yml": `          ${ATTESTED}`,
     ".github/actions/publish/action.yml": `runs:\n  using: composite\n  steps:\n    - run: ${UNATTESTED}\n      shell: bash\n`,
+    "tools/publish-action/action.yml": `runs:\n  using: composite\n  steps:\n    - run: ${UNATTESTED}\n      shell: bash\n`,
     "package.json": "{}",
     "scripts/ship.sh": `#!/usr/bin/env bash\n${UNATTESTED}\n`,
   });
   try {
     assert.ok(trackedPublishSources(root).includes("scripts/ship.sh"));
     assert.ok(trackedPublishSources(root).includes(".github/actions/publish/action.yml"));
+    assert.ok(trackedPublishSources(root).includes("tools/publish-action/action.yml"));
     const failures = verify(root).failures;
-    assert.equal(failures.length, 2, JSON.stringify(failures));
+    assert.equal(failures.length, 3, JSON.stringify(failures));
     assert.ok(failures.some((failure) => failure.includes("scripts/ship.sh")));
     assert.ok(failures.some((failure) => failure.includes(".github/actions/publish/action.yml")));
+    assert.ok(failures.some((failure) => failure.includes("tools/publish-action/action.yml")));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -492,7 +495,7 @@ test("committed build output is not audited, because it is generated from source
 });
 
 test("isExecutableSource recognises the shapes that can run a command", () => {
-  for (const path of [".github/workflows/ci.yml", ".github/workflows/ci.yaml", ".github/actions/publish/action.yml", "package.json", "web/package.json", "x.sh", "Makefile", "build/rules.mk", "Dockerfile", "Dockerfile.ci", "docker-compose.yml", "docker-compose.prod.yaml"]) {
+  for (const path of [".github/workflows/ci.yml", ".github/workflows/ci.yaml", ".github/actions/publish/action.yml", "tools/publish-action/action.yaml", "package.json", "web/package.json", "x.sh", "Makefile", "build/rules.mk", "Dockerfile", "Dockerfile.ci", "docker-compose.yml", "docker-compose.prod.yaml"]) {
     assert.equal(isExecutableSource(path, ""), true, path);
   }
   for (const path of ["README.md", "src/index.ts", ".github/dependabot.yml", "package.json.bak"]) {
