@@ -203,7 +203,7 @@
 
 - Regenerate CHANGELOG to drop the duplicate Unreleased section from pm-changelog issue 47 ([pm-brief-wo7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-wo7u.toon))
 
-## 2026.6.13 - 2026-06-13
+## 2026.6.13-1 - 2026-06-13
 
 ### Added
 
