@@ -321,16 +321,22 @@ export function tokenizeCommands(text: string, depth = 0): ShellCommand[] {
 
   for (const body of nested) commands.push(...tokenizeCommands(body, depth + 1));
   for (const found of [...commands]) {
-    const name = commandName(found);
-    if (name === undefined || !SHELL_EVALUATORS.has(name)) continue;
-    // The shell joins an evaluator's words with a space and evaluates the
-    // result, so `eval "npm pub" "lish"` runs a publish that scanning each
-    // argument on its own never sees.
-    const payload = found.slice(1)
-      .filter((argument) => !argument.value.startsWith("-"))
-      .map((argument) => argument.value);
-    for (const body of new Set([...payload, payload.join(" ")])) {
-      commands.push(...tokenizeCommands(body, depth + 1));
+    // A wrapper's option values are not all knowable (`sudo -u root`), so the
+    // evaluator may be a later command candidate rather than commandName(found).
+    // Inspect every candidate to avoid letting `sudo -u root bash -c ...` hide
+    // the shell text that bash will execute.
+    for (const candidate of commandCandidates(found)) {
+      const name = commandName(candidate);
+      if (name === undefined || !SHELL_EVALUATORS.has(name)) continue;
+      // The shell joins an evaluator's words with a space and evaluates the
+      // result, so `eval "npm pub" "lish"` runs a publish that scanning each
+      // argument on its own never sees.
+      const payload = candidate.slice(1)
+        .filter((argument) => !argument.value.startsWith("-"))
+        .map((argument) => argument.value);
+      for (const body of new Set([...payload, payload.join(" ")])) {
+        commands.push(...tokenizeCommands(body, depth + 1));
+      }
     }
   }
   return commands;

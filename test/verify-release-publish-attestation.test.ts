@@ -265,6 +265,7 @@ test("an unattested publish smuggled through an interpreter or a substitution is
     `output=$(${UNATTESTED})`,
     "output=`npm publish --access public`",
     `echo hi && eval "${UNATTESTED}"`,
+    `sudo -u root bash -c '${UNATTESTED}'`,
   ]) {
     const failures = auditPublishAttestation([
       { file: "release.yml", text: `          ${ATTESTED}\n          ${smuggled}` },
