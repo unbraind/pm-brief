@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Close PR 90 shell scanner review gaps ([pm-brief-d400](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-d400.toon))
+
 ## 2026.8.28 - 2026-08-28
 
 ### Fixed

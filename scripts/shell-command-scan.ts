@@ -378,7 +378,7 @@ function withoutRedirections(command: ShellCommand): ShellCommand {
     const token = command[index]!;
     if (!isRedirection(token)) {
       // A joined form such as `>file` or `2>&1` is one word and takes no target.
-      if (!token.startsQuoted && /^(?:[0-9]*>>?|[0-9]*<<?<?|&>>?)[^\s]/.test(token.value)) continue;
+      if (!token.startsQuoted && /^(?:[0-9]*>>?|[0-9]*<<?<?|[0-9]*<>|&>>?)[^\s]/.test(token.value)) continue;
       kept.push(token);
       continue;
     }
@@ -666,10 +666,14 @@ export function shellScalars(text: string): Map<string, string> {
     // Exactly one of the three value alternatives matches, so the last is the
     // only case left rather than a fallback that could be undefined.
     const raw = assignment[2] ?? assignment[3] ?? assignment[4]!;
-    // Single quotes make a backslash literal, so only the other two forms are
-    // unescaped. Unescaping a single-quoted value turned `'npm publish
-    // \\--provenance'` into an attested-looking command the shell never runs.
-    const value = assignment[3] === undefined ? raw.replace(/\\(.)/g, "$1") : raw;
+    // Unquoted escapes quote any following character. Double quotes are
+    // narrower: the shell removes a backslash only before $, backtick, ", and
+    // backslash. Single quotes make every backslash literal.
+    const value = assignment[4] !== undefined
+      ? raw.replace(/\\(.)/g, "$1")
+      : assignment[2] !== undefined
+        ? raw.replace(/\\([$`"\\])/g, "$1")
+        : raw;
     if (/[$`"'()]/.test(value)) continue;
     scalars.set(assignment[1]!, value);
   }
@@ -690,7 +694,13 @@ export function shellScalars(text: string): Map<string, string> {
 export function expandScalars(line: string, scalars: Map<string, string>): string {
   // One of the two alternatives always captures the name, so there is no
   // nameless match to guard against.
-  return line.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, braced?: string, bare?: string) => scalars.get(braced ?? bare!) ?? whole);
+  return line.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, braced?: string, bare?: string) => {
+    const value = scalars.get(braced ?? bare!);
+    // Quote removal happens before parameter expansion: a backslash produced by
+    // expansion is data, not syntax. Double it in the scanner input so the one
+    // tokenisation pass preserves the shell's literal backslash.
+    return value?.replace(/\\/g, "\\\\") ?? whole;
+  });
 }
 
 /**
