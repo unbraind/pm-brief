@@ -349,14 +349,18 @@ export function tokenizeCommands(text: string, depth = 0): ShellCommand[] {
  * `> /dev/null npm publish` runs npm. A scan that reads words in order sees `>`
  * as the program and audits nothing. The forms accepted here are the ones a
  * workflow actually writes: the plain operators, a file-descriptor prefix
- * (`2>`, `2>>`), and the duplicating forms (`>&`, `2>&1`, `&>`).
+ * (`2>`, `2>>`), the duplicating forms (`>&`, `2>&1`, `&>`), and the read-write
+ * form `<>`. `<>` has to be named explicitly: it is not `<` followed by `>`, so
+ * without it the operator was read as a joined redirection that consumes no
+ * target, its target `/dev/null` became the command word, and the real
+ * `npm publish` after it was never audited.
  *
  * @param token - One command word.
  * @returns True when the word is a redirection operator.
  */
 function isRedirection(token: ShellToken): boolean {
   if (token.startsQuoted) return false;
-  return /^(?:[0-9]*(?:>>?|<<?<?)&?[0-9-]*|&>>?)$/.test(token.value);
+  return /^(?:[0-9]*(?:>>?|<>|<<?<?)(?:&[0-9-]*)?|&>>?)$/.test(token.value);
 }
 
 /**
@@ -374,7 +378,7 @@ function withoutRedirections(command: ShellCommand): ShellCommand {
     const token = command[index]!;
     if (!isRedirection(token)) {
       // A joined form such as `>file` or `2>&1` is one word and takes no target.
-      if (!token.startsQuoted && /^(?:[0-9]*>>?|[0-9]*<<?<?|&>>?)[^\s]/.test(token.value)) continue;
+      if (!token.startsQuoted && /^(?:[0-9]*>>?|[0-9]*<<?<?|[0-9]*<>|&>>?)[^\s]/.test(token.value)) continue;
       kept.push(token);
       continue;
     }
@@ -604,35 +608,74 @@ export function bashArrays(text: string): Map<string, string> {
   return arrays;
 }
 
+/** A line opening with one assignment of a fully literal value, ending there or at a `;`. */
+const STANDALONE_ASSIGNMENT =
+  /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=(?:"((?:\\.|[^"\\$`])*)"|'([^']*)'|((?:\\.|[^\s;&|"'`$()\\])+))[ \t]*(?:[;#]|\r?$)/;
+
 /**
  * Index scalar assignments so a command held in a variable can be audited.
  *
  * `CMD="npm publish"` followed by `$CMD` runs a publish that no scan of the
  * invocation line can see, because the invocation line contains no publish. The
- * assignment is where the command actually is.
+ * assignment is where the command actually is. `NPM=npm` followed by
+ * `$NPM publish` hides one the same way, so unquoted values are indexed too.
  *
- * Only literal single- or double-quoted values are indexed. An unquoted value
- * cannot hold a space and so cannot hold a command, and a value built from
- * other variables is not resolvable without evaluating the script, which this
- * module deliberately does not do.
+ * A name is taken only where a line OPENS with one assignment carrying a fully
+ * literal value and holds nothing else before its end or a `;`. `NPM=npm; cmd`
+ * therefore binds, because the semicolon ends the assignment and the shell keeps
+ * it afterwards, while `NPM=npm cmd` does not, because that binding lasts only
+ * for the command it precedes. Requiring the line to OPEN with the assignment is
+ * what keeps a `;` inside a comment from exposing one. That single rule keeps
+ * the scan from inventing
+ * bindings the shell never makes, each of which let an unattested publish
+ * borrow a flag and pass the gate:
+ *
+ * - `# FLAG=--provenance` is a comment, and a comment is not a line that is
+ *   only an assignment.
+ * - `echo "config NPM=npm"` is a command with an argument, not an assignment.
+ * - `FLAG=--provenance some-command` binds only for that one command; the shell
+ *   does not keep it afterwards, so neither does this map.
+ * - `$(FLAG=--provenance)` binds inside a subshell that the outer shell never
+ *   sees.
+ * - `NPM=npm$SUFFIX` and `NPM=npm$(printf foo)` are not literal. The value must
+ *   match to the end of the line, so a prefix is never mistaken for the whole
+ *   value -- the mistake that let a scan analyse a different command from the
+ *   one the shell runs.
+ *
+ * `export NPM=npm`, a trailing `# comment` and a CRLF line ending are all still
+ * assignments: refusing them left `$NPM` unresolved, and an attested publish
+ * elsewhere in the file then satisfied the non-vacuity guard, so being too
+ * strict here passes an unattested publish just as being too loose does.
+ *
+ * Escapes are honoured outside single quotes, so `NPM=npm\\ publish` is one word
+ * holding a command while `CMD='"'"'a\\b'"'"' keeps its backslash as the shell does.
+ * A value that still carries a substitution, backtick, quote or parenthesis
+ * after unescaping is refused: inlining `pkg_name="$(node -p …)"` injects an
+ * unbalanced parenthesis into an unrelated command, and the scan then reports
+ * invocations that are not there while losing the one that is -- a false
+ * verdict in both directions, which is worse than not resolving the variable.
  *
  * @param text - File contents with continuations already joined.
  * @returns Variable name mapped to the literal text it holds.
  */
 export function shellScalars(text: string): Map<string, string> {
   const scalars = new Map<string, string>();
-  for (const match of text.matchAll(/(?:^|[\s;&|])([A-Za-z_][A-Za-z0-9_]*)=(?:"([^"\n]*)"|'([^'\n]*)')/g)) {
-    // The alternation guarantees exactly one of the two value groups matched,
-    // so there is no third case to fall back to.
-    const value = match[2] ?? match[3]!;
-    // Only a plain literal is inlined. A value carrying a substitution, a
-    // backtick, or a quote of its own changes how the line it lands in parses:
-    // inlining `pkg_name="$(node -p …)"` injects an unbalanced parenthesis into
-    // an unrelated command, and the scan then reports invocations that are not
-    // there while losing the one that is. That is a false verdict in both
-    // directions, which is worse than not resolving the variable at all.
+  for (const line of text.split("\n")) {
+    const assignment = STANDALONE_ASSIGNMENT.exec(line);
+    if (assignment === null) continue;
+    // Exactly one of the three value alternatives matches, so the last is the
+    // only case left rather than a fallback that could be undefined.
+    const raw = assignment[2] ?? assignment[3] ?? assignment[4]!;
+    // Unquoted escapes quote any following character. Double quotes are
+    // narrower: the shell removes a backslash only before $, backtick, ", and
+    // backslash. Single quotes make every backslash literal.
+    const value = assignment[4] !== undefined
+      ? raw.replace(/\\(.)/g, "$1")
+      : assignment[2] !== undefined
+        ? raw.replace(/\\([$`"\\])/g, "$1")
+        : raw;
     if (/[$`"'()]/.test(value)) continue;
-    scalars.set(match[1]!, value);
+    scalars.set(assignment[1]!, value);
   }
   return scalars;
 }
@@ -651,7 +694,13 @@ export function shellScalars(text: string): Map<string, string> {
 export function expandScalars(line: string, scalars: Map<string, string>): string {
   // One of the two alternatives always captures the name, so there is no
   // nameless match to guard against.
-  return line.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, braced?: string, bare?: string) => scalars.get(braced ?? bare!) ?? whole);
+  return line.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (whole, braced?: string, bare?: string) => {
+    const value = scalars.get(braced ?? bare!);
+    // Quote removal happens before parameter expansion: a backslash produced by
+    // expansion is data, not syntax. Double it in the scanner input so the one
+    // tokenisation pass preserves the shell's literal backslash.
+    return value?.replace(/\\/g, "\\\\") ?? whole;
+  });
 }
 
 /**

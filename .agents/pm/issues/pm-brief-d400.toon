@@ -1,0 +1,24 @@
+id: pm-brief-d400
+title: Close PR 90 shell scanner review gaps
+description: Preserve scalar escape semantics through expansion and recognize joined read-write redirections.
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-29T04:18:31.364Z"
+updated_at: "2026-08-29T04:38:23.972Z"
+closed_at: "2026-08-29T04:21:53.296Z"
+completed_at: "2026-08-29T04:21:53.296Z"
+claim_principal: pi-agent
+author: pi-agent
+comments[3]{created_at,author,text}:
+  "2026-08-29T04:18:44.252Z",pi-agent,"Confirmed all three findings: double-quoted non-special backslashes were decoded, expanded scalar backslashes were re-tokenized as syntax, and joined <>target was not removed."
+  "2026-08-29T04:21:52.241Z",pi-agent,"Implemented quote-aware scalar decoding, protected expansion-produced backslashes from re-tokenization, added joined <>target handling, and covered both quoted scalar forms plus both redirection forms. npm test passes (351 tests)."
+  "2026-08-29T04:38:23.972Z",pi-agent,Follow-up review identified numeric joined targets such as 2<>3. Tightened bare-operator recognition so only ampersand duplication forms may carry a numeric suffix; added 2<>3 regression coverage.
+files[2]{path,scope}:
+  scripts/shell-command-scan.ts,project
+  test/verify-release-publish-attestation.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  npm test,project,pi-agent,"2026-08-29T04:21:50.818Z",local_mutation,fix/index-unquoted-scalar-assignments
+close_reason: Shell scanner now preserves runtime backslashes and audits publishes behind joined read-write redirections.
+body: ""
