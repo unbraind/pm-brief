@@ -360,7 +360,7 @@ export function tokenizeCommands(text: string, depth = 0): ShellCommand[] {
  */
 function isRedirection(token: ShellToken): boolean {
   if (token.startsQuoted) return false;
-  return /^(?:[0-9]*(?:>>?|<>|<<?<?)&?[0-9-]*|&>>?)$/.test(token.value);
+  return /^(?:[0-9]*(?:>>?|<>|<<?<?)(?:&[0-9-]*)?|&>>?)$/.test(token.value);
 }
 
 /**

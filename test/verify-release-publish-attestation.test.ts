@@ -923,7 +923,7 @@ test("a read-write redirection does not turn its target into the command", () =>
   // command word and the real publish after it was never audited -- while an
   // attested publish elsewhere satisfied the non-vacuity guard, so the whole
   // audit reported clean.
-  for (const redirected of ["<> /dev/null", "<>/dev/null"]) {
+  for (const redirected of ["<> /dev/null", "<>/dev/null", "2<>3"]) {
     const result = auditPublishAttestation([{
       file: "release.yml",
       text: [
