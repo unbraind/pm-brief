@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Pin pm-changelog 2026.8.30 before the next release ([pm-brief-m4pi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-m4pi.toon))
 - CodeQL action updates split into mutually blocking pull requests ([pm-brief-eba7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-eba7.toon))
 
 ## 2026.8.29 - 2026-08-29
