@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -4266,19 +4266,30 @@ describe("brief merge-decisions end-to-end", () => {
         await writeFile(join(receiptsDir, name), JSON.stringify({ version: 1, state: "pending" }) + "\n");
       }
 
-      // Fixture sanity, and the SDK was in fact hardened: as of pm-cli 2026.8.13
-      // this read no longer throws on either an incomplete receipt or malformed
-      // JSON — it defaults the missing fields and skips unparseable files. The
-      // original guard here asserted a TypeError precisely so this change could
-      // not slip past as a vacuous pass, and it caught it.
+      // The SDK's handling of an incomplete receipt has now moved three times:
+      // it threw (<=2026.8.12), then defaulted the missing fields and returned
+      // the receipt (2026.8.13-2026.8.24), and now drops it entirely (2026.8.30
+      // returns an empty array for this exact fixture). Reported upstream as
+      // pm-cli#1161, because the contract for malformed input is load-bearing
+      // here and is not documented anywhere a consumer could assert against.
       //
-      // So the degradation below is no longer proven by an SDK throw. What it
-      // now pins is the collector's own contract: a receipt carrying no usable
-      // decision must yield no summary rather than an empty section, which is
-      // a real behaviour and not a restatement of the SDK's.
+      // So this guard deliberately does NOT pin which of those three the SDK
+      // does. It pins the invariant that survives all of them: whatever comes
+      // back, none of it may carry a usable decision. Pinning the SDK's choice
+      // is what made this test fail on a routine version bump without any
+      // behaviour of ours changing.
+      //
+      // Non-vacuity is preserved by asserting the fixture is real on disk
+      // first. Without that, an empty result would satisfy `every` trivially
+      // and the test would pass even if the receipts had never been written.
+      const receiptFiles = await readdir(receiptsDir);
+      assert.equal(receiptFiles.length, 2, "the corrupt-receipt fixture is on disk");
       const raw = await listMergeReceipts(tmpDir);
-      assert.ok(raw.length > 0, "the hardened SDK returns the incomplete receipt rather than rejecting it");
-      assert.equal(raw.every((r) => (r.decisions ?? []).length === 0), true, "and it carries no usable decision");
+      assert.equal(
+        raw.every((r) => (r.decisions ?? []).length === 0),
+        true,
+        "no incomplete receipt may yield a usable decision, however the SDK handles it",
+      );
 
       // The collector must degrade to undefined rather than reject.
       assert.equal(await collectPendingMergeDecisions(pmPath), undefined);

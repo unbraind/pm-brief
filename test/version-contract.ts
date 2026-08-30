@@ -3,4 +3,4 @@
 export const REQUIRED_MINIMUM_VERSION = "2026.8.20";
 
 /** Exact pm CLI/SDK release used by development and release gates. */
-export const REQUIRED_DEVELOPMENT_VERSION = "2026.8.24";
+export const REQUIRED_DEVELOPMENT_VERSION = "2026.8.30";

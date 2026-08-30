@@ -1,0 +1,14 @@
+id: pm-brief-00tc
+title: Adopt pm CLI 2026.8.30 and stop pinning which way the SDK handles an incomplete merge receipt
+description: "Dependabot cannot green a host CLI bump here because a packaging test asserts the devDependency equals a constant declared in test/version-contract.ts, and dependabot never edits test files. Moving both together adopts 2026.8.30, which also carries the fix for the npm 12 package install breakage. Bumping surfaced a second problem: listMergeReceipts has changed its handling of structurally incomplete receipts three times, throwing, then defaulting the missing fields and returning the receipt, and now dropping it entirely, so a guard that pinned the SDK's choice failed on a routine version bump with no behaviour of ours changing. The guard now pins the invariant that survives all three, that no incomplete receipt may yield a usable decision, and asserts the fixture exists on disk so an empty result cannot satisfy it vacuously. Reported upstream as pm-cli issue 1161."
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-30T17:20:52.762Z"
+updated_at: "2026-08-30T17:20:55.089Z"
+closed_at: "2026-08-30T17:20:54.993Z"
+completed_at: "2026-08-30T17:20:54.993Z"
+author: claude
+close_reason: "Host CLI and its version-contract constant moved together to 2026.8.30 with no history drift under the pinned binary, and the merge-receipt guard now pins the version-independent invariant with a fixture-existence assertion proving non-vacuity. Suite passes 353 of 353."
+body: ""
