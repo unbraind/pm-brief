@@ -13,18 +13,26 @@ const dependabotConfig = readFileSync(
 );
 
 test("every CodeQL action uses one pinned release", () => {
-  const references = [...codeqlWorkflow.matchAll(/github\/codeql-action\/[^@\s]+@([^\s]+)/g)];
+  const workflow = parse(codeqlWorkflow) as {
+    jobs?: Record<string, { steps?: Array<{ uses?: unknown }> }>;
+  };
+  const references: string[] = [];
+
+  for (const job of Object.values(workflow.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (typeof step.uses !== "string" || !step.uses.startsWith("github/codeql-action/")) continue;
+      const reference = /^github\/codeql-action\/[^@\s]+@([^\s]+)$/.exec(step.uses);
+      assert.ok(reference, `invalid CodeQL action reference: ${step.uses}`);
+      references.push(reference[1]);
+    }
+  }
 
   assert.ok(references.length > 1, "the workflow should use multiple CodeQL actions");
   assert.ok(
-    references.every((reference) => /^[0-9a-f]{40}$/.test(reference[1])),
+    references.every((reference) => /^[0-9a-f]{40}$/.test(reference)),
     "every CodeQL action must use a pinned commit SHA",
   );
-  assert.equal(
-    new Set(references.map((reference) => reference[1])).size,
-    1,
-    "all CodeQL actions must use the same release",
-  );
+  assert.equal(new Set(references).size, 1, "all CodeQL actions must use the same release");
 });
 
 test("Dependabot groups CodeQL action updates", () => {
