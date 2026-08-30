@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- CodeQL action updates split into mutually blocking pull requests ([pm-brief-eba7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-eba7.toon))
+
 ## 2026.8.29 - 2026-08-29
 
 ### Fixed

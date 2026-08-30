@@ -1,0 +1,23 @@
+id: pm-brief-eba7
+title: CodeQL action updates split into mutually blocking pull requests
+description: Dependabot updates the CodeQL init and analyze actions separately even though CodeQL requires every action in a workflow to run the same release. Update the pair together and group future github/codeql-action updates so each bump remains mergeable.
+type: Issue
+status: closed
+priority: 2
+tags: []
+created_at: "2026-08-30T15:26:04.708Z"
+updated_at: "2026-08-30T15:30:11.878Z"
+closed_at: "2026-08-30T15:30:11.865Z"
+completed_at: "2026-08-30T15:30:11.865Z"
+claim_principal: pi-agent
+author: pi-agent
+comments[1]{created_at,author,text}:
+  "2026-08-30T15:30:11.380Z",pi-agent,Updated every CodeQL action to the 4.37.9 SHA and grouped github/codeql-action* updates. Reverting both configuration edits made the focused regression test fail with exit 1; restoration passed. npm test passed 353 tests; the configured coverage gate passed; docstring and typecheck passed.
+files[3]{path,scope,note}:
+  .github/workflows/codeql.yml,project,paired CodeQL action release pin
+  .github/dependabot.yml,project,grouped CodeQL Dependabot updates
+  test/codeql-workflow.test.ts,project,configuration regression coverage
+tests[1]{command,path,scope,timeout_seconds,pm_context_mode,provenance{author,created_at,source_kind,source_ref}}:
+  npm test,test/codeql-workflow.test.ts,project,180,schema,pi-agent,"2026-08-30T15:30:10.697Z",local_mutation,ci/bump-codeql-action-as-one-unit
+close_reason: "Bumped all CodeQL workflow actions as one release, grouped future Dependabot updates, and added regression tests for both invariants."
+body: ""
