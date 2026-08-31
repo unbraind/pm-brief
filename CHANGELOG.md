@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Other
+
+- Reconcile the corrupt-receipt fixture comment with what the pinned SDK now does ([pm-brief-vc49](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-vc49.toon))
+
+## 2026.8.31 - 2026-08-31
+
 ### Fixed
 
 - Adopt pm CLI 2026.8.30 and stop pinning which way the SDK handles an incomplete merge receipt ([pm-brief-00tc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-00tc.toon))

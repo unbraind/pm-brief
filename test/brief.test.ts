@@ -4255,11 +4255,16 @@ describe("brief merge-decisions end-to-end", () => {
       pm(["--pm-path", pmPath, "create", "--title", "Solo item", "--type", "Task", "--author", "agent-a", "--json"]);
       git(["add", "-A"]); git(["commit", "-m", "base"]);
 
-      // Two structurally valid but incomplete pending receipts: the SDK pushes
-      // them (version 1 + pending passes its per-file guard), then its final
-      // created_at sort dereferences the missing field and throws. That is the
-      // SDK-side throw the brief must survive; one receipt would not do (the
-      // comparator is never invoked on a single-element array).
+      // Two structurally valid but incomplete pending receipts. Two, not one,
+      // because of the SDK's ORIGINAL behaviour (<=2026.8.12): it pushed both
+      // (version 1 + pending passes its per-file guard), then its final
+      // created_at sort dereferenced the missing field and threw — and the
+      // comparator is never invoked on a single-element array, so a single
+      // receipt could not reach that path at all. Under the pinned 2026.8.30
+      // the SDK no longer throws on this fixture; it drops both receipts and
+      // returns an empty array (see the note below). The pair is kept because
+      // it is the only shape that exercises every handling the SDK has had, so
+      // the fixture stays valid whichever one a future version picks.
       const receiptsDir = join(tmpDir, ".git", "pm-merge-receipts");
       await mkdir(receiptsDir, { recursive: true });
       for (const name of ["aaaa-corrupt.json", "bbbb-corrupt.json"]) {
