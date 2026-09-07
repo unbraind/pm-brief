@@ -4057,13 +4057,14 @@ describe("brief merge-decisions end-to-end", () => {
   /**
    * Build a real two-branch conflicting merge in a temp git repo. The base item
    * is shared; agent-a and agent-b both rewrite the same scalar (`description`)
-   * and each append a `notes` entry (a union collection). Merging agent-a into
-   * agent-b exits 1 and lands a pending field-aware merge receipt.
+   * and each append a `notes` entry (a union collection). Agent B is newer;
+   * `incomingNewer` chooses whether it is incoming or checked out. Either merge
+   * exits 1 and lands a pending field-aware merge receipt.
    *
    * Returns the workspace + the conflicting item id so the caller can drive the
    * real registered `brief`/`brief diverge` commands and assert against reality.
    */
-  async function buildConflictingMerge(tmpDir: string, pmBin: string, override: { aDesc: string; bDesc: string }): Promise<string> {
+  async function buildConflictingMerge(tmpDir: string, pmBin: string, override: { aDesc: string; bDesc: string; incomingNewer?: boolean }): Promise<string> {
     const git = (args: string[]) => { const r = spawnSync("git", args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
     const pm = (args: string[]) => { const r = spawnSync(pmBin, args, { cwd: tmpDir, stdio: "pipe", encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 }); if (r.status !== 0) throw new Error(`pm ${args.join(" ")} failed: ${r.stderr}`); return r.stdout.trim(); };
     const pmPath = join(tmpDir, ".agents", "pm");
@@ -4089,8 +4090,11 @@ describe("brief merge-decisions end-to-end", () => {
     // The driver records the requested side but selects the newest document,
     // independently of branch direction. Agent B was updated after Agent A,
     // so B survives and A is reported as discarded; notes still merge by union.
-    const merge = spawnSync("git", ["merge", "agent-a", "-m", "merge"], { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" });
+    if (override.incomingNewer) git(["checkout", "agent-a"]);
+    const merge = spawnSync("git", ["merge", override.incomingNewer ? "agent-b" : "agent-a", "-m", "merge"], { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" });
     assert.notEqual(merge.status, 0, "the conflicting merge must exit non-zero");
+    assert.equal(readPmItems(pmPath).find((item) => item.id === itemId)?.description, override.bDesc,
+      "the persisted item must retain the newer value in either merge direction");
     return itemId;
   }
 
@@ -4122,14 +4126,14 @@ describe("brief merge-decisions end-to-end", () => {
     }
   });
 
-  test("integration: registered `brief` and `brief diverge` surface pending receipts via the real command pipeline", async (t) => {
+  test("integration: registered `brief` and `brief diverge` surface pending receipts when the incoming branch is newer", async (t) => {
     const pmBin = process.env.PM_BIN ?? INSTALLED_PM_BIN;
     if (!pmOnPath(pmBin)) { t.skip("pm not on PATH"); return; }
 
     const tmpDir = await mkdtemp(join(tmpdir(), "pm-merge-brief-e2e-"));
     const previousCwd = process.cwd();
     try {
-      const itemId = await buildConflictingMerge(tmpDir, pmBin, { aDesc: "Agent A description", bDesc: "Agent B description" });
+      const itemId = await buildConflictingMerge(tmpDir, pmBin, { aDesc: "Agent A description", bDesc: "Agent B description", incomingNewer: true });
       const { commands } = await activateBrief();
       // `global: { json: false }` is explicit rather than incidental: the SDK test
       // harness defaults globals to `{ json: true, quiet: true, noPager: true }`,
