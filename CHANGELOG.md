@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Consume the canonical attestation gate instead of carrying a copy of it ([pm-brief-hxoj](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-hxoj.toon))
+
 ## 2026.9.1 - 2026-09-01
 
 ### Other
