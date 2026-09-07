@@ -3938,7 +3938,7 @@ describe("brief merge-decisions (unit)", () => {
     assert.match(slack, /\*⚠ Pending Merge Decisions\*/);
   });
 
-  test("a receipt settled by stable value order names no side in any renderer", () => {
+  test("direction-independent merge policies name no requested side in any renderer", () => {
     // pm-cli GH-974: a receipt could report `preferred: ours` while retaining
     // the other branch's value, because under stable_value_order the driver
     // picks by a deterministic ordering rather than by branch. Upstream renamed
@@ -3952,7 +3952,8 @@ describe("brief merge-decisions (unit)", () => {
     const items: PmItem[] = [
       { id: "pm-a", title: "Task A", type: "Task", status: "open", created_at: "2026-07-20T00:00:00Z", updated_at: "2026-07-20T00:00:00Z" },
     ];
-    const stable = mergeSummary({ receipts: [mergeDecisionEntry({ preferred: "ours", conflictResolution: "stable_value_order" })] });
+    for (const [policy, phrase] of [["stable_value_order", "kept by stable value order"], ["latest_document_update", "kept by latest document update"]] as const) {
+    const stable = mergeSummary({ receipts: [mergeDecisionEntry({ preferred: "ours", conflictResolution: policy })] });
     const brief = buildBrief(items, { mergeDecisions: stable, generatedAt: "2026-07-27T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
 
     for (const [format, rendered] of [
@@ -3961,7 +3962,9 @@ describe("brief merge-decisions (unit)", () => {
       ["slack", renderSlackBrief(brief)],
     ] as const) {
       assert.doesNotMatch(rendered, /kept ours|kept theirs|kept undefined/, `${format} must not report the requested side as the side kept`);
-      assert.match(rendered, /kept by stable value order/, `${format} must say how the conflict was actually settled`);
+      assert.ok(rendered.includes(phrase), `${format} must say how the conflict was actually settled`);
+    }
+
     }
 
     // The side-preferring contract still names its side, so the fallback did
@@ -4083,12 +4086,9 @@ describe("brief merge-decisions end-to-end", () => {
     pm(["--pm-path", pmPath, "update", itemId, "--description", override.bDesc, "--author", "agent-b"]);
     pm(["--pm-path", pmPath, "notes", itemId, "--add", "note from B", "--author", "agent-b", "--json"]);
     git(["add", "-A"]); git(["commit", "-m", "agent-b"]);
-    // The driver records `requested_preference: ours` (agent-b) but settles the
-    // scalar by `stable_value_order`, so the value RETAINED is the one that wins
-    // the deterministic ordering — here agent-a's — and agent-b's is discarded.
-    // Reading the requested side as the side kept is the contradiction pm-cli
-    // fixed in GH-974. git still exits 1 because the .toon has a content
-    // conflict needing commit.
+    // The driver records the requested side but selects the newest document,
+    // independently of branch direction. Agent B was updated after Agent A,
+    // so B survives and A is reported as discarded; notes still merge by union.
     const merge = spawnSync("git", ["merge", "agent-a", "-m", "merge"], { cwd: tmpDir, stdio: "pipe", encoding: "utf-8" });
     assert.notEqual(merge.status, 0, "the conflicting merge must exit non-zero");
     return itemId;
@@ -4115,8 +4115,8 @@ describe("brief merge-decisions end-to-end", () => {
       // Only the LOSSY scalar conflict is surfaced — the `notes` union collection
       // merged without loss and must NOT appear as a conflict.
       assert.deepEqual(entry.conflicts.map((c) => c.field), ["description"]);
-      assert.equal(entry.conflictResolution, "stable_value_order", "the item driver settles scalars by stable value order");
-      assert.equal(entry.conflicts[0]!.discarded, "Agent B description", "the discarded value is the one stable value order rejected, not the one the requested side names");
+      assert.equal(entry.conflictResolution, "latest_document_update", "the item driver settles scalars by document recency");
+      assert.equal(entry.conflicts[0]!.discarded, "Agent A description", "the newer document wins independently of requested branch preference");
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -4151,10 +4151,10 @@ describe("brief merge-decisions end-to-end", () => {
       const md = String(briefMd.output);
       assert.match(md, new RegExp("⚠ merge " + itemId + ":"));
       assert.match(md, /## ⚠ Pending Merge Decisions/);
-      // A real receipt from the item driver is settled by stable value order, so
+      // A real receipt from the item driver is settled by document recency, so
       // the brief must say that rather than name the requested side (GH-974).
-      assert.match(md, new RegExp("`" + itemId + "` \\(kept by stable value order\\) — fields: description"));
-      assert.match(md, /`description` discarded: Agent B description/);
+      assert.match(md, new RegExp("`" + itemId + "` \\(kept by latest document update\\) — fields: description"));
+      assert.match(md, /`description` discarded: Agent A description/);
       assert.match(md, /reconcile with `pm merge reconcile`/);
 
       // brief --json: compromised flag on the item + a mergeDecisions block.
@@ -4169,7 +4169,7 @@ describe("brief merge-decisions end-to-end", () => {
       assert.equal(entry.itemPath, ".agents/pm/tasks/" + itemId + ".toon");
       assert.equal(entry.preferred, "ours");
       assert.equal(entry.conflicts[0]!.field, "description");
-      assert.equal(entry.conflicts[0]!.discarded, "Agent B description");
+      assert.equal(entry.conflicts[0]!.discarded, "Agent A description");
 
       // brief diverge (markdown): the section + a recommended reconcile step.
       assert.equal(divergeMd.pmBriefRendered, true);
