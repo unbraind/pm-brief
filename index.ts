@@ -1874,11 +1874,14 @@ function renderGovernanceAgentPrompt(g: GovernanceSummary | undefined): string[]
  * Reporting the requested side here would reintroduce it one layer up, and tell
  * an agent its peer's edit lost when the opposite may have happened.
  *
+ * `latest_document_update` uses document recency and stable tie-breaking, also
+ * independently of the requested branch. Both policies must name their rule.
  * A side is only meaningful under `preferred_side`; it is absent there only if
  * a receipt is malformed, which reads as unknown rather than as a branch.
  */
 function mergeDecisionKeptPhrase(entry: MergeDecisionEntry): string {
   if (entry.conflictResolution === "stable_value_order") return "kept by stable value order";
+  if (entry.conflictResolution === "latest_document_update") return "kept by latest document update";
   return entry.preferred === undefined ? "kept side unrecorded" : `kept ${entry.preferred}`;
 }
 

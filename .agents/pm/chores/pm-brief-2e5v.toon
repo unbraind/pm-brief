@@ -1,0 +1,20 @@
+id: pm-brief-2e5v
+title: Certify the CLI and SDK on PM 2026.9.7
+description: "Upgrade to published PM CLI/SDK 2026.9.7 and pm-changelog 2026.9.6; verify package gates against the actual installed SDK and retain independent production-readiness limitations. The CLI pin was upgraded before tracker writes to honor its history epoch compatibility refusal. Companion: pm-cli-website-6yiv."
+type: Chore
+status: in_progress
+priority: 2
+tags[3]: cli,compatibility,sdk
+created_at: "2026-09-07T20:45:31.941Z"
+updated_at: "2026-09-07T22:23:59.908Z"
+assignee: codex-pm-ecosystem
+claim_principal: codex-pm-ecosystem
+author: codex-pm-ecosystem
+acceptance_criteria: Installed dependencies match exact pins; genuine package checks pass with no weakened gates; all remaining coverage and privacy gaps are recorded
+comments[3]{created_at,author,text}:
+  "2026-09-07T21:05:21.157Z",codex-pm-ecosystem,"Final local release:check passed using installed CLI/SDK 2026.9.7 and pm-changelog 2026.9.6. Final top-level test report: tests=295, pass=295, fail=0, skipped=0. ℹ all files |  99.96 |    92.02 |  100.00 | . Coverage is the current reported scope; complete four-dimensional source certification and independent production/privacy/review gates remain open."
+  "2026-09-07T21:31:32.152Z",codex-pm-ecosystem,"2026-09-07 UTC independent local workspace gate: pm health --strict-exit --json fails on merge_receipts_pending:3. Supported pm merge reconcile --dry-run refuses with no_receipt_set_proves_snapshot. History validation reports no drift or invalid stream; old pending receipt snapshots cannot prove the later item state. Receipts and prior history remain preserved. The passing release:check does not clear this local strict-health gate."
+  "2026-09-07T22:23:59.908Z",codex-pm-ecosystem,"CodeRabbit follow-up: the real registered brief/diverge pipeline now merges the newer incoming agent-b branch into older agent-a. The existing receipt collector retains the opposite direction. The shared fixture independently checks the persisted description through the complete PM reader, and both receipt/rendering assertions still require Agent A as discarded. All five real merge-decision integration tests pass on installed CLI 2026.9.7; no mocked merge or duplicate test was introduced."
+tests[1]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,1200,codex-pm-ecosystem,"2026-09-07T20:45:33.821Z",local_mutation,chore/certify-pm-cli-2026-9-7
+body: ""
