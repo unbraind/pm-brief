@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Certify pm CLI 2026.9.10 and pick up the canonical auditor fixes the lockfile was holding back ([pm-brief-5fv2](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-5fv2.toon))
+
 ## 2026.9.8 - 2026-09-08
 
 ### Security
