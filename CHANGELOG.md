@@ -1,6 +1,12 @@
 # Changelog
 
-## 2026.9.11
+## Unreleased
+
+### Other
+
+- Certify pm CLI 2026.9.12 and the pm-ops 2026.9.11 auditor ([pm-brief-h56n](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-h56n.toon))
+
+## 2026.9.11 - 2026-09-11
 
 ### Other
 
