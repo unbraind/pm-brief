@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Certify pm CLI 2026.9.17 ([pm-brief-ghkc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-ghkc.toon))
+
 ## 2026.9.13 - 2026-09-13
 
 ### Other
@@ -20,6 +26,10 @@
 
 ## 2026.9.1 - 2026-09-01
 
+### Fixed
+
+- Adopt pm CLI 2026.8.30 and stop pinning which way the SDK handles an incomplete merge receipt ([pm-brief-00tc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-00tc.toon))
+
 ### Other
 
 - Reconcile the corrupt-receipt fixture comment with what the pinned SDK now does ([pm-brief-vc49](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-vc49.toon))
@@ -28,7 +38,6 @@
 
 ### Fixed
 
-- Adopt pm CLI 2026.8.30 and stop pinning which way the SDK handles an incomplete merge receipt ([pm-brief-00tc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-00tc.toon))
 - Pin pm-changelog 2026.8.30 before the next release ([pm-brief-m4pi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-m4pi.toon))
 - CodeQL action updates split into mutually blocking pull requests ([pm-brief-eba7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-eba7.toon))
 
@@ -36,13 +45,13 @@
 
 ### Fixed
 
+- A failed provenance publish silently falls back to an unattested one ([pm-brief-k1xr](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-k1xr.toon))
 - Close PR 90 shell scanner review gaps ([pm-brief-d400](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-d400.toon))
 
 ## 2026.8.28 - 2026-08-28
 
 ### Fixed
 
-- A failed provenance publish silently falls back to an unattested one ([pm-brief-k1xr](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-k1xr.toon))
 - Checkout release alert script from the default branch ([pm-brief-l5lh](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-l5lh.toon))
 - Canonicalize the complete-corpus reader and adopt the current pm host contract ([pm-brief-v2ts](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v2ts.toon))
 
@@ -55,11 +64,16 @@
 - Resolve PR \#79 review threads: hermetic release-alert evidence and audit timestamp correction ([pm-brief-zrpv](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-zrpv.toon))
 - Alert on daily release failure and require merge drivers in CI ([pm-brief-javk](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-javk.toon))
 
-## 2026.8.16 - 2026-08-16
+## 2026.8.17 - 2026-08-17
 
 ### Fixed
 
 - The pm CLI compatibility floor was declared only in peerDependencies, which only npm enforces, and not in manifest.json pm_min_version, which is the field the CLI enforces ([pm-brief-mtjj](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-mtjj.toon))
+
+## 2026.8.16 - 2026-08-16
+
+### Fixed
+
 - pm-brief consumes a truncated `pm list-all` answer as if it were complete ([pm-brief-g6ko](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-g6ko.toon))
 
 ## 2026.8.14 - 2026-08-14
