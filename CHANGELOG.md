@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Enforce genuine 100/100/100/100 source coverage in the release gate ([pm-brief-gtiy](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-gtiy.toon))
+
 ### Other
 
 - Certify pm CLI 2026.9.17 ([pm-brief-ghkc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-ghkc.toon))
