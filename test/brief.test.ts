@@ -4461,14 +4461,7 @@ describe("registered command acceptance matrix", () => {
     const { commands } = await activateBrief();
     const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-command-text-"));
     const pmRoot = join(tmpDir, ".agents", "pm");
-    const initialized = spawnSync(INSTALLED_PM_BIN, ["init", "--pm-path", pmRoot], { encoding: "utf-8" });
-    assert.equal(initialized.status, 0, initialized.stderr);
-    const issue = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-issue", "--type", "Issue", "--title", "Fixture issue", "--author", "test", "--json"], { encoding: "utf-8" });
-    assert.equal(issue.status, 0, issue.stderr);
-    const closed = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-closed", "--type", "Task", "--title", "Fixture closed", "--status", "closed", "--close-reason", "done", "--author", "test", "--json"], { encoding: "utf-8" });
-    assert.equal(closed.status, 0, closed.stderr);
     const previousCwd = process.cwd();
-    process.chdir(tmpDir);
     const run = async (
       command: string,
       options: Record<string, unknown> = {},
@@ -4483,6 +4476,14 @@ describe("registered command acceptance matrix", () => {
     };
 
     try {
+      const initialized = spawnSync(INSTALLED_PM_BIN, ["init", "--pm-path", pmRoot], { encoding: "utf-8" });
+      assert.equal(initialized.status, 0, initialized.stderr);
+      const issue = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-issue", "--type", "Issue", "--title", "Fixture issue", "--author", "test", "--json"], { encoding: "utf-8" });
+      assert.equal(issue.status, 0, issue.stderr);
+      const closed = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-closed", "--type", "Task", "--title", "Fixture closed", "--status", "closed", "--close-reason", "done", "--author", "test", "--json"], { encoding: "utf-8" });
+      assert.equal(closed.status, 0, closed.stderr);
+      process.chdir(tmpDir);
+
       const next = await run("brief next", { explain: true, "dependency-order": true, count: 2 });
       assert.match(next, /^1\. pm-/);
       assert.match(next, /\[score -?\d/);
