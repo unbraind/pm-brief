@@ -4459,6 +4459,16 @@ describe("registered command acceptance matrix", () => {
 
   test("text command paths expose human-readable ranking, staleness, momentum, and typed focus", async () => {
     const { commands } = await activateBrief();
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-command-text-"));
+    const pmRoot = join(tmpDir, ".agents", "pm");
+    const initialized = spawnSync(INSTALLED_PM_BIN, ["init", "--pm-path", pmRoot], { encoding: "utf-8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const issue = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-issue", "--type", "Issue", "--title", "Fixture issue", "--author", "test", "--json"], { encoding: "utf-8" });
+    assert.equal(issue.status, 0, issue.stderr);
+    const closed = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-closed", "--type", "Task", "--title", "Fixture closed", "--status", "closed", "--close-reason", "done", "--author", "test", "--json"], { encoding: "utf-8" });
+    assert.equal(closed.status, 0, closed.stderr);
+    const previousCwd = process.cwd();
+    process.chdir(tmpDir);
     const run = async (
       command: string,
       options: Record<string, unknown> = {},
@@ -4472,36 +4482,41 @@ describe("registered command acceptance matrix", () => {
       return String(result.output);
     };
 
-    const next = await run("brief next", { explain: true, "dependency-order": true, count: 2 });
-    assert.match(next, /^1\. pm-/);
-    assert.match(next, /\[score -?\d/);
-    assert.match(next, /confidence \d/);
-    const conciseNext = await run("brief next", { confidence: true, "dependency-order": true, count: 2 });
-    assert.match(conciseNext, /^pm-.* \| score -?\d+ \| confidence \d+/);
+    try {
+      const next = await run("brief next", { explain: true, "dependency-order": true, count: 2 });
+      assert.match(next, /^1\. pm-/);
+      assert.match(next, /\[score -?\d/);
+      assert.match(next, /confidence \d/);
+      const conciseNext = await run("brief next", { confidence: true, "dependency-order": true, count: 2 });
+      assert.match(conciseNext, /^pm-.* \| score -?\d+ \| confidence \d+/);
 
-    const stale = await run("brief stale", { days: 0 });
-    assert.match(stale, /pm-brief-gtiy: .* - \d+ day\(s\) stale/);
+      const stale = await run("brief stale", { days: 0 });
+      assert.match(stale, /pm-fixture-issue: .* - \d+ day\(s\) stale/);
 
-    const momentum = await run("brief momentum", { days: 3650 });
-    assert.match(momentum, /^Closed \d+ item\(s\)/);
-    assert.match(momentum, /Throughput:/);
+      const momentum = await run("brief momentum", { days: 3650 });
+      assert.match(momentum, /^Closed \d+ item\(s\)/);
+      assert.match(momentum, /Throughput:/);
 
-    const typeFocused = JSON.parse(await run("brief", {
-      focus: "type:Issue",
-      format: "json",
-      "no-governance": true,
-      "dependency-order": true,
-    })) as { focus: Array<{ type: string }> };
-    assert.ok(typeFocused.focus.length > 0);
-    assert.ok(typeFocused.focus.every((item) => item.type === "Issue"));
+      const typeFocused = JSON.parse(await run("brief", {
+        focus: "type:Issue",
+        format: "json",
+        "no-governance": true,
+        "dependency-order": true,
+      })) as { focus: Array<{ type: string }> };
+      assert.ok(typeFocused.focus.length > 0);
+      assert.ok(typeFocused.focus.every((item) => item.type === "Issue"));
 
-    const idFocused = JSON.parse(await run("brief", {
-      focus: "pm-brief-gtiy",
-      format: "json",
-      "no-governance": true,
-      "dependency-order": true,
-    })) as { focus: Array<{ id: string }> };
-    assert.ok(idFocused.focus.some((item) => item.id === "pm-brief-gtiy"));
+      const idFocused = JSON.parse(await run("brief", {
+        focus: "pm-fixture-issue",
+        format: "json",
+        "no-governance": true,
+        "dependency-order": true,
+      })) as { focus: Array<{ id: string }> };
+      assert.ok(idFocused.focus.some((item) => item.id === "pm-fixture-issue"));
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   test("registered commands reject invalid positive and non-negative integer flags", async () => {

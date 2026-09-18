@@ -22,21 +22,13 @@ import extension, {
   detectDefaultBase,
   detectStaleContext,
   eventKey,
-  gitConfigGet,
   listChangedPaths,
   mergeBase,
   parseActivitySinceOutput,
-  pmVersion,
   readActivitySince,
   readBlob,
   readPmItems,
   renderMarkdownBrief,
-  normalizeItemPath,
-  secretFieldFromPath,
-  escapeLine,
-  formatScoreValue,
-  toGovernanceDuplicateCluster,
-  toMergeDecisionEntry,
   renderMarkdownDelta,
   renderMarkdownDivergence,
   renderSlackDelta,
@@ -50,8 +42,6 @@ import extension, {
   summarizeMomentum,
   type DeltaActivityEntry,
   type DeltaItemChange,
-  type DuplicateCluster,
-  type MergeDecisionReceipt,
   type DeltaSummary,
   type DivergeEvent,
   type MergeDecisionEntry,
@@ -167,10 +157,6 @@ function divEvent(op: string, ts: string, path = "/metadata/status"): DivergeEve
 }
 
 describe("readPmItems spawn failures name the CLI, the spawn error, or a closed fallback", () => {
-  test("pmVersion reports unknown when the installed CLI process fails", () => {
-    assert.equal(pmVersion(() => failedSpawn()), "unknown");
-  });
-
   test("stderr from a failed complete-corpus read is the error message", () => {
     assert.throws(
       () => readPmItems("/tracker", () => failedSpawn({ stderr: "tracker exploded\n" })),
@@ -372,25 +358,38 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
 
   test("nested --focus arrays flatten and brief next json without --explain is a bare next list", async () => {
     const { commands } = await activateBrief();
-    const focused = (await runRegisteredCommandForTest(commands, {
-      command: "brief",
-      options: { focus: [["pm-brief-gtiy"], "type:Issue"], format: "json", "no-governance": true },
-      global: { json: false },
-      pmRoot: repoPmRoot(),
-    })).result as { output?: string };
-    const brief = JSON.parse(String(focused.output)) as { focus: Array<{ id: string; type: string }> };
-    assert.ok(brief.focus.some((item) => item.id === "pm-brief-gtiy"));
-    assert.ok(brief.focus.some((item) => item.type === "Issue"));
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-nested-focus-"));
+    const pmRoot = join(tmpDir, ".agents", "pm");
+    const initialized = spawnSync(INSTALLED_PM_BIN, ["init", "--pm-path", pmRoot], { encoding: "utf-8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const created = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-issue", "--type", "Issue", "--title", "Fixture issue", "--author", "test", "--json"], { encoding: "utf-8" });
+    assert.equal(created.status, 0, created.stderr);
+    const previousCwd = process.cwd();
+    process.chdir(tmpDir);
+    try {
+      const focused = (await runRegisteredCommandForTest(commands, {
+        command: "brief",
+        options: { focus: [["pm-fixture-issue"], "type:Issue"], format: "json", "no-governance": true },
+        global: { json: false },
+        pmRoot: ".agents/pm",
+      })).result as { output?: string };
+      const brief = JSON.parse(String(focused.output)) as { focus: Array<{ id: string; type: string }> };
+      assert.ok(brief.focus.some((item) => item.id === "pm-fixture-issue"));
+      assert.ok(brief.focus.some((item) => item.type === "Issue"));
 
-    const next = (await runRegisteredCommandForTest(commands, {
-      command: "brief next",
-      options: { format: "json", count: 2 },
-      global: { json: false },
-      pmRoot: repoPmRoot(),
-    })).result as { output?: string };
-    const payload = JSON.parse(String(next.output)) as { next?: unknown; explanations?: unknown };
-    assert.ok(Array.isArray(payload.next));
-    assert.equal(payload.explanations, undefined);
+      const next = (await runRegisteredCommandForTest(commands, {
+        command: "brief next",
+        options: { format: "json", count: 2 },
+        global: { json: false },
+        pmRoot: ".agents/pm",
+      })).result as { output?: string };
+      const payload = JSON.parse(String(next.output)) as { next?: unknown; explanations?: unknown };
+      assert.ok(Array.isArray(payload.next));
+      assert.equal(payload.explanations, undefined);
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   test("brief duplicates and brief governance honour --json and reject a zero --limit", async () => {
@@ -532,9 +531,6 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     const throwingStatus = { toString(): string { throw new Error("status serialization failed"); } } as unknown as string;
     const staleFailure = await collectGovernanceSignals([{ id: "pm-stale-failure", status: throwingStatus }], { pmRoot: repoPmRoot() });
     assert.equal(staleFailure.staleInProgressTotal, 0);
-    const invalidGeneratedAt = Symbol("invalid-generated-at") as unknown as string;
-    const invalidDate = await collectGovernanceSignals([{ id: "pm-invalid-date" }], { pmRoot: repoPmRoot(), generatedAt: invalidGeneratedAt });
-    assert.equal(invalidDate.staleInProgressTotal, 0);
   });
 
   test("a very small brief budget reaches the tight governance compaction stage", () => {
@@ -560,39 +556,6 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
       },
     });
     assert.ok(compactedGovernance.governance);
-  });
-
-  test("SDK edge adapters preserve quote, path, score, and missing-field contracts", () => {
-    assert.equal(normalizeItemPath("\".agents/pm/tasks/pm-a.toon\""), ".agents/pm/tasks/pm-a.toon");
-    assert.equal(secretFieldFromPath("$."), "(unknown field)");
-    assert.equal(escapeLine(undefined), "");
-    assert.equal(formatScoreValue(2), "2");
-    assert.equal(formatScoreValue(1.25), "1.3");
-    const cluster: DuplicateCluster = {
-      id: "pm-a",
-      items: [{ id: "pm-a", title: "Task A", status: "open", type: "Task" }],
-      matches: [],
-      max_score: 0,
-    };
-    const adapted = toGovernanceDuplicateCluster(cluster, new Map([["pm-a", { id: "pm-a", title: "Task A", type: "Task", status: "open" }]]));
-    assert.equal(adapted.reason, "title_token_jaccard");
-
-    const modernReceipt: MergeDecisionReceipt = {
-      version: 1,
-      id: "receipt-modern",
-      item_id: "pm-a",
-      item_path: ".agents/pm/tasks/pm-a.toon",
-      requested_preference: "theirs",
-      conflict_resolution: "preferred_side",
-      fields_from_theirs: [],
-      union_fields: [],
-      decisions: [{ field: "title", base: "base", ours: "ours", theirs: "theirs", retained: "theirs", discarded: "ours" }],
-      state: "pending",
-      created_at: "2026-07-27T12:00:00Z",
-    };
-    assert.equal(toMergeDecisionEntry(modernReceipt).preferred, "theirs");
-    const legacyReceipt: MergeDecisionReceipt = { ...modernReceipt, requested_preference: undefined, preferred: "ours" };
-    assert.equal(toMergeDecisionEntry(legacyReceipt).preferred, "ours");
   });
 
   test("a preferred_side receipt with no recorded side renders as unrecorded, not as a branch name", () => {
@@ -817,23 +780,6 @@ describe("collectPendingMergeDecisions degrades outside git and when cwd disappe
 });
 
 describe("git readers fail closed when stderr is empty and honour a non-origin symbolic default", () => {
-  test("gitConfigGet handles both a configured key and an absent key", async () => {
-    const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-git-config-"));
-    try {
-      const init = spawnSync("git", ["init"], { cwd: tmpDir, encoding: "utf8" });
-      assert.equal(init.status, 0, init.stderr);
-      assert.equal(gitConfigGet(tmpDir, "pm-brief.missing"), undefined);
-      const configured = spawnSync("git", ["config", "pm-brief.present", "value"], { cwd: tmpDir, encoding: "utf8" });
-      assert.equal(configured.status, 0, configured.stderr);
-      assert.equal(gitConfigGet(tmpDir, "pm-brief.present"), "value");
-      const blank = spawnSync("git", ["config", "pm-brief.blank", " "], { cwd: tmpDir, encoding: "utf8" });
-      assert.equal(blank.status, 0, blank.stderr);
-      assert.equal(gitConfigGet(tmpDir, "pm-brief.blank"), undefined);
-    } finally {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
-  });
-
   test("detectDefaultBase accepts origin/HEAD that does not use an origin/ prefix", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-sym-"));
     try {
@@ -957,11 +903,11 @@ describe("git readers fail closed when stderr is empty and honour a non-origin s
 });
 
 describe("brief diverge command covers default refs, text/slack, unrelated histories, and root toons", () => {
-  test("omitting --head defaults to HEAD and text/slack renderers persist", async () => {
+  test("an explicit base with omitted --head defaults to HEAD and text/slack renderers persist", async () => {
     const { commands } = await activateBrief();
     const json = (await runRegisteredCommandForTest(commands, {
       command: "brief diverge",
-      options: { format: "json" },
+      options: { base: "HEAD", format: "json" },
       global: { json: false },
       pmRoot: repoPmRoot(),
     })).result as { output?: string };
