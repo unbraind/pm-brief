@@ -813,7 +813,7 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
   return { score: Math.round(score), confidence, reasons, blocked, activeDependencies: deps, activeDependents: fanout };
 }
 
-function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
+function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds: Set<string>, rankOverride?: RankEvidence): BriefItem {
   const dependencyIds = uniqueStrings(rels.filter((rel) => rel.from === item.id).map((rel) => rel.to));
   const dependentIds = uniqueStrings(rels.filter((rel) => rel.to === item.id).map((rel) => rel.from));
   const stale = ageDays(item, now);
@@ -823,7 +823,7 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     ...linksFor(item),
   ]).slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
-  const rank = rankOverride ?? rankItem(item, rels, activeIds ?? activeItemIds(allItems), now);
+  const rank = rankOverride ?? rankItem(item, rels, activeIds, now);
   const whyNow = rank.blocked
     ? "blocked: resolve prerequisite before implementation"
     : priority !== undefined
@@ -2737,7 +2737,8 @@ export function buildDelta(
     const pb = typeof b.currentPriority === "number" ? b.currentPriority : 99;
     if (pa !== pb) return pa - pb;
     if (a.lastTs !== b.lastTs) return a.lastTs > b.lastTs ? -1 : 1;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    // byId is keyed by id, so distinct changes cannot reach an equal-id tie.
+    return a.id < b.id ? -1 : 1;
   });
 
   // Lifecycle-category counts mirror primary-section membership so every count
@@ -3285,7 +3286,7 @@ export function readBlob(repoRoot: string, sha: string, path: string): string | 
   const result = spawnSync("git", ["show", `${sha}:${path}`], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
   assertGitRan(result, "show");
   if (result.status === 0) return result.stdout;
-  const stderr = result.stderr?.trim() ?? "";
+  const stderr = result.stderr.trim();
   if (/(does not exist|exists on disk, but not in|unknown revision or path|no such path)/i.test(stderr)) {
     return undefined;
   }
@@ -3376,7 +3377,7 @@ export function countMalformedLines(text: string | undefined): number {
 
 /** Identity key for an event: after_hash when available, else ts|author|op. */
 export function eventKey(e: DivergeEvent): string {
-  return e.after_hash && e.after_hash.length > 0 ? e.after_hash : `${e.ts}|${e.author ?? ""}|${e.op ?? ""}`;
+  return e.after_hash ? e.after_hash : `${e.ts}|${e.author ?? ""}|${e.op ?? ""}`;
 }
 
 /** Events on a side whose key is not in the ancestor set. */
@@ -4240,7 +4241,8 @@ export function collapseDuplicatePairs(
       remediation: duplicateRemediationCommand(a, b),
     });
   }
-  pairs.sort((x, y) => (y.score - x.score) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  // Pair ids are map keys, so distinct pairs cannot reach an equal-id tie.
+  pairs.sort((x, y) => (y.score - x.score) || (x.id < y.id ? -1 : 1));
   return pairs;
 }
 
@@ -4667,7 +4669,9 @@ function registerCommands(api: ExtensionApi): void {
         lines.push(`No items closed in the last ${momentum.windowDays} day(s).`);
       } else {
         const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
-        lines.push(`Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
+        // Every closed item contributes one type entry in summarizeMomentum, so
+        // a non-empty closed result always has a non-empty byType summary.
+        lines.push(`Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s) (${byType})`);
         lines.push(`Throughput: ${String(momentum.throughputPerDay)} item(s)/day`);
         if (momentum.cycleTime) {
           lines.push(`Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
@@ -4714,7 +4718,7 @@ function registerCommands(api: ExtensionApi): void {
       const limit = readInt(options, ["limit"], 1000);
       const maxItems = readInt(options, ["max-items", "maxItems"], 40);
       const tokenBudget = readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000);
-      const workspace = ctx.pm_root ?? ".agents/pm";
+      const workspace = ctx.pm_root;
       const entries = readActivitySince(workspace, { from: checkpoint, to: until, author, limit });
       const items = readPmItems(workspace);
       const itemsById = new Map<string, PmItem>();
@@ -4774,7 +4778,7 @@ function registerCommands(api: ExtensionApi): void {
       const format = resolveBriefFormat(options, ctx.global, "markdown");
       if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
 
-      const workspace = ctx.pm_root ?? ".agents/pm";
+      const workspace = ctx.pm_root;
       const cwd = process.cwd();
       const repoRoot = resolveRepoRoot(cwd);
       const pmRootRel = pmRootRelFromCtx(workspace, repoRoot);
@@ -4920,7 +4924,7 @@ function registerCommands(api: ExtensionApi): void {
       const sinceRaw = readString(options, "since");
       const since = sinceRaw ? parseSinceTimestamp(sinceRaw) : undefined;
 
-      const workspace = ctx.pm_root ?? ".agents/pm";
+      const workspace = ctx.pm_root;
       const items = readPmItems(workspace);
       const candidates = selectDuplicateCandidates(items, { statuses, since });
       // `findSimilarItems` is the shared SDK primitive `pm create` advisory mode uses,
@@ -4977,7 +4981,7 @@ function registerCommands(api: ExtensionApi): void {
       if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
       const threshold = parseDuplicateThreshold(readString(options, "threshold"), 0.6);
       const staleHours = readNonNegativeInt(options, ["stale-hours", "staleHours"], 72);
-      const workspace = ctx.pm_root ?? ".agents/pm";
+      const workspace = ctx.pm_root;
       const items = readPmItems(workspace);
       const summary = await collectGovernanceSignals(items, {
         threshold,
@@ -5046,7 +5050,9 @@ function classifyPaths(paths: string[], pmRootRel: string, historyIds: Set<strin
       historyIds.add(basename);
     } else if (path.endsWith(".toon")) {
       const slashIdx = path.lastIndexOf("/");
-      const basename = slashIdx >= 0 ? path.slice(slashIdx + 1, -".toon".length) : path.slice(0, -".toon".length);
+      // Divergence paths are scoped under pmRootRel, so every item path has a
+      // directory separator before its basename.
+      const basename = path.slice(slashIdx + 1, -".toon".length);
       toonIds.add(basename);
     }
   }
