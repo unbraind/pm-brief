@@ -34,12 +34,15 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 /**
  * Minimum acceptable percentage for each coverage dimension Node reports.
  *
- * Statement coverage is not listed because V8 reports statements as lines; the
- * line figure is the statement figure for this runtime.
+ * Node's built-in lcov reporter exposes executable statements as `DA` records
+ * rather than a separate threshold flag. The gate therefore enforces the
+ * statement threshold from those records after the test runner completes.
  */
 interface CoverageThresholds {
   /** Minimum percentage of executable lines that must be covered. */
   readonly lines: number;
+  /** Minimum percentage of executable statements that must be covered. */
+  readonly statements: number;
   /** Minimum percentage of branch arms that must be taken. */
   readonly branches: number;
   /** Minimum percentage of declared functions that must be invoked. */
@@ -312,13 +315,24 @@ if (result.status !== 0) {
  * for never loading.
  */
 const reported = new Set<string>();
+let statementFound = 0;
+let statementHit = 0;
 try {
   statSync(lcovPath);
   for (const line of readFileSync(lcovPath, "utf8").split("\n")) {
-    if (!line.startsWith("SF:")) continue;
-    const raw = line.slice(3).trim();
-    const abs = isAbsolute(raw) ? raw : join(repoRoot, raw);
-    reported.add(relative(repoRoot, abs).split(sep).join("/"));
+    if (line.startsWith("SF:")) {
+      const raw = line.slice(3).trim();
+      const abs = isAbsolute(raw) ? raw : join(repoRoot, raw);
+      reported.add(relative(repoRoot, abs).split(sep).join("/"));
+      continue;
+    }
+    if (line.startsWith("DA:")) {
+      const [lineNumber, hitCount] = line.slice(3).split(",");
+      if (Number.isInteger(Number(lineNumber)) && Number.isInteger(Number(hitCount))) {
+        statementFound += 1;
+        if (Number(hitCount) > 0) statementHit += 1;
+      }
+    }
   }
 } catch {
   console.error(`coverage-gate: no coverage report was written to ${relative(repoRoot, lcovPath)}.`);
@@ -343,4 +357,14 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-console.log(`\ncoverage-gate: ${required.length} source file(s) reported, thresholds met.`);
+const statementCoverage = statementFound === 0 ? 0 : (statementHit / statementFound) * 100;
+if (statementCoverage < config.thresholds.statements) {
+  console.error(
+    `coverage-gate: ${statementCoverage.toFixed(2)}% statement coverage does not meet threshold of ${config.thresholds.statements}%.`,
+  );
+  process.exit(1);
+}
+
+console.log(
+  `\ncoverage-gate: ${required.length} source file(s) reported; statements ${statementCoverage.toFixed(2)}%, thresholds met.`,
+);
