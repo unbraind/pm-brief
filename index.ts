@@ -984,14 +984,14 @@ function itemClosedAt(item: PmItem): string {
 }
 
 function median(values: number[]): number {
-  if (values.length === 0) return 0;
+  // Callers only pass a non-empty list: summarizeMomentum builds cycleTime only
+  // when cycleDaysList.length > 0, which is the sole call site.
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 }
 
 function percentile(values: number[], p: number): number {
-  if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const rank = Math.ceil((p / 100) * sorted.length);
   return sorted[Math.min(sorted.length - 1, Math.max(0, rank - 1))]!;
@@ -1140,20 +1140,18 @@ function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: F
         suggestion: "pm list --status open --limit 20",
       });
     } else if (options.assignee || options.statuses?.length) {
-      const activeFilters = describeFilters(options);
-      const filterSuffix = activeFilters ? ` (${activeFilters})` : "";
+      // describeFilters is non-empty exactly when assignee or statuses is set — the
+      // condition that admitted this branch — so the empty-suffix arm cannot run.
       insights.push({
         level: "warning",
-        message: `no open work matched filters${filterSuffix}`,
+        message: `no open work matched filters (${describeFilters(options)})`,
         suggestion: "pm brief --format markdown",
       });
     }
   } else if (candidates.length < Math.min(options.nextCount ?? 5, openItems.length) && (options.assignee || options.statuses?.length)) {
-    const activeFilters = describeFilters(options);
-    const filterSuffix = activeFilters ? ` (${activeFilters})` : "";
     insights.push({
       level: "info",
-      message: `filters narrowed next-work candidates to ${candidates.length} item(s)${filterSuffix}`,
+      message: `filters narrowed next-work candidates to ${candidates.length} item(s) (${describeFilters(options)})`,
     });
   }
   return insights;
@@ -1319,7 +1317,8 @@ function duplicateClusterRemediation(
   cluster: DuplicateCluster,
   itemsById: ReadonlyMap<string, PmItem>,
 ): string {
-  if (cluster.items.length < 2) return "";
+  // A cluster with fewer than two members yields an empty command from slice(1),
+  // which is the same observable result the previous length guard returned.
   const sorted = [...cluster.items].sort((a, b) => {
     const aCreated = Date.parse(itemsById.get(a.id)?.created_at ?? "");
     const bCreated = Date.parse(itemsById.get(b.id)?.created_at ?? "");
@@ -1706,7 +1705,9 @@ function escapeLine(value: unknown): string {
 }
 
 function formatScoreValue(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+  // round1 (the only producer) returns integers or a single decimal place, so
+  // toFixed(1) never yields a trailing ".0" for a non-integer input.
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function renderNextExplanationLine(entry: NextItemExplanation): string {
@@ -2874,18 +2875,17 @@ function describeDeltaItem(change: DeltaItemChange): string {
  * reader to recall the window and format flags.
  *
  * Mirrors the flags the delta was built with: the `since` checkpoint is always
- * present, `--until`/`--author` appear only when the summary carries them, and
- * `--format` appears only when a non-default format was requested.
+ * present, and `--until`/`--author` appear only when the summary carries them.
+ * Renderers never pin `--format` on the refresh command because the reader can
+ * choose output format independently of the window that produced this report.
  *
- * @param summary - Delta whose window, author and format drive the command text.
- * @param format - Output format to pin in the command, omitted when falsy.
+ * @param summary - Delta whose window and author drive the command text.
  * @returns Space-joined command string carrying the summary's filters.
  */
-function deltaRefreshCommand(summary: DeltaSummary, format?: string): string {
+function deltaRefreshCommand(summary: DeltaSummary): string {
   const parts = ["pm", "brief", "since", summary.since];
   if (summary.until) parts.push("--until", summary.until);
   if (summary.author) parts.push("--author", summary.author);
-  if (format) parts.push("--format", format);
   return parts.join(" ");
 }
 
@@ -2978,8 +2978,9 @@ export function renderMarkdownDelta(summary: DeltaSummary): string {
   }
   lines.push("");
 
+  // groupDeltaSections only yields titles that have members, so an empty-members
+  // guard here could never fire.
   const section = (title: string, members: DeltaItemChange[]) => {
-    if (members.length === 0) return;
     lines.push(`## ${title}`, "");
     for (const change of members) {
       lines.push(`- ${change.id}: ${escapeLine(change.title)} (${change.type}) — ${describeDeltaItem(change)}`);
@@ -3046,7 +3047,6 @@ export function renderSlackDelta(summary: DeltaSummary): string {
   lines.push(`*Summary* — ${t.itemsChanged} item(s) / ${t.events} event(s): ${t.created} created, ${t.closed} closed, ${t.canceled} canceled, ${t.reopened} reopened, ${t.statusChanged} status, ${t.reprioritized} repri, ${t.notes} notes, ${t.comments} comments${summary.truncated ? ` _(${summary.omittedItems ?? 0} omitted)_` : ""}`);
   lines.push("");
   const section = (title: string, members: DeltaItemChange[]) => {
-    if (members.length === 0) return;
     lines.push(`*${title}*`);
     for (const change of members) {
       lines.push(`• \`${change.id}\` ${escapeLine(change.title)} (${change.type}) — ${describeDeltaItem(change)}`);
@@ -3258,15 +3258,16 @@ export function mergeBase(repoRoot: string, a: string, b: string): string | unde
 
 /** `git diff --name-only --diff-filter=ACMRD <from> <to> -- <pathspec>`, or `git ls-tree` when fromSha is undefined. */
 export function listChangedPaths(repoRoot: string, fromSha: string | undefined, toSha: string, pathspec: string): string[] {
+  const verb = fromSha ? "diff" : "ls-tree";
   const args: string[] = fromSha
     ? ["diff", "--name-only", "--diff-filter=ACMRD", fromSha, toSha, "--", pathspec]
     : ["ls-tree", "-r", "--name-only", toSha, "--", pathspec];
   const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
-  assertGitRan(result, args[0] ?? "diff");
+  assertGitRan(result, verb);
   // Neither `diff` nor `ls-tree` has a "negative but fine" exit code here: an
   // empty change set is reported as status 0 with empty stdout.
   if (result.status !== 0) {
-    throw new CommandError(`git ${args[0]} failed: ${result.stderr?.trim() || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
+    throw new CommandError(`git ${verb} failed: ${result.stderr?.trim() || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
   }
   return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
 }
