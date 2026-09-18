@@ -246,13 +246,22 @@ describe("buildDelta covers retitle, dep removal, unpatched comments, and format
   test("equal timestamps fall through to id ordering and text/slack budgets still truncate", () => {
     const many: DeltaActivityEntry[] = [];
     const byId = new Map<string, PmItem>();
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 7; index >= 0; index -= 1) {
       const id = `pm-same-${String(index)}`;
       many.push(actEntry(id, "note_add", "2026-07-20T01:00:00Z", [
         { op: "add", path: "/metadata/notes/0", value: {} },
       ]));
       byId.set(id, { id, title: id, type: "Task", status: "open", priority: 2 });
     }
+    const ordered = buildDelta(many, byId, {
+      since: "2026-07-20",
+      maxItems: 8,
+      tokenBudget: 4000,
+    });
+    assert.deepEqual(ordered.items.map((change) => change.id), [
+      "pm-same-0", "pm-same-1", "pm-same-2", "pm-same-3",
+      "pm-same-4", "pm-same-5", "pm-same-6", "pm-same-7",
+    ]);
     const text = buildDelta(many, byId, {
       since: "2026-07-20",
       format: "text",
