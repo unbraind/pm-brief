@@ -779,8 +779,8 @@ describe("collectPendingMergeDecisions degrades outside git and when cwd disappe
     const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-gone-cwd-"));
     const previousCwd = process.cwd();
     process.chdir(tmpDir);
-    await rm(tmpDir, { recursive: true, force: true });
     try {
+      await rm(tmpDir, { recursive: true, force: true });
       assert.equal(await collectPendingMergeDecisions(".agents/pm"), undefined);
     } finally {
       process.chdir(previousCwd);
