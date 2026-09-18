@@ -539,8 +539,7 @@ function text(value: unknown): string {
 }
 
 function renderedCommandResult(output: string): RenderedCommandResult {
-  // All pm-brief renderers terminate their output with a newline.
-  return { pmBriefRendered: true, output };
+  return { pmBriefRendered: true, output: output.endsWith("\n") ? output : `${output}\n` };
 }
 
 /** Determine whether an unknown command result carries valid pre-rendered pm-brief output. */
@@ -555,9 +554,8 @@ function isRenderedCommandResult(value: unknown): value is RenderedCommandResult
   );
 }
 
-/** Render only after the host's result discriminator has accepted the marker. */
-function renderCommandResult(context: { result: unknown }): string {
-  return (context.result as RenderedCommandResult).output;
+function renderCommandResult(context: { result?: unknown }): string | null {
+  return isRenderedCommandResult(context.result) ? context.result.output : null;
 }
 
 function asArray(value: unknown): string[] {
@@ -815,7 +813,7 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
   return { score: Math.round(score), confidence, reasons, blocked, activeDependencies: deps, activeDependents: fanout };
 }
 
-function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds: Set<string>, rankOverride?: RankEvidence): BriefItem {
+function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
   const dependencyIds = uniqueStrings(rels.filter((rel) => rel.from === item.id).map((rel) => rel.to));
   const dependentIds = uniqueStrings(rels.filter((rel) => rel.to === item.id).map((rel) => rel.from));
   const stale = ageDays(item, now);
@@ -825,7 +823,7 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
     ...linksFor(item),
   ]).slice(0, 8);
   const priority = typeof item.priority === "number" ? item.priority : undefined;
-  const rank = rankOverride ?? rankItem(item, rels, activeIds, now);
+  const rank = rankOverride ?? rankItem(item, rels, activeIds ?? activeItemIds(allItems), now);
   const whyNow = rank.blocked
     ? "blocked: resolve prerequisite before implementation"
     : priority !== undefined
@@ -986,14 +984,14 @@ function itemClosedAt(item: PmItem): string {
 }
 
 function median(values: number[]): number {
-  // Callers only pass a non-empty list: summarizeMomentum builds cycleTime only
-  // when cycleDaysList.length > 0, which is the sole call site.
+  if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 }
 
 function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const rank = Math.ceil((p / 100) * sorted.length);
   return sorted[Math.min(sorted.length - 1, Math.max(0, rank - 1))]!;
@@ -1142,18 +1140,20 @@ function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: F
         suggestion: "pm list --status open --limit 20",
       });
     } else if (options.assignee || options.statuses?.length) {
-      // describeFilters is non-empty exactly when assignee or statuses is set — the
-      // condition that admitted this branch — so the empty-suffix arm cannot run.
+      const activeFilters = describeFilters(options);
+      const filterSuffix = activeFilters ? ` (${activeFilters})` : "";
       insights.push({
         level: "warning",
-        message: `no open work matched filters (${describeFilters(options)})`,
+        message: `no open work matched filters${filterSuffix}`,
         suggestion: "pm brief --format markdown",
       });
     }
   } else if (candidates.length < Math.min(options.nextCount ?? 5, openItems.length) && (options.assignee || options.statuses?.length)) {
+    const activeFilters = describeFilters(options);
+    const filterSuffix = activeFilters ? ` (${activeFilters})` : "";
     insights.push({
       level: "info",
-      message: `filters narrowed next-work candidates to ${candidates.length} item(s) (${describeFilters(options)})`,
+      message: `filters narrowed next-work candidates to ${candidates.length} item(s)${filterSuffix}`,
     });
   }
   return insights;
@@ -1192,7 +1192,7 @@ const MERGE_DECISION_MAX_RECEIPTS = 10;
  * layer that makes it unreadable in output. Upstream tracking issue: unbraind/pm-cli#771
  * — this normalization is removable once the driver strips the wrapping layer itself.
  */
-export function normalizeItemPath(itemPath: string): string {
+function normalizeItemPath(itemPath: string): string {
   const trimmed = itemPath.trim();
   if (trimmed.length >= 2) {
     const first = trimmed[0];
@@ -1225,7 +1225,7 @@ function truncateForBrief(value: unknown): string {
  * into a clone still parse. Both are optional, because a receipt settled by
  * `stable_value_order` names no side at all.
  */
-export function toMergeDecisionEntry(receipt: MergeDecisionReceipt): MergeDecisionEntry {
+function toMergeDecisionEntry(receipt: MergeDecisionReceipt): MergeDecisionEntry {
   return {
     receiptId: receipt.id,
     itemId: normalizeItemPath(receipt.item_id),
@@ -1302,7 +1302,7 @@ function compromisedItemIds(m: MergeDecisionsSummary | undefined): Set<string> {
  * the matched secret value is never present, so the field name is the safest
  * identifier we can give an agent.
  */
-export function secretFieldFromPath(path: string): string {
+function secretFieldFromPath(path: string): string {
   // `$.description` → `description`; `$.nested[0].body` → `nested.body`
   return path
     .replace(/^\$\./, "")
@@ -1319,8 +1319,7 @@ function duplicateClusterRemediation(
   cluster: DuplicateCluster,
   itemsById: ReadonlyMap<string, PmItem>,
 ): string {
-  // A cluster with fewer than two members yields an empty command from slice(1),
-  // which is the same observable result the previous length guard returned.
+  if (cluster.items.length < 2) return "";
   const sorted = [...cluster.items].sort((a, b) => {
     const aCreated = Date.parse(itemsById.get(a.id)?.created_at ?? "");
     const bCreated = Date.parse(itemsById.get(b.id)?.created_at ?? "");
@@ -1340,7 +1339,7 @@ function duplicateClusterRemediation(
  * Convert a raw SDK `DuplicateCluster` into the brief's budget-friendly shape
  * with an actionable remediation command.
  */
-export function toGovernanceDuplicateCluster(
+function toGovernanceDuplicateCluster(
   cluster: DuplicateCluster,
   itemsById: ReadonlyMap<string, PmItem>,
 ): GovernanceDuplicateCluster {
@@ -1483,14 +1482,6 @@ function toItemMetadata(item: PmItem): ItemMetadata {
   };
 }
 
-/** Run the stale scanner separately so its SDK rejection remains advisory-only. */
-async function runStaleGovernanceScan(pmRoot: string, metadata: ItemMetadata[], thresholdHours: number, generatedAt: string): Promise<StaleInProgressScan> {
-  return scanStaleInProgressItems(pmRoot, metadata, {
-    threshold_hours: thresholdHours,
-    now: new Date(generatedAt),
-  });
-}
-
 /**
  * Knobs for the advisory duplicate, stale-in-progress, storage and secret scan.
  *
@@ -1534,7 +1525,10 @@ export async function collectGovernanceSignals(
   const itemsById = new Map(items.map((item) => [item.id, item]));
   const [duplicateResult, staleResult, storageResult] = await Promise.allSettled([
     findDuplicateClusters({ pmRoot, threshold }),
-    runStaleGovernanceScan(pmRoot, metadata, staleHours, generatedAt),
+    scanStaleInProgressItems(pmRoot, metadata, {
+      threshold_hours: staleHours,
+      now: new Date(generatedAt),
+    }),
     (async (): Promise<GovernanceStorageFinding[]> => {
       const settings = await readSettings(pmRoot);
       const typeRegistry = resolveItemTypeRegistry(settings);
@@ -1707,16 +1701,12 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   });
 }
 
-/** Collapse an optional renderer value to one trimmed, single-line string. */
-export function escapeLine(value: unknown): string {
+function escapeLine(value: unknown): string {
   return String(value ?? "").replace(/\r?\n/g, " ").trim();
 }
 
-/** Format a score without displaying a redundant trailing decimal zero. */
-export function formatScoreValue(value: number): string {
-  // round1 (the only producer) returns integers or a single decimal place, so
-  // toFixed(1) never yields a trailing ".0" for a non-integer input.
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+function formatScoreValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
 }
 
 function renderNextExplanationLine(entry: NextItemExplanation): string {
@@ -2371,9 +2361,8 @@ export function parsePmItemsOutput(output: string): PmItem[] {
   return certifyCompleteListResult(record).items;
 }
 
-/** Read the installed pm version, retaining an explicit unknown marker on process failure. */
-export function pmVersion(run: (args: string[]) => SpawnSyncReturns<string> = spawnPm): string {
-  const result = run(["--version"]);
+function pmVersion(): string {
+  const result = spawnPm(["--version"]);
   return result.status === 0 ? result.stdout.trim() : "unknown";
 }
 
@@ -2523,7 +2512,7 @@ export function parseActivitySinceOutput(output: string): DeltaActivityEntry[] {
       message: text(r.message) || undefined,
     });
   }
-  normalized.sort((a, b) => a.ts.localeCompare(b.ts));
+  normalized.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   return normalized;
 }
 
@@ -2573,7 +2562,7 @@ export function buildDelta(
 
   const items: DeltaItemChange[] = [];
   for (const [id, rawEvents] of byId) {
-    const events = [...rawEvents].sort((a, b) => a.ts.localeCompare(b.ts));
+    const events = [...rawEvents].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
     const item = itemsById.get(id);
 
     let created = false;
@@ -2747,8 +2736,7 @@ export function buildDelta(
     const pb = typeof b.currentPriority === "number" ? b.currentPriority : 99;
     if (pa !== pb) return pa - pb;
     if (a.lastTs !== b.lastTs) return a.lastTs > b.lastTs ? -1 : 1;
-    // byId is keyed by id, so distinct changes cannot reach an equal-id tie.
-    return a.id < b.id ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 
   // Lifecycle-category counts mirror primary-section membership so every count
@@ -2886,17 +2874,18 @@ function describeDeltaItem(change: DeltaItemChange): string {
  * reader to recall the window and format flags.
  *
  * Mirrors the flags the delta was built with: the `since` checkpoint is always
- * present, and `--until`/`--author` appear only when the summary carries them.
- * Renderers never pin `--format` on the refresh command because the reader can
- * choose output format independently of the window that produced this report.
+ * present, `--until`/`--author` appear only when the summary carries them, and
+ * `--format` appears only when a non-default format was requested.
  *
- * @param summary - Delta whose window and author drive the command text.
+ * @param summary - Delta whose window, author and format drive the command text.
+ * @param format - Output format to pin in the command, omitted when falsy.
  * @returns Space-joined command string carrying the summary's filters.
  */
-function deltaRefreshCommand(summary: DeltaSummary): string {
+function deltaRefreshCommand(summary: DeltaSummary, format?: string): string {
   const parts = ["pm", "brief", "since", summary.since];
   if (summary.until) parts.push("--until", summary.until);
   if (summary.author) parts.push("--author", summary.author);
+  if (format) parts.push("--format", format);
   return parts.join(" ");
 }
 
@@ -2989,9 +2978,8 @@ export function renderMarkdownDelta(summary: DeltaSummary): string {
   }
   lines.push("");
 
-  // groupDeltaSections only yields titles that have members, so an empty-members
-  // guard here could never fire.
   const section = (title: string, members: DeltaItemChange[]) => {
+    if (members.length === 0) return;
     lines.push(`## ${title}`, "");
     for (const change of members) {
       lines.push(`- ${change.id}: ${escapeLine(change.title)} (${change.type}) — ${describeDeltaItem(change)}`);
@@ -3058,6 +3046,7 @@ export function renderSlackDelta(summary: DeltaSummary): string {
   lines.push(`*Summary* — ${t.itemsChanged} item(s) / ${t.events} event(s): ${t.created} created, ${t.closed} closed, ${t.canceled} canceled, ${t.reopened} reopened, ${t.statusChanged} status, ${t.reprioritized} repri, ${t.notes} notes, ${t.comments} comments${summary.truncated ? ` _(${summary.omittedItems ?? 0} omitted)_` : ""}`);
   lines.push("");
   const section = (title: string, members: DeltaItemChange[]) => {
+    if (members.length === 0) return;
     lines.push(`*${title}*`);
     for (const change of members) {
       lines.push(`• \`${change.id}\` ${escapeLine(change.title)} (${change.type}) — ${describeDeltaItem(change)}`);
@@ -3269,16 +3258,15 @@ export function mergeBase(repoRoot: string, a: string, b: string): string | unde
 
 /** `git diff --name-only --diff-filter=ACMRD <from> <to> -- <pathspec>`, or `git ls-tree` when fromSha is undefined. */
 export function listChangedPaths(repoRoot: string, fromSha: string | undefined, toSha: string, pathspec: string): string[] {
-  const verb = fromSha ? "diff" : "ls-tree";
   const args: string[] = fromSha
     ? ["diff", "--name-only", "--diff-filter=ACMRD", fromSha, toSha, "--", pathspec]
     : ["ls-tree", "-r", "--name-only", toSha, "--", pathspec];
   const result = spawnSync("git", args, { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
-  assertGitRan(result, verb);
+  assertGitRan(result, args[0] ?? "diff");
   // Neither `diff` nor `ls-tree` has a "negative but fine" exit code here: an
   // empty change set is reported as status 0 with empty stdout.
   if (result.status !== 0) {
-    throw new CommandError(`git ${verb} failed: ${result.stderr?.trim() || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
+    throw new CommandError(`git ${args[0]} failed: ${result.stderr?.trim() || `exit ${String(result.status)}`}`, EXIT_CODE.USAGE);
   }
   return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
 }
@@ -3296,7 +3284,7 @@ export function readBlob(repoRoot: string, sha: string, path: string): string | 
   const result = spawnSync("git", ["show", `${sha}:${path}`], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
   assertGitRan(result, "show");
   if (result.status === 0) return result.stdout;
-  const stderr = result.stderr.trim();
+  const stderr = result.stderr?.trim() ?? "";
   if (/(does not exist|exists on disk, but not in|unknown revision or path|no such path)/i.test(stderr)) {
     return undefined;
   }
@@ -3387,8 +3375,7 @@ export function countMalformedLines(text: string | undefined): number {
 
 /** Identity key for an event: after_hash when available, else ts|author|op. */
 export function eventKey(e: DivergeEvent): string {
-  // Divergence events always carry an operation from the history parser.
-  return e.after_hash ? e.after_hash : `${e.ts}|${e.author ?? ""}|${e.op}`;
+  return e.after_hash && e.after_hash.length > 0 ? e.after_hash : `${e.ts}|${e.author ?? ""}|${e.op ?? ""}`;
 }
 
 /** Events on a side whose key is not in the ancestor set. */
@@ -3505,7 +3492,7 @@ export function classifyItemDivergence(input: {
  * the side's whole history, since only new events can collide.
  */
 function summarizeSide(newSideEvents: DivergeEvent[], itemPresent: boolean, malformedLines: number): DivergeItem["base"] {
-  const sorted = [...newSideEvents].sort((a, b) => a.ts.localeCompare(b.ts));
+  const sorted = [...newSideEvents].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   const fields = [...changedFieldPaths(newSideEvents)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
   const authors = [...new Set(sorted.map((e) => e.author ?? "").filter(Boolean))].sort();
   return {
@@ -4252,8 +4239,7 @@ export function collapseDuplicatePairs(
       remediation: duplicateRemediationCommand(a, b),
     });
   }
-  // Pair ids are map keys, so distinct pairs cannot reach an equal-id tie.
-  pairs.sort((x, y) => (y.score - x.score) || (x.id < y.id ? -1 : 1));
+  pairs.sort((x, y) => (y.score - x.score) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
   return pairs;
 }
 
@@ -4680,9 +4666,7 @@ function registerCommands(api: ExtensionApi): void {
         lines.push(`No items closed in the last ${momentum.windowDays} day(s).`);
       } else {
         const byType = Object.entries(momentum.byType).map(([type, count]) => `${type} ${count}`).join(", ");
-        // Every closed item contributes one type entry in summarizeMomentum, so
-        // a non-empty closed result always has a non-empty byType summary.
-        lines.push(`Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s) (${byType})`);
+        lines.push(`Closed ${momentum.closedCount} item(s) in the last ${momentum.windowDays} day(s)${byType ? ` (${byType})` : ""}`);
         lines.push(`Throughput: ${String(momentum.throughputPerDay)} item(s)/day`);
         if (momentum.cycleTime) {
           lines.push(`Cycle time: median ${formatScoreValue(momentum.cycleTime.medianDays)}d, p90 ${formatScoreValue(momentum.cycleTime.p90Days)}d (n=${momentum.cycleTime.sampleSize})`);
@@ -4729,7 +4713,7 @@ function registerCommands(api: ExtensionApi): void {
       const limit = readInt(options, ["limit"], 1000);
       const maxItems = readInt(options, ["max-items", "maxItems"], 40);
       const tokenBudget = readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000);
-      const workspace = ctx.pm_root;
+      const workspace = ctx.pm_root ?? ".agents/pm";
       const entries = readActivitySince(workspace, { from: checkpoint, to: until, author, limit });
       const items = readPmItems(workspace);
       const itemsById = new Map<string, PmItem>();
@@ -4789,7 +4773,7 @@ function registerCommands(api: ExtensionApi): void {
       const format = resolveBriefFormat(options, ctx.global, "markdown");
       if (!["markdown", "text", "json", "slack"].includes(format)) throw new CommandError("--format must be markdown, text, json, or slack", EXIT_CODE.USAGE);
 
-      const workspace = ctx.pm_root;
+      const workspace = ctx.pm_root ?? ".agents/pm";
       const cwd = process.cwd();
       const repoRoot = resolveRepoRoot(cwd);
       const pmRootRel = pmRootRelFromCtx(workspace, repoRoot);
@@ -4935,7 +4919,7 @@ function registerCommands(api: ExtensionApi): void {
       const sinceRaw = readString(options, "since");
       const since = sinceRaw ? parseSinceTimestamp(sinceRaw) : undefined;
 
-      const workspace = ctx.pm_root;
+      const workspace = ctx.pm_root ?? ".agents/pm";
       const items = readPmItems(workspace);
       const candidates = selectDuplicateCandidates(items, { statuses, since });
       // `findSimilarItems` is the shared SDK primitive `pm create` advisory mode uses,
@@ -4992,7 +4976,7 @@ function registerCommands(api: ExtensionApi): void {
       if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
       const threshold = parseDuplicateThreshold(readString(options, "threshold"), 0.6);
       const staleHours = readNonNegativeInt(options, ["stale-hours", "staleHours"], 72);
-      const workspace = ctx.pm_root;
+      const workspace = ctx.pm_root ?? ".agents/pm";
       const items = readPmItems(workspace);
       const summary = await collectGovernanceSignals(items, {
         threshold,
@@ -5033,10 +5017,10 @@ function registerCommands(api: ExtensionApi): void {
  * @param key - Git config key to read, e.g. `merge.pm-item-toon.driver`.
  * @returns The trimmed value, or undefined when unset or blank.
  */
-export function gitConfigGet(repoRoot: string, key: string): string | undefined {
+function gitConfigGet(repoRoot: string, key: string): string | undefined {
   const result = spawnSync("git", ["config", "--get", key], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
   if (result.status !== 0) return undefined;
-  const value = result.stdout.trim();
+  const value = result.stdout?.trim();
   return value || undefined;
 }
 
@@ -5061,9 +5045,7 @@ function classifyPaths(paths: string[], pmRootRel: string, historyIds: Set<strin
       historyIds.add(basename);
     } else if (path.endsWith(".toon")) {
       const slashIdx = path.lastIndexOf("/");
-      // Divergence paths are scoped under pmRootRel, so every item path has a
-      // directory separator before its basename.
-      const basename = path.slice(slashIdx + 1, -".toon".length);
+      const basename = slashIdx >= 0 ? path.slice(slashIdx + 1, -".toon".length) : path.slice(0, -".toon".length);
       toonIds.add(basename);
     }
   }
