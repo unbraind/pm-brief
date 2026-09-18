@@ -6,7 +6,7 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-07-26T13:52:29.218Z"
-updated_at: "2026-09-18T06:19:02.024Z"
+updated_at: "2026-09-18T06:28:45.594Z"
 assignee: pi-agent
 claim_principal: pi-agent
 author: codex
@@ -14,7 +14,7 @@ estimated_minutes: 720
 acceptance_criteria: "A deterministic coverage command reports 100% lines, branches, functions, and statements for all source files; release:check fails when any source coverage dimension drops below 100%; Tests exercise observable behavior and real failure paths without coverage-only branches, mocks that bypass production behavior, ignore pragmas, or generated-code inflation; Coverage execution uses the project-local latest pm CLI and is stable in npm and bun workflows"
 risk: high
 severity: high
-actual_result: "The exact tree passes 333 tests with 100.00% lines, 97.85% branches, 100.00% functions, and 100.00% statement records; the release gate now enforces statements explicitly and honestly retains the measured branch floor."
+actual_result: "The exact tree passes the full suite with 100.00% lines, 97.85% branches and 100.00% functions. The gate enforces those three from V8 LCOV; statements are NOT measured, because LCOV DA records are line data and deriving statements from them was rejected in review. Real statement coverage needs c8 (companion pm-cli-website-m3by). The remaining 2.15% of branches keeps this item open."
 component: testing
 dependencies[1]{id,kind,created_at,author}:
   pm-brief-q325,related,"2026-07-26T13:52:29.218Z",codex
@@ -47,10 +47,10 @@ notes[19]{created_at,author,text}:
 files[6]{path,scope,note}:
   index.ts,project,Source coverage target
   package.json,project,100 percent coverage thresholds
+  scripts/coverage-gate.ts,project,"Enforces lines, branches and functions from Node's V8 LCOV. It does not measure statements (DA records are line data); real statement coverage needs c8, tracked fleet-wide as companion pm-cli-website-m3by."
   test/brief.test.ts,project,Coverage test expansion
   test/coverage-gaps.test.ts,project,real CLI and git behavioral coverage
   test/renderer-ownership.test.ts,project,host renderer ownership coverage
-  scripts/coverage-gate.ts,project,Explicitly parses LCOV DA statement records and enforces coverageGate.thresholds.statements.
 tests[7]:
   - command: "bun install --no-save && bun run release:check"
     path: .github/workflows/ci.yml

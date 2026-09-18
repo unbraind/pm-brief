@@ -775,7 +775,13 @@ describe("collectPendingMergeDecisions degrades outside git and when cwd disappe
     }
   });
 
-  test("a deleted process cwd degrades to no pending decisions instead of failing the brief", async () => {
+  test("a deleted process cwd degrades to no pending decisions instead of failing the brief", async (t) => {
+    if (process.platform === "win32") {
+      // Windows refuses to delete a process's current working directory, so the
+      // deleted-cwd condition this test exercises cannot be constructed there.
+      t.skip("Windows cannot delete the current working directory");
+      return;
+    }
     const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-gone-cwd-"));
     const previousCwd = process.cwd();
     process.chdir(tmpDir);
