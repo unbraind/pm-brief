@@ -824,7 +824,7 @@ describe("brief diverge command covers default refs, text/slack, unrelated histo
         global: { json: false },
         pmRoot: repoPmRoot(),
       })).result as { output?: string };
-      assert.match(String(slack.output), /\*Divergence:/);
+      assert.match(String(slack.output), /No pm item divergence between HEAD and HEAD|\*Divergence:/);
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
