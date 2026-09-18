@@ -539,7 +539,8 @@ function text(value: unknown): string {
 }
 
 function renderedCommandResult(output: string): RenderedCommandResult {
-  return { pmBriefRendered: true, output: output.endsWith("\n") ? output : `${output}\n` };
+  // All pm-brief renderers terminate their output with a newline.
+  return { pmBriefRendered: true, output };
 }
 
 /** Determine whether an unknown command result carries valid pre-rendered pm-brief output. */
@@ -554,8 +555,9 @@ function isRenderedCommandResult(value: unknown): value is RenderedCommandResult
   );
 }
 
-function renderCommandResult(context: { result?: unknown }): string | null {
-  return isRenderedCommandResult(context.result) ? context.result.output : null;
+/** Render only after the host's result discriminator has accepted the marker. */
+function renderCommandResult(context: { result: unknown }): string {
+  return (context.result as RenderedCommandResult).output;
 }
 
 function asArray(value: unknown): string[] {
@@ -1190,7 +1192,7 @@ const MERGE_DECISION_MAX_RECEIPTS = 10;
  * layer that makes it unreadable in output. Upstream tracking issue: unbraind/pm-cli#771
  * — this normalization is removable once the driver strips the wrapping layer itself.
  */
-function normalizeItemPath(itemPath: string): string {
+export function normalizeItemPath(itemPath: string): string {
   const trimmed = itemPath.trim();
   if (trimmed.length >= 2) {
     const first = trimmed[0];
@@ -1300,7 +1302,7 @@ function compromisedItemIds(m: MergeDecisionsSummary | undefined): Set<string> {
  * the matched secret value is never present, so the field name is the safest
  * identifier we can give an agent.
  */
-function secretFieldFromPath(path: string): string {
+export function secretFieldFromPath(path: string): string {
   // `$.description` → `description`; `$.nested[0].body` → `nested.body`
   return path
     .replace(/^\$\./, "")
@@ -1338,7 +1340,7 @@ function duplicateClusterRemediation(
  * Convert a raw SDK `DuplicateCluster` into the brief's budget-friendly shape
  * with an actionable remediation command.
  */
-function toGovernanceDuplicateCluster(
+export function toGovernanceDuplicateCluster(
   cluster: DuplicateCluster,
   itemsById: ReadonlyMap<string, PmItem>,
 ): GovernanceDuplicateCluster {
@@ -1522,24 +1524,29 @@ export async function collectGovernanceSignals(
   const metadata = items.map(toItemMetadata);
   const parsedItemIds = new Set(items.map((item) => item.id));
   const itemsById = new Map(items.map((item) => [item.id, item]));
-  const [duplicateResult, staleResult, allStorage] = await Promise.all([
-    findDuplicateClusters({ pmRoot, threshold }).catch(() => ({ clusters: [] })),
+  const [duplicateResult, staleResult, storageResult] = await Promise.allSettled([
+    findDuplicateClusters({ pmRoot, threshold }),
     scanStaleInProgressItems(pmRoot, metadata, {
       threshold_hours: staleHours,
       now: new Date(generatedAt),
-    }).catch(() => ({ threshold_hours: staleHours, count: 0, items: [], remediation: "" })),
+    }),
     (async (): Promise<GovernanceStorageFinding[]> => {
       const settings = await readSettings(pmRoot);
       const typeRegistry = resolveItemTypeRegistry(settings);
       return toGovernanceStorageFindings(
         await scanStorageIntegrity(pmRoot, parsedItemIds, typeRegistry.type_to_folder),
       );
-    })().catch(() => []),
+    })(),
   ]);
-  const allClusters = duplicateResult.clusters
-    .map((cluster) => toGovernanceDuplicateCluster(cluster, itemsById))
-    .sort((a, b) => b.maxScore - a.maxScore);
-  const allStale = toGovernanceStaleItems(staleResult);
+  const allClusters = duplicateResult.status === "fulfilled"
+    ? duplicateResult.value.clusters
+      .map((cluster) => toGovernanceDuplicateCluster(cluster, itemsById))
+      .sort((a, b) => b.maxScore - a.maxScore)
+    : [];
+  const allStale = staleResult.status === "fulfilled"
+    ? toGovernanceStaleItems(staleResult.value)
+    : [];
+  const allStorage = storageResult.status === "fulfilled" ? storageResult.value : [];
   let allSecrets: GovernanceSecretFinding[] = [];
   try {
     allSecrets = scanItemSecrets(items);
@@ -1695,11 +1702,13 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   });
 }
 
-function escapeLine(value: unknown): string {
+/** Collapse an optional renderer value to one trimmed, single-line string. */
+export function escapeLine(value: unknown): string {
   return String(value ?? "").replace(/\r?\n/g, " ").trim();
 }
 
-function formatScoreValue(value: number): string {
+/** Format a score without displaying a redundant trailing decimal zero. */
+export function formatScoreValue(value: number): string {
   // round1 (the only producer) returns integers or a single decimal place, so
   // toFixed(1) never yields a trailing ".0" for a non-integer input.
   return Number.isInteger(value) ? String(value) : value.toFixed(1);

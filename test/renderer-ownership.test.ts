@@ -40,6 +40,7 @@ const foreignResult = { pmChangelogRendered: true, output: "{}\n" } as unknown;
 
 /** A bare result carrying pm-brief's output shape but no render marker. */
 const bareResult = { output: "x" } as unknown;
+const markedWithoutNewline = { pmBriefRendered: true, output: "# brief" } as unknown;
 
 /** A command path pm-brief does not own, used to exercise the command filter. */
 const foreignCommand = "context-pack";
@@ -115,6 +116,15 @@ test("declines when both command and result are foreign (belt-and-braces)", asyn
     assert.equal(rendered.overridden, false, `${format} renderer should decline a foreign result under a foreign command`);
     assert.equal(rendered.rendered, null, `${format} should leave native rendering intact`);
     assert.deepEqual(rendered.warnings, [], `${format} should produce no warnings`);
+  }
+  await ext.deactivate();
+});
+
+test("the registered callback renders the host-marked result directly", async () => {
+  const ext = await harness();
+  for (const override of ext.activation.renderers.overrides) {
+    const rendered = override.run({ format: override.format, command: "brief", result: markedWithoutNewline });
+    assert.equal(rendered, "# brief");
   }
   await ext.deactivate();
 });

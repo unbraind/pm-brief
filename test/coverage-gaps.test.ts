@@ -29,6 +29,11 @@ import extension, {
   readBlob,
   readPmItems,
   renderMarkdownBrief,
+  normalizeItemPath,
+  secretFieldFromPath,
+  escapeLine,
+  formatScoreValue,
+  toGovernanceDuplicateCluster,
   renderMarkdownDelta,
   renderMarkdownDivergence,
   renderSlackDelta,
@@ -42,6 +47,7 @@ import extension, {
   summarizeMomentum,
   type DeltaActivityEntry,
   type DeltaItemChange,
+  type DuplicateCluster,
   type DeltaSummary,
   type DivergeEvent,
   type MergeDecisionEntry,
@@ -469,6 +475,22 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     ], { tokenBudget: 1, generatedAt: "2026-07-27T12:00:00Z" });
     assert.equal(brief.budget.truncated, true);
     assert.equal(brief.governance, undefined);
+  });
+
+  test("SDK edge adapters preserve quote, path, score, and missing-field contracts", () => {
+    assert.equal(normalizeItemPath("\".agents/pm/tasks/pm-a.toon\""), ".agents/pm/tasks/pm-a.toon");
+    assert.equal(secretFieldFromPath("$."), "(unknown field)");
+    assert.equal(escapeLine(undefined), "");
+    assert.equal(formatScoreValue(2), "2");
+    assert.equal(formatScoreValue(1.25), "1.3");
+    const cluster: DuplicateCluster = {
+      id: "pm-a",
+      items: [{ id: "pm-a", title: "Task A", status: "open", type: "Task" }],
+      matches: [],
+      max_score: 0,
+    };
+    const adapted = toGovernanceDuplicateCluster(cluster, new Map([["pm-a", { id: "pm-a", title: "Task A", type: "Task", status: "open" }]]));
+    assert.equal(adapted.reason, "title_token_jaccard");
   });
 
   test("a preferred_side receipt with no recorded side renders as unrecorded, not as a branch name", () => {
