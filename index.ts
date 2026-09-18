@@ -1483,6 +1483,14 @@ function toItemMetadata(item: PmItem): ItemMetadata {
   };
 }
 
+/** Run the stale scanner separately so its SDK rejection remains advisory-only. */
+async function runStaleGovernanceScan(pmRoot: string, metadata: ItemMetadata[], thresholdHours: number, generatedAt: string): Promise<StaleInProgressScan> {
+  return scanStaleInProgressItems(pmRoot, metadata, {
+    threshold_hours: thresholdHours,
+    now: new Date(generatedAt),
+  });
+}
+
 /**
  * Knobs for the advisory duplicate, stale-in-progress, storage and secret scan.
  *
@@ -1526,10 +1534,7 @@ export async function collectGovernanceSignals(
   const itemsById = new Map(items.map((item) => [item.id, item]));
   const [duplicateResult, staleResult, storageResult] = await Promise.allSettled([
     findDuplicateClusters({ pmRoot, threshold }),
-    scanStaleInProgressItems(pmRoot, metadata, {
-      threshold_hours: staleHours,
-      now: new Date(generatedAt),
-    }),
+    runStaleGovernanceScan(pmRoot, metadata, staleHours, generatedAt),
     (async (): Promise<GovernanceStorageFinding[]> => {
       const settings = await readSettings(pmRoot);
       const typeRegistry = resolveItemTypeRegistry(settings);
@@ -2366,8 +2371,9 @@ export function parsePmItemsOutput(output: string): PmItem[] {
   return certifyCompleteListResult(record).items;
 }
 
-function pmVersion(): string {
-  const result = spawnPm(["--version"]);
+/** Read the installed pm version, retaining an explicit unknown marker on process failure. */
+export function pmVersion(run: (args: string[]) => SpawnSyncReturns<string> = spawnPm): string {
+  const result = run(["--version"]);
   return result.status === 0 ? result.stdout.trim() : "unknown";
 }
 
@@ -2517,7 +2523,7 @@ export function parseActivitySinceOutput(output: string): DeltaActivityEntry[] {
       message: text(r.message) || undefined,
     });
   }
-  normalized.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  normalized.sort((a, b) => a.ts.localeCompare(b.ts));
   return normalized;
 }
 
@@ -2567,7 +2573,7 @@ export function buildDelta(
 
   const items: DeltaItemChange[] = [];
   for (const [id, rawEvents] of byId) {
-    const events = [...rawEvents].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+    const events = [...rawEvents].sort((a, b) => a.ts.localeCompare(b.ts));
     const item = itemsById.get(id);
 
     let created = false;
@@ -3499,7 +3505,7 @@ export function classifyItemDivergence(input: {
  * the side's whole history, since only new events can collide.
  */
 function summarizeSide(newSideEvents: DivergeEvent[], itemPresent: boolean, malformedLines: number): DivergeItem["base"] {
-  const sorted = [...newSideEvents].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  const sorted = [...newSideEvents].sort((a, b) => a.ts.localeCompare(b.ts));
   const fields = [...changedFieldPaths(newSideEvents)].filter((f) => !BENIGN_FIELDS.has(f)).sort();
   const authors = [...new Set(sorted.map((e) => e.author ?? "").filter(Boolean))].sort();
   return {
@@ -5027,10 +5033,10 @@ function registerCommands(api: ExtensionApi): void {
  * @param key - Git config key to read, e.g. `merge.pm-item-toon.driver`.
  * @returns The trimmed value, or undefined when unset or blank.
  */
-function gitConfigGet(repoRoot: string, key: string): string | undefined {
+export function gitConfigGet(repoRoot: string, key: string): string | undefined {
   const result = spawnSync("git", ["config", "--get", key], { cwd: repoRoot, encoding: "utf-8", maxBuffer: GIT_MAX_BUFFER });
   if (result.status !== 0) return undefined;
-  const value = result.stdout?.trim();
+  const value = result.stdout.trim();
   return value || undefined;
 }
 

@@ -22,9 +22,11 @@ import extension, {
   detectDefaultBase,
   detectStaleContext,
   eventKey,
+  gitConfigGet,
   listChangedPaths,
   mergeBase,
   parseActivitySinceOutput,
+  pmVersion,
   readActivitySince,
   readBlob,
   readPmItems,
@@ -165,6 +167,10 @@ function divEvent(op: string, ts: string, path = "/metadata/status"): DivergeEve
 }
 
 describe("readPmItems spawn failures name the CLI, the spawn error, or a closed fallback", () => {
+  test("pmVersion reports unknown when the installed CLI process fails", () => {
+    assert.equal(pmVersion(() => failedSpawn()), "unknown");
+  });
+
   test("stderr from a failed complete-corpus read is the error message", () => {
     assert.throws(
       () => readPmItems("/tracker", () => failedSpawn({ stderr: "tracker exploded\n" })),
@@ -237,7 +243,7 @@ describe("buildDelta covers retitle, dep removal, unpatched comments, and format
       ]),
       actEntry("pm-comment", "comment_add", "2026-07-20T01:00:00Z"),
       { ts: "2026-07-20T01:00:00Z", author: "pi-agent", op: "activity", id: "pm-quiet" },
-      { ts: "2026-07-20T02:00:00Z", author: "pi-agent", op: "activity", id: "pm-quiet" },
+      { ts: "2026-07-20T01:00:00Z", author: "pi-agent", op: "activity", id: "pm-quiet" },
     ], items, { since: "2026-07-20", workspace: ".agents/pm", pmVersion: "test" });
     const byId = new Map(summary.items.map((change) => [change.id, change]));
     assert.equal(byId.get("pm-retitle")?.retitled, true);
@@ -355,6 +361,10 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
       const truncated = await run({ format: "text", output: truncatedPath, until: "0d", "token-budget": 1 }, ["3650d"]);
       assert.equal(truncated.ok, true);
       assert.equal(truncated.truncated, true);
+      const quietPath = join(outputDir, "delta-quiet.txt");
+      const quiet = await run({ format: "text", output: quietPath }, ["2999-01-01"]);
+      assert.equal(quiet.ok, true);
+      assert.equal(quiet.truncated, false);
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
@@ -518,6 +528,13 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     const objectRootSummary = await collectGovernanceSignals([{ id: "pm-object-root" }], { pmRoot: objectRoot });
     assert.equal(objectRootSummary.staleInProgressTotal, 0);
     assert.equal(objectRootSummary.storageFindingsTotal, 0);
+
+    const throwingStatus = { toString(): string { throw new Error("status serialization failed"); } } as unknown as string;
+    const staleFailure = await collectGovernanceSignals([{ id: "pm-stale-failure", status: throwingStatus }], { pmRoot: repoPmRoot() });
+    assert.equal(staleFailure.staleInProgressTotal, 0);
+    const invalidGeneratedAt = Symbol("invalid-generated-at") as unknown as string;
+    const invalidDate = await collectGovernanceSignals([{ id: "pm-invalid-date" }], { pmRoot: repoPmRoot(), generatedAt: invalidGeneratedAt });
+    assert.equal(invalidDate.staleInProgressTotal, 0);
   });
 
   test("a very small brief budget reaches the tight governance compaction stage", () => {
@@ -526,6 +543,23 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     ], { tokenBudget: 1, generatedAt: "2026-07-27T12:00:00Z" });
     assert.equal(brief.budget.truncated, true);
     assert.equal(brief.governance, undefined);
+    const compactedGovernance = buildBrief([
+      { id: "pm-budget-governance", title: "Budget governance", type: "Task", status: "open", priority: 1 },
+    ], {
+      tokenBudget: 1,
+      generatedAt: "2026-07-27T12:00:00Z",
+      governance: {
+        duplicateClusters: [], duplicateClustersTotal: 0,
+        staleInProgress: [], staleInProgressTotal: 0,
+        storageFindings: [], storageFindingsTotal: 0,
+        secretFindings: [{ itemId: "pm-budget-governance", field: "description", rule: "github_token", remediation: "pm get pm-budget-governance" }],
+        secretFindingsTotal: 1,
+        threshold: 0.6,
+        staleThresholdHours: 72,
+        generatedAt: "2026-07-27T12:00:00Z",
+      },
+    });
+    assert.ok(compactedGovernance.governance);
   });
 
   test("SDK edge adapters preserve quote, path, score, and missing-field contracts", () => {
@@ -557,6 +591,8 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
       created_at: "2026-07-27T12:00:00Z",
     };
     assert.equal(toMergeDecisionEntry(modernReceipt).preferred, "theirs");
+    const legacyReceipt: MergeDecisionReceipt = { ...modernReceipt, requested_preference: undefined, preferred: "ours" };
+    assert.equal(toMergeDecisionEntry(legacyReceipt).preferred, "ours");
   });
 
   test("a preferred_side receipt with no recorded side renders as unrecorded, not as a branch name", () => {
@@ -682,7 +718,7 @@ describe("divergence helpers cover sparse events, empty probes, and renderer fal
       ancestor: { events: [divEvent("create", "2026-07-19T00:00:00Z")], itemPresent: true },
       base: {
         events: [
-          divEvent("create", "2026-07-19T00:00:00Z"),
+          divEvent("create", "2026-07-20T01:00:00Z"),
           divEvent("update", "2026-07-20T01:00:00Z"),
           divEvent("note", "2026-07-20T01:00:00Z"),
         ],
@@ -781,6 +817,23 @@ describe("collectPendingMergeDecisions degrades outside git and when cwd disappe
 });
 
 describe("git readers fail closed when stderr is empty and honour a non-origin symbolic default", () => {
+  test("gitConfigGet handles both a configured key and an absent key", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-git-config-"));
+    try {
+      const init = spawnSync("git", ["init"], { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      assert.equal(gitConfigGet(tmpDir, "pm-brief.missing"), undefined);
+      const configured = spawnSync("git", ["config", "pm-brief.present", "value"], { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(configured.status, 0, configured.stderr);
+      assert.equal(gitConfigGet(tmpDir, "pm-brief.present"), "value");
+      const blank = spawnSync("git", ["config", "pm-brief.blank", " "], { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(blank.status, 0, blank.stderr);
+      assert.equal(gitConfigGet(tmpDir, "pm-brief.blank"), undefined);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   test("detectDefaultBase accepts origin/HEAD that does not use an origin/ prefix", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-sym-"));
     try {
@@ -859,6 +912,7 @@ describe("git readers fail closed when stderr is empty and honour a non-origin s
     try {
       process.env.PATH = fakeBin;
       assert.throws(() => resolveRepoRoot(process.cwd()), /spawn.*ENOENT|not a git repository/i);
+      assert.throws(() => resolveRef(process.cwd(), "HEAD"), /spawn.*ENOENT|unknown ref/i);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
@@ -907,7 +961,7 @@ describe("brief diverge command covers default refs, text/slack, unrelated histo
     const { commands } = await activateBrief();
     const json = (await runRegisteredCommandForTest(commands, {
       command: "brief diverge",
-      options: { format: "json", head: "HEAD" },
+      options: { format: "json" },
       global: { json: false },
       pmRoot: repoPmRoot(),
     })).result as { output?: string };
@@ -969,9 +1023,6 @@ describe("brief diverge command covers default refs, text/slack, unrelated histo
       pm(["--pm-path", pmPath, "create", "--title", "Other", "--type", "Task", "--author", "agent-b", "--json"]);
       git(["add", "-A"]);
       git(["commit", "-m", "root b"]);
-      git(["config", "merge.pm-item-toon.driver", " "]);
-      git(["config", "merge.pm-history.driver", " "]);
-
       const { commands } = await activateBrief();
       process.chdir(tmpDir);
       const result = (await runRegisteredCommandForTest(commands, {
