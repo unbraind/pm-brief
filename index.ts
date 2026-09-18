@@ -1522,29 +1522,24 @@ export async function collectGovernanceSignals(
   const metadata = items.map(toItemMetadata);
   const parsedItemIds = new Set(items.map((item) => item.id));
   const itemsById = new Map(items.map((item) => [item.id, item]));
-  const [duplicateResult, staleResult, storageResult] = await Promise.allSettled([
-    findDuplicateClusters({ pmRoot, threshold }),
+  const [duplicateResult, staleResult, allStorage] = await Promise.all([
+    findDuplicateClusters({ pmRoot, threshold }).catch(() => ({ clusters: [] })),
     scanStaleInProgressItems(pmRoot, metadata, {
       threshold_hours: staleHours,
       now: new Date(generatedAt),
-    }),
+    }).catch(() => ({ threshold_hours: staleHours, count: 0, items: [], remediation: "" })),
     (async (): Promise<GovernanceStorageFinding[]> => {
       const settings = await readSettings(pmRoot);
       const typeRegistry = resolveItemTypeRegistry(settings);
       return toGovernanceStorageFindings(
         await scanStorageIntegrity(pmRoot, parsedItemIds, typeRegistry.type_to_folder),
       );
-    })(),
+    })().catch(() => []),
   ]);
-  const allClusters = duplicateResult.status === "fulfilled"
-    ? duplicateResult.value.clusters
-      .map((cluster) => toGovernanceDuplicateCluster(cluster, itemsById))
-      .sort((a, b) => b.maxScore - a.maxScore)
-    : [];
-  const allStale = staleResult.status === "fulfilled"
-    ? toGovernanceStaleItems(staleResult.value)
-    : [];
-  const allStorage = storageResult.status === "fulfilled" ? storageResult.value : [];
+  const allClusters = duplicateResult.clusters
+    .map((cluster) => toGovernanceDuplicateCluster(cluster, itemsById))
+    .sort((a, b) => b.maxScore - a.maxScore);
+  const allStale = toGovernanceStaleItems(staleResult);
   let allSecrets: GovernanceSecretFinding[] = [];
   try {
     allSecrets = scanItemSecrets(items);
@@ -3377,7 +3372,8 @@ export function countMalformedLines(text: string | undefined): number {
 
 /** Identity key for an event: after_hash when available, else ts|author|op. */
 export function eventKey(e: DivergeEvent): string {
-  return e.after_hash ? e.after_hash : `${e.ts}|${e.author ?? ""}|${e.op ?? ""}`;
+  // Divergence events always carry an operation from the history parser.
+  return e.after_hash ? e.after_hash : `${e.ts}|${e.author ?? ""}|${e.op}`;
 }
 
 /** Events on a side whose key is not in the ancestor set. */

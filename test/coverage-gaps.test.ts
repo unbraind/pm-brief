@@ -197,11 +197,12 @@ describe("activity since readers accept window bounds and keep equal timestamps 
   test("parseActivitySinceOutput keeps equal timestamps in input order after a stable sort", () => {
     const parsed = parseActivitySinceOutput(JSON.stringify({
       activity: [
-        { ts: "2026-07-20T10:00:00Z", id: "pm-b", op: "update" },
-        { ts: "2026-07-20T10:00:00Z", id: "pm-a", op: "update" },
+        { ts: "2026-07-20T11:00:00Z", id: "pm-late", op: "update" },
+        { ts: "2026-07-20T10:00:00Z", id: "pm-early", op: "update" },
+        { ts: "2026-07-20T10:00:00Z", id: "pm-tie", op: "update" },
       ],
     }));
-    assert.deepEqual(parsed.map((entry) => entry.id), ["pm-b", "pm-a"]);
+    assert.deepEqual(parsed.map((entry) => entry.id), ["pm-early", "pm-tie", "pm-late"]);
   });
 });
 
@@ -223,18 +224,19 @@ describe("buildDelta covers retitle, dep removal, unpatched comments, and format
         { op: "remove", path: "/metadata/dependencies/1" },
       ]),
       actEntry("pm-comment", "comment_add", "2026-07-20T01:00:00Z"),
-      actEntry("pm-quiet", "activity", "2026-07-20T01:00:00Z"),
+      { ts: "2026-07-20T01:00:00Z", author: "pi-agent", op: "activity", id: "pm-quiet" },
+      { ts: "2026-07-20T02:00:00Z", author: "pi-agent", op: "activity", id: "pm-quiet" },
     ], items, { since: "2026-07-20", workspace: ".agents/pm", pmVersion: "test" });
     const byId = new Map(summary.items.map((change) => [change.id, change]));
     assert.equal(byId.get("pm-retitle")?.retitled, true);
     assert.equal(byId.get("pm-deps")?.depsRemoved, 2);
     assert.equal(byId.get("pm-comment")?.commentsAdded, 1);
-    assert.equal(byId.get("pm-quiet")?.eventCount, 1);
+    assert.equal(byId.get("pm-quiet")?.eventCount, 2);
     const markdown = renderMarkdownDelta(summary);
     assert.match(markdown, /retitled/);
     assert.match(markdown, /-2 deps/);
     assert.match(markdown, /1 comment/);
-    assert.match(markdown, /1 event/);
+    assert.match(markdown, /2 events/);
   });
 
   test("equal timestamps fall through to id ordering and text/slack budgets still truncate", () => {
@@ -435,6 +437,9 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
   });
 
   test("detectStaleContext keeps items that have no updated_at and governance defaults still scan", async () => {
+    const defaults = await collectGovernanceSignals([{ id: "pm-defaults" }]);
+    assert.equal(defaults.threshold, 0.6);
+    assert.equal(defaults.staleThresholdHours, 72);
     const stale = detectStaleContext([
       { id: "pm-no-ts", title: "Ancient", type: "Task", status: "open" },
     ], { generatedAt: "2026-07-21T00:00:00Z", staleDays: 0 });
@@ -447,6 +452,23 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     assert.equal(typeof summary.generatedAt, "string");
     assert.equal(summary.threshold, 0.6);
     assert.equal(summary.staleThresholdHours, 72);
+
+    const malformedRoot = await mkdtemp(join(tmpdir(), "pm-brief-governance-settings-"));
+    try {
+      await writeFile(join(malformedRoot, "settings.json"), "{not-json}\n", "utf8");
+      const malformed = await collectGovernanceSignals([{ id: "pm-malformed" }], { pmRoot: malformedRoot });
+      assert.equal(malformed.storageFindingsTotal, 1);
+    } finally {
+      await rm(malformedRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("a very small brief budget reaches the tight governance compaction stage", () => {
+    const brief = buildBrief([
+      { id: "pm-budget", title: "A very long title that forces repeated compaction", type: "Task", status: "open", priority: 1 },
+    ], { tokenBudget: 1, generatedAt: "2026-07-27T12:00:00Z" });
+    assert.equal(brief.budget.truncated, true);
+    assert.equal(brief.governance, undefined);
   });
 
   test("a preferred_side receipt with no recorded side renders as unrecorded, not as a branch name", () => {
@@ -527,8 +549,8 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     const pairs = collapseDuplicatePairs(
       items,
       new Map([
-        ["pm-a", [match("pm-b")]],
         ["pm-c", [match("pm-d")]],
+        ["pm-a", [match("pm-b")]],
       ]),
       new Map(items.map((item) => [item.id, item])),
     );
@@ -627,7 +649,7 @@ describe("divergence helpers cover sparse events, empty probes, and renderer fal
       base: {
         events: [
           { ts: "2026-07-20T01:00:00Z", op: "update", patch: [{ op: "replace", path: "/metadata/priority", value: 1 }] },
-          { ts: "2026-07-20T01:00:00Z", author: "ada", op: "update", patch: [{ op: "replace", path: "/metadata/assignee", value: "ada" }] },
+          { ts: "2026-07-20T02:00:00Z", author: "ada", op: "update", patch: [{ op: "replace", path: "/metadata/assignee", value: "ada" }] },
         ],
         itemPresent: true,
       },
