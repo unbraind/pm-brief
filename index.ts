@@ -1225,7 +1225,7 @@ function truncateForBrief(value: unknown): string {
  * into a clone still parse. Both are optional, because a receipt settled by
  * `stable_value_order` names no side at all.
  */
-function toMergeDecisionEntry(receipt: MergeDecisionReceipt): MergeDecisionEntry {
+export function toMergeDecisionEntry(receipt: MergeDecisionReceipt): MergeDecisionEntry {
   return {
     receiptId: receipt.id,
     itemId: normalizeItemPath(receipt.item_id),

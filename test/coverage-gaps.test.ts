@@ -34,6 +34,7 @@ import extension, {
   escapeLine,
   formatScoreValue,
   toGovernanceDuplicateCluster,
+  toMergeDecisionEntry,
   renderMarkdownDelta,
   renderMarkdownDivergence,
   renderSlackDelta,
@@ -48,6 +49,7 @@ import extension, {
   type DeltaActivityEntry,
   type DeltaItemChange,
   type DuplicateCluster,
+  type MergeDecisionReceipt,
   type DeltaSummary,
   type DivergeEvent,
   type MergeDecisionEntry,
@@ -206,9 +208,13 @@ describe("activity since readers accept window bounds and keep equal timestamps 
         { ts: "2026-07-20T11:00:00Z", id: "pm-late", op: "update" },
         { ts: "2026-07-20T10:00:00Z", id: "pm-early", op: "update" },
         { ts: "2026-07-20T10:00:00Z", id: "pm-tie", op: "update" },
+        ...Array.from({ length: 10 }, (_, index) => ({ ts: "2026-07-20T09:00:00Z", id: `pm-equal-${String(10 - index)}`, op: "update" })),
       ],
     }));
-    assert.deepEqual(parsed.map((entry) => entry.id), ["pm-early", "pm-tie", "pm-late"]);
+    assert.deepEqual(parsed.map((entry) => entry.id), [
+      "pm-equal-10", "pm-equal-9", "pm-equal-8", "pm-equal-7", "pm-equal-6", "pm-equal-5", "pm-equal-4", "pm-equal-3", "pm-equal-2", "pm-equal-1",
+      "pm-early", "pm-tie", "pm-late",
+    ]);
   });
 });
 
@@ -336,7 +342,7 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
           options,
           global: { json: false },
           pmRoot: repoPmRoot(),
-        })).result as { pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string };
+        })).result as { pmBriefRendered?: boolean; output?: string; ok?: boolean; format?: string; truncated?: boolean };
       const text = await run({ format: "text", until: "0d" }, ["3650d"]);
       assert.equal(text.pmBriefRendered, true);
       assert.match(String(text.output), /Delta since /);
@@ -345,6 +351,10 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
       assert.equal(slack.ok, true);
       assert.equal(slack.format, "slack");
       assert.match(readFileSync(slackPath, "utf8"), /\*Delta since /);
+      const truncatedPath = join(outputDir, "delta-truncated.txt");
+      const truncated = await run({ format: "text", output: truncatedPath, until: "0d", "token-budget": 1 }, ["3650d"]);
+      assert.equal(truncated.ok, true);
+      assert.equal(truncated.truncated, true);
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
@@ -389,6 +399,12 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
       pmRoot: repoPmRoot(),
     })).result as { output?: string };
     assert.equal((JSON.parse(String(duplicates.output)) as { count?: number }).count, 0);
+    const defaults = (await runRegisteredCommandForTest(commands, {
+      command: "brief duplicates",
+      options: { json: true, limit: 2 },
+      pmRoot: repoPmRoot(),
+    })).result as { output?: string };
+    assert.equal(typeof JSON.parse(String(defaults.output)), "object");
 
     const governance = (await runRegisteredCommandForTest(commands, {
       command: "brief governance",
@@ -419,6 +435,36 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
       { id: "pm-open", title: "Open", type: "Task", status: "open", priority: 1 },
     ], { generatedAt: "2026-07-21T00:00:00Z", statuses: ["blocked"] });
     assert.ok(brief.insights?.some((insight) => insight.message.includes("no open work matched filters (status=blocked)")));
+  });
+
+  test("registered momentum renders a closed item whose cycle time is unavailable", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "pm-brief-momentum-command-"));
+    const previousCwd = process.cwd();
+    try {
+      const pmRoot = join(tmpDir, ".agents", "pm");
+      const init = spawnSync(INSTALLED_PM_BIN, ["init", "--pm-path", pmRoot], { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const created = spawnSync(INSTALLED_PM_BIN, ["--pm-path", pmRoot, "create", "Closed invalid date", "--type", "Task", "--priority", "2", "--author", "pi-agent", "--json"], { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(created.status, 0, created.stderr);
+      const itemId = (JSON.parse(created.stdout) as { id: string }).id;
+      const closed = spawnSync(INSTALLED_PM_BIN, ["--pm-path", pmRoot, "close", itemId, "done", "--author", "pi-agent", "--json"], { cwd: tmpDir, encoding: "utf8" });
+      assert.equal(closed.status, 0, closed.stderr);
+      const itemPath = join(pmRoot, "tasks", `${itemId}.toon`);
+      writeFileSync(itemPath, readFileSync(itemPath, "utf8").replace(/created_at: "[^"]+"/, 'created_at: "2099-01-01T00:00:00.000Z"'));
+      const { commands } = await activateBrief();
+      process.chdir(tmpDir);
+      const result = (await runRegisteredCommandForTest(commands, {
+        command: "brief momentum",
+        options: { format: "text", days: 30 },
+        global: { json: false },
+        pmRoot: ".agents/pm",
+      })).result as { output?: string };
+      assert.match(String(result.output), /Closed 1 item/);
+      assert.doesNotMatch(String(result.output), /cycle/);
+    } finally {
+      process.chdir(previousCwd);
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -467,6 +513,11 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     } finally {
       await rm(malformedRoot, { recursive: true, force: true });
     }
+
+    const objectRoot = new String("/nonexistent-object-pm-root") as unknown as string;
+    const objectRootSummary = await collectGovernanceSignals([{ id: "pm-object-root" }], { pmRoot: objectRoot });
+    assert.equal(objectRootSummary.staleInProgressTotal, 0);
+    assert.equal(objectRootSummary.storageFindingsTotal, 0);
   });
 
   test("a very small brief budget reaches the tight governance compaction stage", () => {
@@ -491,6 +542,21 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     };
     const adapted = toGovernanceDuplicateCluster(cluster, new Map([["pm-a", { id: "pm-a", title: "Task A", type: "Task", status: "open" }]]));
     assert.equal(adapted.reason, "title_token_jaccard");
+
+    const modernReceipt: MergeDecisionReceipt = {
+      version: 1,
+      id: "receipt-modern",
+      item_id: "pm-a",
+      item_path: ".agents/pm/tasks/pm-a.toon",
+      requested_preference: "theirs",
+      conflict_resolution: "preferred_side",
+      fields_from_theirs: [],
+      union_fields: [],
+      decisions: [{ field: "title", base: "base", ours: "ours", theirs: "theirs", retained: "theirs", discarded: "ours" }],
+      state: "pending",
+      created_at: "2026-07-27T12:00:00Z",
+    };
+    assert.equal(toMergeDecisionEntry(modernReceipt).preferred, "theirs");
   });
 
   test("a preferred_side receipt with no recorded side renders as unrecorded, not as a branch name", () => {
@@ -555,10 +621,10 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
 
   test("collapseDuplicatePairs with equal scores orders by pair id", () => {
     const items: PmItem[] = [
-      { id: "pm-a", title: "A", type: "Task", status: "open" },
-      { id: "pm-b", title: "B", type: "Task", status: "open" },
       { id: "pm-c", title: "C", type: "Task", status: "open" },
       { id: "pm-d", title: "D", type: "Task", status: "open" },
+      { id: "pm-a", title: "A", type: "Task", status: "open" },
+      { id: "pm-b", title: "B", type: "Task", status: "open" },
     ];
     const match = (id: string): SimilarItemMatch => ({
       id,
@@ -618,6 +684,7 @@ describe("divergence helpers cover sparse events, empty probes, and renderer fal
         events: [
           divEvent("create", "2026-07-19T00:00:00Z"),
           divEvent("update", "2026-07-20T01:00:00Z"),
+          divEvent("note", "2026-07-20T01:00:00Z"),
         ],
         itemPresent: true,
       },
@@ -840,7 +907,7 @@ describe("brief diverge command covers default refs, text/slack, unrelated histo
     const { commands } = await activateBrief();
     const json = (await runRegisteredCommandForTest(commands, {
       command: "brief diverge",
-      options: { base: "HEAD", format: "json" },
+      options: { format: "json", head: "HEAD" },
       global: { json: false },
       pmRoot: repoPmRoot(),
     })).result as { output?: string };
