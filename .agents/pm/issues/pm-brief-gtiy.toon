@@ -6,7 +6,7 @@ status: in_progress
 priority: 1
 tags: []
 created_at: "2026-07-26T13:52:29.218Z"
-updated_at: "2026-09-18T06:03:35.201Z"
+updated_at: "2026-09-18T06:19:02.024Z"
 assignee: pi-agent
 claim_principal: pi-agent
 author: codex
@@ -18,11 +18,12 @@ actual_result: "The exact tree passes 333 tests with 100.00% lines, 97.85% branc
 component: testing
 dependencies[1]{id,kind,created_at,author}:
   pm-brief-q325,related,"2026-07-26T13:52:29.218Z",codex
-comments[4]{created_at,author,text}:
+comments[5]{created_at,author,text}:
   "2026-09-18T03:49:34.658Z",pi-agent,"Baseline before 100% coverage push (npm run coverage, TZ=UTC): index.ts lines 99.96 / branches 91.96 / functions 100.00. Uncovered lines: 1277-1278 (collectPendingMergeDecisions catch). Gate in package.json is still 91/76/95. Raising to 100/100/100 after behavioural tests cover remaining branches."
   "2026-09-18T05:03:15.500Z",pi-agent,"Coverage implementation complete: behavioral tests in test/coverage-gaps.test.ts use the real pm CLI, real git repositories/processes, SDK governance/merge readers, registered commands, and renderer ownership. index.ts now reports 100.00% lines, 100.00% branches, and 100.00% functions across 336 passing tests. Invariant-based dead fallbacks were removed only where the SDK/host contract makes them unreachable; adapter and failure contracts remain tested. Package thresholds are now 100/100/100."
   "2026-09-18T05:08:46.613Z",pi-agent,"Release gates passed: npm run release:check completed typecheck, workflow verification, build, docstring gate, 100/100/100 coverage (336 tests), production audit (0 vulnerabilities), pack dry-run, packed acceptance, changelog check, and publish-attestation verification."
   "2026-09-18T05:24:46.732Z",pi-agent,"PM-linked test execution note: direct npm run release:check passed. The linked-test runner's sandboxed rerun failed only in scripts/accept-packed.ts because its temporary working directory inherited an ancestor tracker and pm init refused the implicit ancestor without --force (infra collision, not a package assertion). npm run lint and npm run jscpd were checked with --if-present; neither script is declared."
+  "2026-09-18T06:19:01.866Z",pi-agent,"Review correction: removed the DA-record statement gate because LCOV DA records are line data, not an independent statement metric. The PM item remains open for genuine 100/100/100/100 coverage; real statement coverage requires c8 with --all, which pm-vcs uses as the fleet reference."
 notes[19]{created_at,author,text}:
   "2026-07-26T13:52:41.808Z",codex,"Baseline measured 2026-07-26 with Node built-in coverage against the latest project-local pm CLI: dist/index.js 82.84% lines, 74.67% branches, 92.19% functions. The aggregate report is lower because it also observes a temporary installed extension copy; the source file row is the actionable baseline."
   "2026-07-26T14:13:07.264Z",codex,"Workflow-level acceptance evidence is now linked in addition to the reporting-only coverage baseline. This Issue remains open until release:check itself enforces all four 100% thresholds; a passing current release:check is not evidence that the acceptance criteria are met."
