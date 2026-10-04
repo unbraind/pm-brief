@@ -33,9 +33,10 @@ const declaredDrivers = [
  * Create a consumer checkout: a fresh Git repository carrying this
  * repository's `.gitattributes` and tracker settings. `pmOps` selects what
  * `node_modules/pm-ops` is: absent (an omit-dev install), the pinned package,
- * or a stale pm-ops whose exports predate the launcher entry.
+ * a stale pm-ops whose exports predate the launcher entry, a package directory
+ * without its manifest, or a dangling link left by an incomplete install.
  */
-function checkout(name: string, pmOps: "absent" | "pinned" | "stale"): string {
+function checkout(name: string, pmOps: "absent" | "pinned" | "stale" | "no-manifest" | "broken"): string {
   const directory = join(scratch, name);
   mkdirSync(join(directory, ".agents", "pm"), { recursive: true });
   assert.equal(spawnSync("git", ["init", "-q"], { cwd: directory }).status, 0);
@@ -52,6 +53,13 @@ function checkout(name: string, pmOps: "absent" | "pinned" | "stale"): string {
       join(directory, "node_modules", "pm-ops", "package.json"),
       JSON.stringify({ name: "pm-ops", type: "module", exports: { "./merge-driver": "./merge-driver.js" } }),
     );
+  }
+  if (pmOps === "no-manifest") {
+    mkdirSync(join(directory, "node_modules", "pm-ops"), { recursive: true });
+  }
+  if (pmOps === "broken") {
+    mkdirSync(join(directory, "node_modules"));
+    symlinkSync(join(directory, "missing-pm-ops"), join(directory, "node_modules", "pm-ops"), "dir");
   }
   return directory;
 }
@@ -107,6 +115,36 @@ test("a pm-ops too old to export the launcher entry fails the install", posixOnl
   const result = prepare(checkout("stale", "stale"), hostPath);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /ERR_PACKAGE_PATH_NOT_EXPORTED/);
+});
+
+test("a pm-ops directory without a manifest preserves the installer resolution error", posixOnly, () => {
+  const directory = checkout("no-manifest", "no-manifest");
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Cannot find module 'pm-ops\/merge-driver\/prepare'/);
+  assert.doesNotMatch(result.stderr, /skipping merge-driver install/);
+  assert.deepEqual(registeredDrivers(directory), []);
+});
+
+test("a dangling pm-ops link preserves the installer resolution error", posixOnly, () => {
+  const directory = checkout("broken", "broken");
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Cannot find module 'pm-ops\/merge-driver\/prepare'/);
+  assert.doesNotMatch(result.stderr, /skipping merge-driver install/);
+  assert.deepEqual(registeredDrivers(directory), []);
+});
+
+test("an inconclusive lookup preserves the installer error instead of the probe error", posixOnly, () => {
+  const directory = checkout("lookup-file", "absent");
+  // A regular file at node_modules makes lstat throw ENOTDIR even for a
+  // non-root caller, so the fixture is deterministic in CI and locally.
+  writeFileSync(join(directory, "node_modules"), "not a directory");
+  const result = prepare(directory, hostPath);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Cannot find module 'pm-ops\/merge-driver\/prepare'/);
+  assert.doesNotMatch(result.stderr, /ENOTDIR|skipping merge-driver install/);
+  assert.deepEqual(registeredDrivers(directory), []);
 });
 
 test("a failing pm merge install fails the install with the same status", posixOnly, () => {
