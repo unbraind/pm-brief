@@ -1,0 +1,24 @@
+id: pm-brief-m8hh
+title: Certify pm-brief on PM CLI/SDK 2026.10.4 and consolidate pending dependency updates
+description: "Pin @unbrained/pm-cli@2026.10.4, pm-ops@2026.10.4 and pm-changelog@2026.10.4 (latest npm), consolidate Dependabot updates (#128 codeql-action SHAs, #129 pm-ops, #130 pm-changelog, #131 pm-cli, #132 @types/node), re-copy the canonical merge-driver launcher from pm-ops 2026.10.4, and prove the full release gate green."
+type: Chore
+status: open
+priority: 2
+tags[2]: cert,deps
+created_at: "2026-10-04T10:28:41.304Z"
+updated_at: "2026-10-04T10:40:30.580Z"
+assignee: pi-cert-a
+author: pi-cert-a
+actual_result: "Pins @unbrained/pm-cli 2026.10.4, pm-ops 2026.10.4, pm-changelog 2026.10.4 (all exact latest npm), @types/node lockfile 26.6.4, codeql-action SHAs 2892aa5e. release:check green 339/339 with the repo's enforced coverage thresholds met; audits clean; strict pm health ok. Dogfood through npx and bunx against a real tracker copy (brief, next --explain, prompt, stale). pm-github 2026.10.4 managed extension with clean read-only sync dry-run. No open Dependabot security alerts."
+comments[2]{created_at,author,text}:
+  "2026-10-04T10:37:42.117Z",pi-cert-a,"Gate evidence: npm run release:check green 339/339 (typecheck, release-workflow, build, docstring, coverage, audit:prod 0 vulnerabilities, pack:dry-run, accept:packed, changelog:check with pm-changelog 2026.10.4, publish-attestation ok); ./node_modules/.bin/pm health --strict-exit exits 0; npm audit and npm audit --omit=dev both clean. Launcher re-copied byte-identical from pm-ops@2026.10.4 templates (fail-closed probe on unreadable lookup paths). REQUIRED_DEVELOPMENT_VERSION in test/version-contract.ts raised to 2026.10.4.\n\nDogfood (pm-brief-2026.9.26.tgz packed from this tree, installed into a scratch copy of this repo's real tracker):\n- npm: 'npx -y @unbrained/pm-cli@2026.10.4 brief' rendered the full brief (79 items, budget respected); 'brief next --explain --count 2' ranked pm-brief-4ohy (score 222) and this item pm-brief-m8hh (score 115) with evidence lines.\n- bun: 'bunx --bun @unbrained/pm-cli@2026.10.4 brief prompt' rendered the agent handoff prompt (score 247 top item); 'brief stale' listed 5 stale items.\nScratch copy deleted afterwards.\n\npm-github: installed as managed extension pm-github@2026.10.4; read-only preview 'pm github sync --repo unbraind/pm-brief --dry-run' -> 'No pm items linked to unbraind/pm-brief' planned 0. No issues created/modified, no scheduled sync."
+  "2026-10-04T10:40:30.580Z",pi-cert-a,"pm test --run receipt: the linked 'npm run release:check' fails only inside the pm test harness — scripts/accept-packed.ts's throwaway 'npx pm init --defaults --prefix accept' in /tmp/pm-brief-packed-accept exits status 2 ('No tracker exists') because the harness injects the sandbox PM_PATH into the linked command's process tree (same upstream defect class as unbraind/pm-cli#1391, already filed with the pm-ops reproduction). The direct release:check — exactly what CI runs — is green 339/339. Every pm-ops-covered repo with a packed-accept step that initializes a scratch tracker hits this under the harness."
+files[5]{path,scope,note}:
+  .github/workflows/codeql.yml,project,2026.10.4 certification
+  package-lock.json,project,2026.10.4 certification
+  package.json,project,2026.10.4 certification
+  scripts/prepare-merge-driver.ts,project,2026.10.4 certification
+  test/version-contract.ts,project,2026.10.4 certification
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,pi-cert-a,"2026-10-04T10:37:41.118Z",local_mutation,chore/pm-brief-pm-cli-2026-10-4
+body: ""
