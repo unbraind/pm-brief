@@ -1,0 +1,59 @@
+id: pm-brief-k8no
+title: Enforce the chosen rendered brief token ceiling
+description: "Enforce rendered token budgets with bounded compaction, omission receipts and explicit cannot-fit recovery. GitHub: https://github.com/unbraind/pm-brief/issues/135"
+type: Feature
+status: in_progress
+priority: 1
+tags: []
+created_at: "2026-10-07T11:04:40.332Z"
+updated_at: "2026-10-07T11:32:39.468Z"
+author: codex-sol
+acceptance_criteria: "Every supported rendered brief fits its character estimate budget or explicitly fails with minimum budget and recovery; regression sweep, revert proof and both release gates pass."
+comments[5]{created_at,author,text}:
+  "2026-10-07T11:05:37.937Z",codex-sol,"Reproduced #135 on the built package: budgets 100/300/1000 return estimatedTokens 1226, compact JSON estimates 1227 and pretty CLI JSON 1539; Markdown estimates 856. Baseline tracker default 4000 fits unchanged content. Plan: measure selected rendering including disclosure, bound compaction, preserve retained IDs and merge warnings, disclose per-section omissions, and throw a usage error with minimum budget and recovery when the minimal brief cannot fit."
+  "2026-10-07T11:12:28.943Z",codex-sol,"Implemented selected-rendering measurement with self-disclosure fixed point, bounded section/field compaction, cumulative omission receipts, full merge-compromise identities and actionable-ID retention. Public renderers recheck changed formats and inputs. Focused budget tests and updated legacy overrun tests pass; running complete coverage before the compactor revert proof and release gates."
+  "2026-10-07T11:18:32.651Z",codex-sol,"Old-compactor revert proof: the selected issue #135, generated sweep and cannot-fit tests all fail (18/18, exit 1), then the fixed implementation was restored. The pm-linked focused run passes 24/24 after explicitly selecting the disposable tracker; execution-result tracking is disabled by the project, so results are recorded here. The complete coverage report is 100% lines, 97.90% branches and 100% functions; existing detached docstrings were attached to their declarations before final gates. Packed acceptance now also checks the rendered ceiling and actual usage exit 2 for cannot-fit."
+  "2026-10-07T11:30:20.232Z",codex-sol,"Both pm-linked release runs passed 367 tests, 100% lines, 97.90% branches, 100% functions and production audit, then failed in packed fixture initialization because the runner supplied an ancestor tracker context. Corrected the package acceptance launcher and cannot-fit probe to select the disposable tracker explicitly. This is fixture isolation, not a weakened gate. Standalone budget tests pass 25/25 including Unicode and input immutability. Rechecking packed acceptance under the same pm runner before the final committed-head gates."
+  "2026-10-07T11:32:38.579Z",codex-sol,"Corrected packed acceptance now passes through the pm runner with explicit tracker selection: npm/current and Bun/current on SDK 2026.10.4, plus npm/minimum on 2026.8.20; each verifies a fitting rendering and actual cannot-fit exit 2 with recovery. Tests and docs are complete, including the 18/18 old-compactor failure proof and 25/25 restored budget tests. Both earlier full suites passed 367 tests and the unchanged 100/97.85/100 thresholds (observed 100/97.90/100). Releasing the claim without closing the item; final full npm and Bun release gates will be rerun on the committed head and their receipts published in the PR."
+files[5]{path,scope}:
+  index.ts,project
+  scripts/accept-packed.ts,project
+  test/brief.test.ts,project
+  test/budget.test.ts,project
+  test/coverage-gaps.test.ts,project
+tests[4]:
+  - command: node --test test/budget.test.ts
+    scope: project
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-07T11:12:27.710Z"
+      source_kind: local_mutation
+      source_ref: feat/enforce-brief-budget
+  - command: "npm run release:check"
+    scope: project
+    timeout_seconds: 600
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-07T11:18:28.874Z"
+      source_kind: local_mutation
+      source_ref: feat/enforce-brief-budget
+  - command: "bun run release:check"
+    scope: project
+    timeout_seconds: 600
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-07T11:18:30.988Z"
+      source_kind: local_mutation
+      source_ref: feat/enforce-brief-budget
+  - command: "npm run accept:packed"
+    scope: project
+    timeout_seconds: 600
+    provenance:
+      author: codex-sol
+      created_at: "2026-10-07T11:30:19.308Z"
+      source_kind: local_mutation
+      source_ref: feat/enforce-brief-budget
+docs[2]{path,scope}:
+  docs/brief-budget.md,project
+  README.md,project
+body: ""

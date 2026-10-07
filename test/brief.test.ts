@@ -1138,7 +1138,7 @@ test("buildBrief does not emit executable guidance for an unsafe focus id", () =
 });
 
 test("buildBrief compacts when token budget is small", () => {
-  const brief = buildBrief(items, { generatedAt: "2026-06-06T00:00:00Z", tokenBudget: 50 });
+  const brief = buildBrief(items, { generatedAt: "2026-06-06T00:00:00Z", tokenBudget: 500 });
   assert.equal(brief.budget.truncated, true);
   assert.ok(brief.next.length <= 3);
 });
@@ -3497,7 +3497,9 @@ describe("brief governance", () => {
     const brief = buildBrief(items, { governance, tokenBudget: 500, generatedAt: "2026-07-26T12:00:00Z", pmRoot: ".agents/pm", pmVersion: "test" });
     assert.equal(brief.budget.truncated, true);
     assert.ok(brief.governance, "governance should remain visible under budget pressure");
-    assert.equal(brief.governance.duplicateClusters.length, 2);
+    assert.ok(brief.governance.duplicateClusters.length < clusters.length);
+    assert.equal(brief.omissions?.sections.duplicateClusters, 5 - brief.governance.duplicateClusters.length);
+    assert.ok(brief.budget.estimatedTokens <= 500);
     assert.equal(brief.governance.duplicateClustersTotal, 5);
   });
 

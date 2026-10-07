@@ -50,7 +50,7 @@ pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 
 ### Ranking and Budget Flags
 
-- `--max-tokens` is an alias for `--token-budget`.
+- `--max-tokens` is an alias for `--token-budget`: a ceiling on the chosen rendered brief, estimated as `ceil(characters / 4)` (not a model tokenizer).
 - `--dependency-order` prefers prerequisite items before dependent work in next-work ranking.
 - `--focus` highlights specific item ids, or `type:Type` to highlight every item of a type (repeatable or comma-separated).
 - `--include-history` adds a Recent Activity section sourced from `pm activity` to briefs and prompts; `--history-limit` controls the entry count (default 10).
@@ -59,6 +59,37 @@ pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 - `pm brief` emits a `Brief Insights` section when focus ids are missing, closed focus items are excluded, or active filters hide all open work.
 - `--explain` on `pm brief next` includes compact ranking evidence such as unblockability, stale age, dependency fanout, release/deadline proximity, and linked docs/files.
 - `--confidence` on `pm brief next` includes the confidence score behind each recommendation.
+
+For `pm brief` (default 4000) and `pm brief prompt` (default 2500), the ceiling
+includes headings, pretty JSON whitespace, the final newline, merge receipts,
+and omission/disclosure lines. Compaction caps ancillary sections, shortens
+display fields with `…`, then drops lower-priority entries. Retained items keep
+their IDs and the highest-ranked next item remains available. `omissions` in
+JSON, or the rendered omission notice, gives per-section entry counts and
+`pm list --all` / `pm get <id>` retrieval hints. Counts are section entries, so
+an item appearing in both focus and next can be counted twice. Merge compromise
+IDs and pending totals remain complete; `pm merge report` retrieves hidden receipts.
+
+If the smallest actionable brief cannot fit, the command fails before writing
+an output file. The error states the minimum required budget and a command to
+retry. The API throws `CommandError` with `EXIT_CODE.USAGE` (2), matching existing
+usage failures; the host CLI controls process error rendering and exit handling.
+
+API callers can choose the rendering before building:
+
+```ts
+import { buildBrief, renderBrief } from "pm-brief";
+const brief = buildBrief(items, { tokenBudget: 1000, format: "markdown" });
+const output = renderBrief(brief, "markdown");
+```
+
+`buildBrief` defaults to budgeting pretty JSON. `renderBrief`,
+`renderMarkdownBrief`, `renderSlackBrief` and `renderAgentPrompt` enforce the
+selected rendering again if callers change format or modify the returned object.
+`budget.estimatedTokens` measures the rendering chosen at build time, including
+its own digit count. An unchanged ordinary tracker that already fits keeps its
+sections and fields; only the estimate disclosure can differ from older versions.
+See [budget evidence and recovery](docs/brief-budget.md) for the regression matrix.
 
 ## Agent Brief Contents
 

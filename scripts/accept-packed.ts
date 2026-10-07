@@ -26,6 +26,8 @@ interface AcceptanceReceipt {
   readonly stdout_bytes: number;
   readonly stderr_bytes: number;
   readonly fixture_present: true;
+  readonly bounded_estimate: number;
+  readonly cannot_fit_exit_code: 2;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -90,8 +92,8 @@ function runPm(scenario: AcceptanceScenario, cwd: string, args: string[]): Spawn
   // the installed host or extension printed -- exactly what this gate exists to
   // catch.
   return scenario.manager === "npm"
-    ? run(npxCommand, ["--no-install", "--silent", "pm", ...args], cwd)
-    : run(bunxCommand, ["--no-install", "pm", ...args], cwd);
+    ? run(npxCommand, ["--no-install", "--silent", "pm", "--pm-path", ".agents/pm", ...args], cwd)
+    : run(bunxCommand, ["--no-install", "pm", "--pm-path", ".agents/pm", ...args], cwd);
 }
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), "pm-brief-packed-acceptance-"));
@@ -149,12 +151,26 @@ try {
     if (brief.stderr !== "") {
       throw new Error(`${scenario.name} pm brief emitted unexpected stderr: ${brief.stderr.trim()}`);
     }
+    const bounded = runPm(scenario, scenarioRoot, ["brief", "--no-governance", "--format", "markdown", "--max-tokens", "1000"]);
+    const boundedEstimate = Math.ceil(bounded.stdout.length / 4);
+    if (boundedEstimate > 1000) throw new Error(`${scenario.name} rendered brief exceeds 1000: ${boundedEstimate}`);
+    const refusedArgs = ["--pm-path", ".agents/pm", "brief", "--no-governance", "--max-tokens", "1"];
+    const refused = spawnSync(
+      scenario.manager === "npm" ? npxCommand : bunxCommand,
+      scenario.manager === "npm" ? ["--no-install", "--silent", "pm", ...refusedArgs] : ["--no-install", "pm", ...refusedArgs],
+      { cwd: scenarioRoot, encoding: "utf8", env: cleanEnvironment, maxBuffer: 64 * 1024 * 1024 },
+    );
+    if (refused.status !== 2 || !/minimum budget \d+ required; run pm brief/.test(refused.stdout + refused.stderr)) {
+      throw new Error(`${scenario.name} cannot-fit must preserve usage exit 2 and recovery: ${String(refused.status)} ${(refused.stderr || refused.stdout).trim()}`);
+    }
     receipts.push({
       scenario: scenario.name,
       host_version: scenario.hostVersion,
       stdout_bytes: Buffer.byteLength(brief.stdout),
       stderr_bytes: Buffer.byteLength(brief.stderr),
       fixture_present: true,
+      bounded_estimate: boundedEstimate,
+      cannot_fit_exit_code: 2,
     });
   }
 

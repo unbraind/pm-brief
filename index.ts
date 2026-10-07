@@ -117,7 +117,13 @@ export interface PmItem {
   [key: string]: unknown;
 }
 
+/** Renderings whose complete character estimate can be budgeted by buildBrief. */
+export type BriefFormat = "json" | "markdown" | "prompt" | "slack";
+
+/** Selection and rendering controls for a brief whose output must fit the requested ceiling. */
 export interface BriefOptions {
+  /** Rendering to budget, including whitespace and disclosure (default: json). */
+  format?: BriefFormat;
   tokenBudget?: number;
   dependencyOrder?: boolean;
   focusIds?: string[];
@@ -258,7 +264,16 @@ export interface BriefInsight {
   suggestion?: string;
 }
 
+/** Counts removed from each selected section, with commands to recover full context. */
+export interface BriefOmissions {
+  sections: Record<string, number>;
+  shortenedFields: boolean;
+  retrieve: string;
+}
+
 export interface AgentBrief {
+  /** Present after budget compaction; counts refer to section entries, not unique items. */
+  omissions?: BriefOmissions;
   generatedAt: string;
   workspace: {
     root: string;
@@ -1594,41 +1609,158 @@ export function governanceIsEmpty(g: GovernanceSummary | undefined): boolean {
   );
 }
 
-function compactToBudget(brief: AgentBrief): AgentBrief {
-  const budget = brief.budget.requestedTokens;
-  let estimated = estimateTokens(brief);
-  if (estimated <= budget) return { ...brief, budget: { ...brief.budget, estimatedTokens: estimated, truncated: false } };
-  const next = {
-    ...brief,
-    insights: brief.insights?.slice(0, 4),
-    recommendedPmUpdates: brief.recommendedPmUpdates.slice(0, 5),
-    staleContext: brief.staleContext.slice(0, 5),
-    risks: brief.risks.slice(0, 8),
-    momentum: { ...brief.momentum, recent: brief.momentum.recent.slice(0, 3) },
-    recentActivity: brief.recentActivity?.slice(0, 8),
-    // Trim governance from the default caps (3/5/5/5) to the tight caps (2/3/3/3)
-    // at the first compaction step so it competes fairly with the other sections.
-    governance: brief.governance ? compactGovernance(brief.governance, 2, 3, 3, 3) : undefined,
-  };
-  estimated = estimateTokens(next);
-  if (estimated <= budget) return { ...next, budget: { ...next.budget, estimatedTokens: estimated, truncated: true } };
-  const tighter = {
-    ...next,
-    insights: next.insights?.slice(0, 2),
-    next: next.next.slice(0, 3),
-    blockers: next.blockers.slice(0, 6),
-    focus: next.focus.slice(0, 3),
-    decisionsNeeded: next.decisionsNeeded.slice(0, 3),
-    momentum: { ...next.momentum, recent: next.momentum.recent.slice(0, 2) },
-    recentActivity: next.recentActivity?.slice(0, 5),
-    // At the tightest level, drop governance to 1/2/2/2 — the Total fields keep
-    // the real finding count visible so an agent still knows there is more.
-    governance: next.governance ? compactGovernance(next.governance, 1, 2, 2, 2) : undefined,
-  };
-  estimated = estimateTokens(tighter);
-  return { ...tighter, budget: { ...tighter.budget, estimatedTokens: estimated, truncated: true } };
+/**
+ * Render exactly the bytes emitted by the brief commands, including JSON indentation
+ * and the trailing newline. Select the same format when calling buildBrief.
+ */
+export function renderBrief(brief: AgentBrief, format: BriefFormat): string {
+  return renderBriefContent(compactToBudget(brief, format), format);
 }
 
+/** Render without re-entering compaction so measurement sees the exact output bytes. */
+function renderBriefContent(brief: AgentBrief, format: BriefFormat): string {
+  switch (format) {
+    case "json": return `${JSON.stringify(brief, null, 2)}\n`;
+    case "markdown": return renderMarkdownBriefContent(brief);
+    case "prompt": return renderAgentPromptContent(brief);
+    case "slack": return renderSlackBriefContent(brief);
+  }
+}
+
+/**
+ * Settle the estimate's own digit count before measuring the complete rendering.
+ * Increasing from zero reaches a fixed point after at most the number of digits
+ * in a JavaScript string length; disclosure can never create a silent overrun.
+ */
+function measureRenderedBrief(brief: AgentBrief, format: BriefFormat): AgentBrief {
+  const measured = { ...brief, budget: { ...brief.budget, estimatedTokens: 0 } };
+  let estimate = Math.ceil(renderBriefContent(measured, format).length / 4);
+  while (estimate !== measured.budget.estimatedTokens) {
+    measured.budget.estimatedTokens = estimate;
+    estimate = Math.ceil(renderBriefContent(measured, format).length / 4);
+  }
+  return measured;
+}
+
+const BRIEF_DISPLAY_FIELDS = new Set(["title", "whyNow", "reason", "message", "discarded", "detail", "root", "pmVersion", "assignee", "type", "status", "tags", "rankingReasons", "requiredContext"]);
+
+/**
+ * Shorten display fields recursively, retaining identifiers, relationship IDs,
+ * timestamps and executable commands verbatim. Display labels can shorten. The
+ * whitelist avoids turning a truncated command or identity into misleading data.
+ */
+function shortenBriefFields(value: unknown, cap: number, key = ""): unknown {
+  if (typeof value === "string") {
+    return BRIEF_DISPLAY_FIELDS.has(key) && value.length > cap ? `${value.slice(0, cap - 1)}…` : value;
+  }
+  if (Array.isArray(value)) return value.map((entry: unknown) => shortenBriefFields(entry, cap, key));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([field, entry]) => [field, shortenBriefFields(entry, cap, field)]));
+  }
+  return value;
+}
+
+/**
+ * Enforce the chosen rendering in bounded steps: cap ancillary sections, shorten
+ * display fields, then remove entries from the least urgent sections first.
+ * Retained items keep their IDs; merge identity/warning sets remain complete.
+ * Each step accounts for its receipt before testing the ceiling. Failure uses
+ * the existing usage-error contract, with a minimum that also budgets recovery.
+ */
+function compactToBudget(brief: AgentBrief, format: BriefFormat): AgentBrief {
+  const budget = brief.budget.requestedTokens;
+  if (!Number.isSafeInteger(budget) || budget < 1) {
+    throw new CommandError("tokenBudget must be a positive safe integer", EXIT_CODE.USAGE);
+  }
+  let candidate = measureRenderedBrief(brief, format);
+  if (candidate.budget.estimatedTokens <= budget) return candidate;
+
+  const sections = ["insights", "recommendedPmUpdates", "recentActivity", "risks", "staleContext", "blockers", "decisionsNeeded", "focus", "next"] as const;
+  const counts = Object.fromEntries(sections.map((key) => [key, brief[key]?.length ?? 0]));
+  counts.momentum = brief.momentum.recent.length;
+  for (const key of Object.keys(counts)) counts[key] += brief.omissions?.sections[key] ?? 0;
+  if (brief.governance) {
+    counts.duplicateClusters = brief.governance.duplicateClustersTotal;
+    counts.staleInProgress = brief.governance.staleInProgressTotal;
+    counts.storageFindings = brief.governance.storageFindingsTotal;
+    counts.secretFindings = brief.governance.secretFindingsTotal;
+  }
+  if (brief.mergeDecisions) counts.mergeReceipts = brief.mergeDecisions.pendingCount;
+  candidate = { ...candidate, budget: { ...candidate.budget, truncated: true }, omissions: {
+    sections: {}, shortenedFields: brief.omissions?.shortenedFields ?? false,
+    retrieve: "pm list --all; pm get <id>" + (brief.mergeDecisions ? "; pm merge report" : ""),
+  } };
+
+  /** Refresh counts from the original selection and include the receipt in the estimate. */
+  const measure = (): AgentBrief => {
+    const remaining = Object.fromEntries(sections.map((key) => [key, candidate[key]?.length ?? 0]));
+    remaining.momentum = candidate.momentum.recent.length;
+    if (candidate.governance) {
+      remaining.duplicateClusters = candidate.governance.duplicateClusters.length;
+      remaining.staleInProgress = candidate.governance.staleInProgress.length;
+      remaining.storageFindings = candidate.governance.storageFindings.length;
+      remaining.secretFindings = candidate.governance.secretFindings.length;
+    }
+    if (candidate.mergeDecisions) remaining.mergeReceipts = candidate.mergeDecisions.receipts.length;
+    candidate.omissions!.sections = Object.fromEntries(Object.entries(counts)
+      .map(([key, count]) => [key, count - remaining[key]])
+      .filter(([, count]) => Number(count) > 0));
+    candidate = measureRenderedBrief(candidate, format);
+    return candidate;
+  };
+
+  for (const cap of [8, 4, 2]) {
+    candidate = { ...candidate,
+      insights: candidate.insights?.slice(0, cap),
+      recommendedPmUpdates: candidate.recommendedPmUpdates.slice(0, cap),
+      staleContext: candidate.staleContext.slice(0, cap),
+      risks: candidate.risks.slice(0, cap),
+      blockers: candidate.blockers.slice(0, cap),
+      momentum: { ...candidate.momentum, recent: candidate.momentum.recent.slice(0, cap) },
+      recentActivity: candidate.recentActivity?.slice(0, cap),
+      governance: candidate.governance ? compactGovernance(candidate.governance, cap, cap, cap, cap) : undefined,
+    };
+    if (measure().budget.estimatedTokens <= budget) return candidate;
+  }
+  for (const cap of [160, 80, 40, 20]) {
+    const shortened = shortenBriefFields(candidate, cap) as AgentBrief;
+    shortened.omissions!.shortenedFields = candidate.omissions!.shortenedFields || JSON.stringify(shortened) !== JSON.stringify(candidate);
+    candidate = shortened;
+    if (measure().budget.estimatedTokens <= budget) return candidate;
+  }
+
+  // Every selected array is now bounded except nextCount supplied by an API
+  // caller. Halving it keeps the number of iterations logarithmic in that count.
+  const dropOrder = ["insights", "recommendedPmUpdates", "recentActivity", "momentum", "risks", "staleContext", "governance", "mergeDecisions", "blockers", "decisionsNeeded", "focus", "next"] as const;
+  for (const section of dropOrder) {
+    if (section === "momentum") candidate.momentum = { ...candidate.momentum, recent: [] };
+    else if (section === "governance" && candidate.governance) candidate.governance = compactGovernance(candidate.governance, 0, 0, 0, 0);
+    else if (section === "mergeDecisions" && candidate.mergeDecisions) candidate.mergeDecisions = { ...candidate.mergeDecisions, receipts: [] };
+    else if (section !== "governance" && section !== "mergeDecisions") {
+      let entries = candidate[section];
+      const keep = section === "next" || (section === "focus" && brief.next.length === 0) ? 1 : 0;
+      while (entries && entries.length > keep) {
+        entries = entries.slice(0, Math.max(keep, Math.floor(entries.length / 2)));
+        Object.assign(candidate, { [section]: entries });
+        if (measure().budget.estimatedTokens <= budget) return candidate;
+      }
+    }
+    if (measure().budget.estimatedTokens <= budget) return candidate;
+  }
+
+  // Account for the recovery budget's digit count as well as estimatedTokens.
+  let minimum = candidate.budget.estimatedTokens;
+  do {
+    candidate.budget.requestedTokens = minimum;
+    minimum = measure().budget.estimatedTokens;
+  } while (minimum !== candidate.budget.requestedTokens);
+  const recovery = format === "prompt"
+    ? `pm brief prompt --max-tokens ${minimum}`
+    : `pm brief --format ${format} --max-tokens ${minimum}`;
+  throw new CommandError(`Brief cannot fit: minimum budget ${minimum} required; run ${recovery}`, EXIT_CODE.USAGE);
+}
+
+/** Build a ranked brief, enforcing the full chosen rendering or throwing a recoverable usage error. */
 export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBrief {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const now = new Date(generatedAt);
@@ -1698,7 +1830,7 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
     insights,
     governance: governanceIsEmpty(options.governance) ? undefined : options.governance,
     mergeDecisions: mergeDecisionsIsEmpty(options.mergeDecisions) ? undefined : options.mergeDecisions,
-  });
+  }, options.format ?? "json");
 }
 
 function escapeLine(value: unknown): string {
@@ -1885,6 +2017,7 @@ function mergeDecisionKeptPhrase(entry: MergeDecisionEntry): string {
   return entry.preferred === undefined ? "kept side unrecorded" : `kept ${entry.preferred}`;
 }
 
+/** Render pending receipt metadata and discarded values with explicit hidden-receipt totals. */
 function renderMergeDecisionsMarkdown(m: MergeDecisionsSummary | undefined): string[] {
   if (mergeDecisionsIsEmpty(m)) return [];
   const lines: string[] = ["## \u26a0 Pending Merge Decisions", ""];
@@ -1941,6 +2074,7 @@ function mergeDecisionOmittedLines(m: MergeDecisionsSummary): string[] {
   return [`- \u26a0 ${omitted} further pending decision(s) not shown — run \`pm merge report\` for the full list`];
 }
 
+/** Render actionable merge warnings and retrieval hints for receipts omitted from an agent prompt. */
 function renderMergeDecisionsAgentPrompt(m: MergeDecisionsSummary | undefined): string[] {
   if (mergeDecisionsIsEmpty(m)) return [];
   const lines: string[] = ["Pending merge decisions (a peer agent's scalar edit was discarded and is NOT in committed history — your context is compromised):"];
@@ -1969,7 +2103,24 @@ function mergeMarker(item: BriefItem): string {
 }
 
 
+/** Render budget omissions consistently without implying dropped sections are complete. */
+function renderBriefOmissions(brief: AgentBrief): string[] {
+  if (!brief.omissions) return [];
+  const counts = Object.entries(brief.omissions.sections).map(([section, count]) => `${section}=${count}`).join(", ");
+  return [
+    `Omitted section entries: ${counts || "0"}.${brief.omissions.shortenedFields ? " Display fields shortened (…)." : ""}`,
+    `Retrieve full context: ${brief.omissions.retrieve}`,
+    "",
+  ];
+}
+
+/** Render the markdown brief, rechecking its ceiling when the format or input changes. */
 export function renderMarkdownBrief(brief: AgentBrief): string {
+  return renderBrief(brief, "markdown");
+}
+
+/** Assemble the markdown sections and disclosure for the budget measurement pass. */
+function renderMarkdownBriefContent(brief: AgentBrief): string {
   const lines: string[] = [
     "# pm brief",
     "",
@@ -2039,10 +2190,17 @@ export function renderMarkdownBrief(brief: AgentBrief): string {
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`- ${update.itemId}: \`${update.command}\` - ${update.reason}`);
   lines.push("");
+  lines.push(...renderBriefOmissions(brief));
   return `${lines.join("\n")}\n`;
 }
 
+/** Render the slack brief, rechecking its ceiling when the format or input changes. */
 export function renderSlackBrief(brief: AgentBrief): string {
+  return renderBrief(brief, "slack");
+}
+
+/** Assemble the slack sections and disclosure for the budget measurement pass. */
+function renderSlackBriefContent(brief: AgentBrief): string {
   const header = `*pm brief* — ${brief.generatedAt}`;
   const meta = `_${brief.workspace.root} | pm ${brief.workspace.pmVersion} | items ${brief.workspace.itemCount}_ (budget ${brief.budget.requestedTokens} ≈ ${brief.budget.estimatedTokens}${brief.budget.truncated ? ", trimmed" : ""})`;
   const lines: string[] = [header, meta, ""];
@@ -2109,10 +2267,17 @@ export function renderSlackBrief(brief: AgentBrief): string {
   if (brief.recommendedPmUpdates.length === 0) lines.push("_No update suggestions._");
   for (const update of brief.recommendedPmUpdates) lines.push(`• \`${update.itemId}\` \`${update.command}\` — ${update.reason}`);
   lines.push("");
+  lines.push(...renderBriefOmissions(brief));
   return `${lines.join("\n")}\n`;
 }
 
+/** Render the prompt brief, rechecking its ceiling when the format or input changes. */
 export function renderAgentPrompt(brief: AgentBrief): string {
+  return renderBrief(brief, "prompt");
+}
+
+/** Assemble the prompt sections and disclosure for the budget measurement pass. */
+function renderAgentPromptContent(brief: AgentBrief): string {
   const lines: string[] = [
     "You are continuing work in a pm-managed project.",
     "",
@@ -2177,6 +2342,7 @@ export function renderAgentPrompt(brief: AgentBrief): string {
   lines.push("- Do not assume context outside pm items and linked files.");
   lines.push("- Prefer the highest-ranked unblocked prerequisite before dependent work.");
   lines.push("- Record meaningful decisions, tests, and blockers in pm before handing off.");
+  lines.push(...renderBriefOmissions(brief));
   return `${lines.join("\n")}\n`;
 }
 
@@ -2418,6 +2584,7 @@ export function parseNextOrderedIdsOutput(output: string): string[] {
   return uniqueStrings(ordered);
 }
 
+/** Read bounded activity from the canonical CLI, degrading unavailable history to an empty section. */
 export function readRecentActivity(pmRoot: string, limit = 10): BriefActivity[] {
   const safeLimit = Math.max(1, Math.min(limit, 100));
   const result = spawnPm([PM_PATH_OPTION, pmRoot, "activity", "--json", "--compact", "--limit", String(safeLimit)]);
@@ -4491,6 +4658,7 @@ function registerCommands(api: ExtensionApi): void {
       // ok: true and never mentions receipts (unbraind/pm-cli#770).
       const mergeDecisions = await collectPendingMergeDecisions(ctx.pm_root);
       const brief = buildBrief(items, {
+        format,
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
         dependencyOrder: briefDependencyOrder,
         focusIds,
@@ -4511,7 +4679,7 @@ function registerCommands(api: ExtensionApi): void {
         // Skipped under `--dependency-order` so the explicit prerequisite-first sort wins.
         nextOrder: briefDependencyOrder ? undefined : readNextOrderedIds(ctx.pm_root, { limit: 200, assignee: readString(options, "assignee") }),
       });
-      const output = format === "json" ? `${JSON.stringify(brief, null, 2)}\n` : format === "slack" ? renderSlackBrief(brief) : renderMarkdownBrief(brief);
+      const output = renderBrief(brief, format);
       const outputPath = readString(options, "output");
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
@@ -4542,6 +4710,7 @@ function registerCommands(api: ExtensionApi): void {
       });
       const mergeDecisions = await collectPendingMergeDecisions(ctx.pm_root);
       const brief = buildBrief(items, {
+        format: "prompt",
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 2500),
         dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
         focusIds,
