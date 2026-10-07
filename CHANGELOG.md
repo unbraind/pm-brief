@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Enforce the chosen rendered brief token ceiling ([pm-brief-k8no](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-k8no.toon))
+
 ## 2026.10.5 - 2026-10-05
 
 ### Other
