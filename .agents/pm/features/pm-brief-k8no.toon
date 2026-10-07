@@ -2,11 +2,13 @@ id: pm-brief-k8no
 title: Enforce the chosen rendered brief token ceiling
 description: "Enforce rendered token budgets with bounded compaction, omission receipts and explicit cannot-fit recovery. GitHub: https://github.com/unbraind/pm-brief/issues/135"
 type: Feature
-status: in_progress
+status: closed
 priority: 1
 tags: []
 created_at: "2026-10-07T11:04:40.332Z"
-updated_at: "2026-10-07T11:32:39.468Z"
+updated_at: "2026-10-07T12:19:36.359Z"
+closed_at: "2026-10-07T12:19:35.878Z"
+completed_at: "2026-10-07T12:19:35.878Z"
 author: codex-sol
 acceptance_criteria: "Every supported rendered brief fits its character estimate budget or explicitly fails with minimum budget and recovery; regression sweep, revert proof and both release gates pass."
 comments[5]{created_at,author,text}:
@@ -56,4 +58,5 @@ tests[4]:
 docs[2]{path,scope}:
   docs/brief-budget.md,project
   README.md,project
+close_reason: "Merged in #137 (2cdffd9). Budgets now apply to the chosen rendered format (json/markdown/prompt/slack), compacting progressively with omission counts and retrieval hints, or failing with an explicit cannot-fit (minimum budget + recovery command, exit 2). Orchestrator verified with an independent 240-case sweep across all formats: 151 fit, 89 explicit cannot-fit whose stated minimum fits in every case, 0 violations. npm+Bun release:check passed (367 tests). CodeRabbit full review of all 9 files: no findings."
 body: ""
