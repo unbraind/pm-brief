@@ -500,10 +500,10 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     ], {
       generatedAt: "2026-07-21T00:00:00Z",
       includeHistory: true,
-      tokenBudget: 80,
+      tokenBudget: 4000,
     });
     assert.ok(brief.blockers.some((blocker) => blocker.blockedBy === "pm-absent" && blocker.title === undefined));
-    assert.equal(brief.budget.truncated, true);
+    assert.equal(brief.budget.truncated, false);
   });
 
   test("detectStaleContext keeps items that have no updated_at and governance defaults still scan", async () => {
@@ -542,13 +542,11 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
     assert.equal(staleFailure.staleInProgressTotal, 0);
   });
 
-  test("a very small brief budget reaches the tight governance compaction stage", () => {
-    const brief = buildBrief([
+  test("a very small brief budget fails explicitly after governance compaction", () => {
+    assert.throws(() => buildBrief([
       { id: "pm-budget", title: "A very long title that forces repeated compaction", type: "Task", status: "open", priority: 1 },
-    ], { tokenBudget: 1, generatedAt: "2026-07-27T12:00:00Z" });
-    assert.equal(brief.budget.truncated, true);
-    assert.equal(brief.governance, undefined);
-    const compactedGovernance = buildBrief([
+    ], { tokenBudget: 1, generatedAt: "2026-07-27T12:00:00Z" }), /Brief cannot fit: minimum budget/);
+    assert.throws(() => buildBrief([
       { id: "pm-budget-governance", title: "Budget governance", type: "Task", status: "open", priority: 1 },
     ], {
       tokenBudget: 1,
@@ -563,8 +561,7 @@ describe("briefs, governance, and merge-decision renderers cover remaining fallb
         staleThresholdHours: 72,
         generatedAt: "2026-07-27T12:00:00Z",
       },
-    });
-    assert.ok(compactedGovernance.governance);
+    }), /Brief cannot fit: minimum budget/);
   });
 
   test("a preferred_side receipt with no recorded side renders as unrecorded, not as a branch name", () => {
