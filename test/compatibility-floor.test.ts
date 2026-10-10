@@ -125,7 +125,7 @@ test("the development dependency is an exact pin at or above the declared floor"
   assert.equal(
     dev,
     REQUIRED_DEVELOPMENT_VERSION,
-    `development must exact-pin the current approved pm CLI/SDK ${REQUIRED_DEVELOPMENT_VERSION}`,
+    `development must exact-pin the installed pm CLI/SDK ${REQUIRED_DEVELOPMENT_VERSION}`,
   );
 });
 
