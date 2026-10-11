@@ -1,29 +1,47 @@
 id: pm-brief-m8hh
-title: Certify pm-brief on PM CLI/SDK 2026.10.4 and consolidate pending dependency updates
-description: "Pin @unbrained/pm-cli@2026.10.4, pm-ops@2026.10.4 and pm-changelog@2026.10.4 (latest npm), consolidate Dependabot updates (#128 codeql-action SHAs, #129 pm-ops, #130 pm-changelog, #131 pm-cli, #132 @types/node), re-copy the canonical merge-driver launcher from pm-ops 2026.10.4, and prove the full release gate green."
+title: Repair SDK installation metadata contract for automated dependency upgrades
+description: "Repair the package-owned hardcoded SDK development assertion exposed by automated dependency updates. Match the exact pin to independently installed public SDK metadata, retain the separate 2026.8.20 runtime floor, and verify published SDK2026.10.10."
 type: Chore
 status: in_progress
 priority: 2
 tags[2]: cert,deps
 created_at: "2026-10-04T10:28:41.304Z"
-updated_at: "2026-10-04T11:36:19.685Z"
+updated_at: "2026-10-10T04:43:05.689Z"
 author: pi-cert-a
-actual_result: "Updated candidate: exact PM CLI, pm-ops and pm-changelog 2026.10.4; all devDependencies exact, Node types 26.6.4; current Dependabot #128 CodeQL SHA 1c5b675653bb5c22dbe9b12b556ec555138e09fd and #129/#130/#131/#132 consolidated. Greptile 4177156759 fixed by three real broken-install/lookup regression cases; canonical launcher preserved. Direct locked release:check PASS 342/342, zero failures/skips, reported V8 lines=100/branches=97.84/functions=100 with existing thresholds met. Both audits zero vulnerabilities; strict pinned health PASS; packed npm/native Bun brief/next --explain/prompt/stale PASS on real 79-item tracker copy, scratch removed. pm-github 2026.10.4 read-only preview planned=0/synced=0. Required final-head reviews pending; no 100% branch or independent statement coverage claim. Handoff: source-head CI green at 686689baf3cb, zero unresolved threads. NOT READY: Sourcery weekly quota; Cubic monthly quota/skip; Gemini and Copilot have no response after the requested review round. Configured coverage reports 97.84% branches and does not separately measure statements; pm-brief-gtiy remains open. Claim released; item remains open for orchestrator."
-comments[6]{created_at,author,text}:
+actual_result: "SDK2026.10.10 full release:check passes367/367 with zero skips. Packed npm-current/Bun-current/minimum8.20 pass, production audit zero, doc gate107 declarations/7files, changelog and publication attestation pass. Controlled copy rejects manifest-only9999.1.1 mismatch against independently installed SDK; original hardcoded4 assertion failed on SDK9. Configured V8 scope is ONE runtime file: lines/functions100, branches97.96; statements unmeasured. pm-brief-gtiy retains the all-source four100 gap. Required exact-head review remains open."
+comments[8]{created_at,author,text}:
   "2026-10-04T10:37:42.117Z",pi-cert-a,"Gate evidence: npm run release:check green 339/339 (typecheck, release-workflow, build, docstring, coverage, audit:prod 0 vulnerabilities, pack:dry-run, accept:packed, changelog:check with pm-changelog 2026.10.4, publish-attestation ok); ./node_modules/.bin/pm health --strict-exit exits 0; npm audit and npm audit --omit=dev both clean. Launcher re-copied byte-identical from pm-ops@2026.10.4 templates (fail-closed probe on unreadable lookup paths). REQUIRED_DEVELOPMENT_VERSION in test/version-contract.ts raised to 2026.10.4.\n\nDogfood (pm-brief-2026.9.26.tgz packed from this tree, installed into a scratch copy of this repo's real tracker):\n- npm: 'npx -y @unbrained/pm-cli@2026.10.4 brief' rendered the full brief (79 items, budget respected); 'brief next --explain --count 2' ranked pm-brief-4ohy (score 222) and this item pm-brief-m8hh (score 115) with evidence lines.\n- bun: 'bunx --bun @unbrained/pm-cli@2026.10.4 brief prompt' rendered the agent handoff prompt (score 247 top item); 'brief stale' listed 5 stale items.\nScratch copy deleted afterwards.\n\npm-github: installed as managed extension pm-github@2026.10.4; read-only preview 'pm github sync --repo unbraind/pm-brief --dry-run' -> 'No pm items linked to unbraind/pm-brief' planned 0. No issues created/modified, no scheduled sync."
   "2026-10-04T10:40:30.580Z",pi-cert-a,"pm test --run receipt: the linked 'npm run release:check' fails only inside the pm test harness — scripts/accept-packed.ts's throwaway 'npx pm init --defaults --prefix accept' in /tmp/pm-brief-packed-accept exits status 2 ('No tracker exists') because the harness injects the sandbox PM_PATH into the linked command's process tree (same upstream defect class as unbraind/pm-cli#1391, already filed with the pm-ops reproduction). The direct release:check — exactly what CI runs — is green 339/339. Every pm-ops-covered repo with a packed-accept step that initializes a scratch tracker hits this under the harness."
   "2026-10-04T10:52:31.841Z",codex-sol,"Resume from pushed PR #133. Greptile thread 4177156759 is valid: add package-without-manifest, dangling-link and deterministic ENOTDIR lookup fixtures, assert the original installer resolution error and no registered drivers. Keep the copied launcher byte-identical to published pm-ops 2026.10.4. Copy the current Dependabot #128 CodeQL SHA, exact-pin development dependencies, then repeat the full gate and real-tracker packed acceptance."
   "2026-10-04T10:57:15.594Z",codex-sol,"Test-first evidence for Greptile 4177156759: 9/9 launcher tests pass with zero skipped. The ENOTDIR negative control fails against origin/main launcher; canonical pm-ops 2026.10.4 restores a green run. Fixtures assert Cannot find module pm-ops/merge-driver/prepare, forbid the skip notice and replacement ENOTDIR diagnostic, and assert zero registered drivers."
   "2026-10-04T11:13:20.222Z",codex-sol,"Full restart gate: flock /tmp/claude-1000/heavy-gate.lock npm run release:check passed 342/342 tests, zero skipped, all packed acceptance scenarios (npm-current, bun-current, npm-minimum) passed. V8 report: 100% lines / 97.84% branches / 100% functions; the existing coverage gate passes without any threshold or tolerance edits. Both npm audits zero vulnerabilities and npx pm health --strict-exit --require-merge-drivers passes. The PM-linked launcher suite also passes 9/9. Packed real-tracker dogfood: npm pack --silent, install tarball with @unbrained/pm-cli@2026.10.4 into pm-brief-dogfood, package install <tarball> --project copy.complete=true; both npx -y @unbrained/pm-cli@2026.10.4 and bunx --bun -y @unbrained/pm-cli@2026.10.4 execute brief, brief next --explain --count 2, brief prompt and brief stale against 79 actual tracker items. Outputs include ranked evidence, rendered prompts and 5 stale items. Scratch deleted. Read-only github sync preview planned=0/synced=0. Greptile 4177156759 is addressed by the three new behavior fixtures; one exact current CodeQL SHA copied from Dependabot #128. The existing coverage improvement item pm-brief-gtiy remains open."
   "2026-10-04T11:36:17.437Z",codex-sol,"Orchestrator handoff for PR #133: source head 686689baf3cb8a9a0fb113ad6eb596e3ffd52a6c has green Node 22/26 and CodeQL CI; local release/health/audit/dogfood receipts are recorded above. Greptile 4177156759 fixed in 686689b; thread resolved, subsequent reviews found no new issue. Zero unresolved review threads. Required review quorum is unavailable: Sourcery weekly quota; Cubic monthly quota/skip; Gemini and Copilot have no response after the requested review round. Configured coverage reports 97.84% branches and does not separately measure statements; pm-brief-gtiy remains open. All bot comments/reviews/inline findings inspected; useful findings/summaries reacted positively, skip/quota notices negatively, concrete replies posted, addressed threads resolved. Initial review requests sent once per repo; pm-ops received one second-round request after its valid fix. No merge, close, auto-merge, publication or release. Release the claim for orchestrator verification; the certification item remains in progress. Final metadata head will be checked separately before removing the worktree."
-files[6]{path,scope,note}:
-  .github/workflows/codeql.yml,project,2026.10.4 certification
-  package-lock.json,project,2026.10.4 certification
-  package.json,project,2026.10.4 certification
-  scripts/prepare-merge-driver.ts,project,2026.10.4 certification
-  test/prepare-merge-driver.test.ts,project,Greptile 4177156759 regressions
-  test/version-contract.ts,project,2026.10.4 certification
+  "2026-10-10T03:58:18.377Z",codex-sol,"Test-first reproduction: installing published SDK2026.10.9 makes the prior compatibility suite fail actual9 vs hardcoded4. The repaired contract resolves the installed public package.json and validates its exact release identity, preserving the8.20 compatibility floor. Focused suite passes; full release and packed consumers running."
+  "2026-10-10T04:43:04.309Z",codex-sol,Final latest-SDK gate passes367 tests and all3 packed consumers. TDD and manifest-only negative control prove the contract rejects a valid but uninstalled version. Source floor unchanged. Companion session pm-cli-website-session-2026-10-10 links this repair and the remaining whole-source coverage/review boundaries.
+files[7]:
+  - path: .github/workflows/codeql.yml
+    scope: project
+    note: 2026.10.4 certification
+  - path: package-lock.json
+    scope: project
+    note: 2026.10.4 certification
+  - path: package.json
+    scope: project
+    note: 2026.10.4 certification
+  - path: scripts/prepare-merge-driver.ts
+    scope: project
+    note: 2026.10.4 certification
+  - path: test/prepare-merge-driver.test.ts
+    scope: project
+    note: Greptile 4177156759 regressions
+  - path: test/version-contract.ts
+    scope: project
+    note: 2026.10.4 certification
+  - path: test/compatibility-floor.test.ts
+    scope: project
 tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   "npm run release:check",project,pi-cert-a,"2026-10-04T10:37:41.118Z",local_mutation,chore/pm-brief-pm-cli-2026-10-4
   node --test test/prepare-merge-driver.test.ts,project,codex-sol,"2026-10-04T10:57:06.326Z",local_mutation,chore/pm-brief-pm-cli-2026-10-4
+docs[1]{path,scope,note}:
+  docs/sdk-installation-contract.md,project,Independent installed SDK contract and authentic gate limits
 body: ""
