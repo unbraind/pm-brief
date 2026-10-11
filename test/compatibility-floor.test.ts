@@ -6,7 +6,7 @@ import {
   checkExtensionManifestCompatibility,
   type ExtensionManifestCompatibilityManifest,
 } from "@unbrained/pm-cli/sdk";
-import { REQUIRED_DEVELOPMENT_VERSION, REQUIRED_MINIMUM_VERSION } from "./version-contract.ts";
+import { assertToolchainPins, REQUIRED_DEVELOPMENT_VERSION, REQUIRED_MINIMUM_VERSION } from "./version-contract.ts";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
@@ -36,6 +36,10 @@ const extensionManifest = JSON.parse(
 
 const CLI = "@unbrained/pm-cli";
 const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
+
+test("all development toolchain pins agree with lockfile and installed metadata", () => {
+  assertToolchainPins(repoRoot);
+});
 
 /**
  * Two independent systems enforce the pm CLI compatibility floor, and each reads

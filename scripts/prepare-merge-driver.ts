@@ -10,8 +10,8 @@
  * the entry, or a `pm-ops` directory whose package.json is gone) and any
  * installer failure fail the install.
  *
- * Canonical copy: `pm-ops/templates/prepare-merge-driver.ts`. Copy it
- * unchanged to `scripts/prepare-merge-driver.ts`.
+ * The installed package owns the installer behavior. Repository tests enforce
+ * delegation and failure handling without binding to its template bytes.
  */
 
 import { spawnSync } from "node:child_process";

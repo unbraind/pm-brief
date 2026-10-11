@@ -358,14 +358,18 @@ acceptance, and changelog validation. The packed acceptance matrix loads real
 tracker data through npm/npx and Bun/bunx on the current host, plus npm/npx on
 the declared minimum host. Changelog and release-note reads let `pm-changelog`
 resolve the installed pm CLI entry through Node (portable to Windows) and
-explicitly disable both host output bounds.
+explicitly disable both host output bounds. Toolchain development pins come from
+`package.json`; tests require exact versions and matching lockfile root entries,
+locked resolutions, and installed package metadata. Routine toolchain updates
+need only the manifest and lockfile changes. Consumer host requirements remain
+minimum floors, separate from the development pins.
 
 ## Multi-agent merge safety
 
 This repo tracks its project management in `.agents/pm/` and ships a committed `.gitattributes`
 that maps those tracker artifacts to pm-cli's field-aware Git merge drivers, so concurrent-branch
 tracker edits merge cleanly instead of hard-conflicting. The driver **definitions** live in
-per-clone Git config; `npm install` / `npm ci` wires them automatically via the `prepare` script, `scripts/prepare-merge-driver.ts`: the launcher template pm-ops ships, copied unchanged, which a test compares byte for byte with the pinned template. It runs pm-ops's installer, which calls `pm merge install` when the `pm` CLI is on `PATH` and skips with a notice when it is not. A production install of a clone (`npm ci --omit=dev`) has no `pm-ops`, so the launcher skips with one notice, while a stale or broken `pm-ops` fails the install. Registry installs of this package never run `prepare`. Being Node-based, it behaves identically on POSIX shells and Windows `cmd.exe`. To (re)run manually: `npm run merge:install`.
+per-clone Git config; `npm install` / `npm ci` wires them automatically via the `prepare` script, `scripts/prepare-merge-driver.ts`: a launcher that delegates to the installed pm-ops installer. Behavioral tests enforce driver registration, omit-dev and missing-CLI skips, and failure propagation without requiring template equality. The installer calls `pm merge install` when the `pm` CLI is on `PATH` and skips with a notice when it is not. A production install of a clone (`npm ci --omit=dev`) has no `pm-ops`, so the launcher skips with one notice, while a stale or broken `pm-ops` fails the install. Registry installs of this package never run `prepare`. Being Node-based, it behaves identically on POSIX shells and Windows `cmd.exe`. To (re)run manually: `npm run merge:install`.
 
 After merging a branch that touched `.agents/pm/`, reconcile any residual history-hash drift with
 **`pm merge reconcile`** (pm-cli ≥ 2026.7.22): preview with `pm merge reconcile --dry-run`, apply with
