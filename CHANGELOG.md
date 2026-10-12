@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Other
+
+- Repair SDK installation metadata contract for automated dependency upgrades ([pm-brief-m8hh](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-m8hh.toon))
+
 ## 2026.10.8 - 2026-10-08
 
 ### Added

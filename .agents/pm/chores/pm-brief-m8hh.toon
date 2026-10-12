@@ -2,13 +2,17 @@ id: pm-brief-m8hh
 title: Repair SDK installation metadata contract for automated dependency upgrades
 description: "Repair the package-owned hardcoded SDK development assertion exposed by automated dependency updates. Match the exact pin to independently installed public SDK metadata, retain the separate 2026.8.20 runtime floor, and verify published SDK2026.10.10."
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[2]: cert,deps
 created_at: "2026-10-04T10:28:41.304Z"
-updated_at: "2026-10-11T07:35:24.405Z"
+updated_at: "2026-10-11T23:28:01.067Z"
+closed_at: "2026-10-11T23:28:01.059Z"
+completed_at: "2026-10-11T23:28:01.059Z"
 author: pi-cert-a
-actual_result: "Original and actual automated update manifests each pass full npm and Bun release:check: four gates, 384/384 tests per gate, zero failures or skips. Both npm gates use isolated Git configuration. All three packed consumers per gate pass real tracker, clean stderr, bounded estimate 163 and cannot-fit exit 2. Focused suite passes 34/34; checker-only reversion fails 13/16 new metadata cases, restoration passes 16/16. Original manifests restored and npm ci succeeds. Exact pins, lock/installed consistency, minimum floors and installer safety retained. Configured coverage is one runtime file at 100/97.96/100; statements unmeasured and pm-brief-gtiy remains open. Required CI/review gates remain separate."
+resolution: "Implemented and merged in https://github.com/unbraind/pm-brief/pull/144: SDK installation metadata contract validated so Dependabot toolchain bumps stay green"
+expected_result: The acceptance criteria recorded on pm-brief-m8hh are met on main.
+actual_result: "Merged in https://github.com/unbraind/pm-brief/pull/144 after its full CI, an isolated release gate and a CodeRabbit full review with every finding resolved; SDK installation metadata contract validated so Dependabot toolchain bumps stay green"
 comments[28]{created_at,author,text}:
   "2026-10-04T10:37:42.117Z",pi-cert-a,"Gate evidence: npm run release:check green 339/339 (typecheck, release-workflow, build, docstring, coverage, audit:prod 0 vulnerabilities, pack:dry-run, accept:packed, changelog:check with pm-changelog 2026.10.4, publish-attestation ok); ./node_modules/.bin/pm health --strict-exit exits 0; npm audit and npm audit --omit=dev both clean. Launcher re-copied byte-identical from pm-ops@2026.10.4 templates (fail-closed probe on unreadable lookup paths). REQUIRED_DEVELOPMENT_VERSION in test/version-contract.ts raised to 2026.10.4.\n\nDogfood (pm-brief-2026.9.26.tgz packed from this tree, installed into a scratch copy of this repo's real tracker):\n- npm: 'npx -y @unbrained/pm-cli@2026.10.4 brief' rendered the full brief (79 items, budget respected); 'brief next --explain --count 2' ranked pm-brief-4ohy (score 222) and this item pm-brief-m8hh (score 115) with evidence lines.\n- bun: 'bunx --bun @unbrained/pm-cli@2026.10.4 brief prompt' rendered the agent handoff prompt (score 247 top item); 'brief stale' listed 5 stale items.\nScratch copy deleted afterwards.\n\npm-github: installed as managed extension pm-github@2026.10.4; read-only preview 'pm github sync --repo unbraind/pm-brief --dry-run' -> 'No pm items linked to unbraind/pm-brief' planned 0. No issues created/modified, no scheduled sync."
   "2026-10-04T10:40:30.580Z",pi-cert-a,"pm test --run receipt: the linked 'npm run release:check' fails only inside the pm test harness — scripts/accept-packed.ts's throwaway 'npx pm init --defaults --prefix accept' in /tmp/pm-brief-packed-accept exits status 2 ('No tracker exists') because the harness injects the sandbox PM_PATH into the linked command's process tree (same upstream defect class as unbraind/pm-cli#1391, already filed with the pm-ops reproduction). The direct release:check — exactly what CI runs — is green 339/339. Every pm-ops-covered repo with a packed-accept step that initializes a scratch tracker hits this under the harness."
@@ -74,4 +78,5 @@ docs[2]:
     note: Independent installed SDK contract and authentic gate limits
   - path: README.md
     scope: project
+close_reason: "Delivered by https://github.com/unbraind/pm-brief/pull/144 (merged); SDK installation metadata contract validated so Dependabot toolchain bumps stay green"
 body: ""
