@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Adopt the pm SDK 2026.10.13 read_output contract on every pm-brief read command ([pm-brief-ccwo](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-ccwo.toon))
+
 ## 2026.10.12 - 2026-10-12
 
 ### Other
