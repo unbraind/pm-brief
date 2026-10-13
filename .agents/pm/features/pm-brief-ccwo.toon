@@ -1,0 +1,39 @@
+id: pm-brief-ccwo
+title: Adopt the pm SDK 2026.10.13 read_output contract on every pm-brief read command
+description: "pm-cli 2026.10.13 ships pm-extension-read-output-controls: a read-only extension command can declare read_output on its CommandDefinition and the host then applies the universal projection, amount, token-budget and cursor-continuation controls to it. Declare read_output on all nine pm-brief read commands (pm-brief has no writer commands), honour the host controls by returning structured payloads when host read-output options are requested, and cover the contract with real temp trackers through the installed host."
+type: Feature
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-13T12:07:53.603Z"
+updated_at: "2026-10-13T19:51:06.162Z"
+author: pi-agent
+comments[12]{created_at,author,text}:
+  "2026-10-13T12:08:03.273Z",pi-agent,"Adoption design: (1) bump the dev pin, peer floor and manifest pm_min_version to 2026.10.13 so the repo builds and tests against the SDK that actually carries the contract; (2) declare read_output per command - row collections for the two list-shaped reads (brief next: next; brief stale: stale) and singleton row_keys for the document/summary reads (brief, brief prompt, brief momentum, brief since, brief diverge, brief duplicates, brief governance); (3) handlers return the structured payload instead of the pre-rendered document when host read-output controls are requested, so the host output engine owns projection/budget/continuation and the registered renderer stays on the pre-rendered document path."
+  "2026-10-13T13:07:08.545Z",codex-agent,"Continuation review: taking ownership of the uncommitted adoption draft, checking the installed SDK contract, adding packaged-host projection/budget/continuation and declaration-revert tests, and re-running npm and Bun release gates at unchanged thresholds."
+  "2026-10-13T13:15:37.785Z",codex-agent,"Reviewed draft and corrected row contracts for resumable summary collections. Ordinary documents remain on the owned output service; universal controls select structured results. File-output variants reject canonical controls before writing. New packaged-host tests cover all nine reads, with writer refusal and ordinary rendering checks."
+  "2026-10-13T13:21:53.533Z",codex-agent,The required docstring gate reports 25 undocumented existing helper functions in index.ts. Adding concise behavioral documentation without changing those helpers or weakening the gate so the adoption can satisfy the required release checks.
+  "2026-10-13T18:22:22.571Z",codex-agent,"Resumed after provider quota interruption. Re-reading the pinned SDK and reviewing every inherited change, then independently verifying declaration-revert failures, packaged-host behavior, and unchanged npm/Bun release gates before committing and opening the adoption PR."
+  "2026-10-13T18:26:27.396Z",codex-agent,"Fresh npm ci and strict tracker health with required merge drivers pass. Inherited regression assertions failed on host projection semantics, budget-window selection, and SDK harness rejection handling; correcting the assertions against the installed host and expanding fixtures rather than treating the draft as verified."
+  "2026-10-13T18:39:05.532Z",codex-agent,"Found and repaired the inherited ordinary --output summary collision with declared row collections. Preserve JSON/TOON file summaries through an owned output-service discriminator, refuse universal controls before file writes, and test every supported file variant. Cursor fidelity uses explicit row-identity projection where nested details can themselves be budget-compacted. Full npm release verification and declaration-only revert proofs are running; revert experiments use isolated snapshots of the reviewed code."
+  "2026-10-13T18:41:01.433Z",codex-agent,"Behavioral revert proof: copied the current reviewed package into an isolated snapshot, removed only the 9 read_output declarations, rebuilt with npm run build, and ran node --test --test-name-pattern='packaged host' test/read-output-host.test.ts. All 9 selected reader regressions failed (0 passed, 0 skipped), each because the installed host refused universal output controls on the undeclared command. The implementation worktree remained unchanged."
+  "2026-10-13T19:01:31.348Z",codex-agent,"The initial full gate passed existing source coverage (100% lines, 98.27% branches, 100% functions) but exposed six inherited/new fixture assertions. Replaced oversized synthetic identifiers with ordinary IDs, verified exactly-once row identities while allowing disclosed detail compaction, and made budget probing start below the measured projected envelope instead of fixed token steps. Momentum has a roughly 20-token feasible continuation window; its measured-window regression now passes. Ordinary JSON/TOON file summaries and all file-output variants pass. Re-running unchanged complete release gates on the corrected tests."
+  "2026-10-13T19:13:23.600Z",codex-agent,"Corrected reader tests now pass on the supported Node 22 runtime: 13 passed, zero failures/skips. Clean-identity npm run release:check passed 390 tests with coverage 100% lines, 98.27% branches and 100% functions at unchanged thresholds; npm-current, bun-current and npm-minimum packed-consumer scenarios also pass. Applied the npm 10 archive-discovery correction from hosted graph CI to this fixture as well. The Bun gate and linked test receipt are being finalized."
+  "2026-10-13T19:25:50.689Z",codex-agent,"SDK observation for the orchestrator: the installed 2026.10.13 generic string-budget compactor can shorten compound row identifiers longer than 240 characters, which the oversized synthetic duplicate-pair fixture exposed. Reader recovery tests now use ordinary stable IDs and permit disclosed detail compaction. Report this SDK identity-retention gap in the handoff; no SDK edits or new upstream issue are part of this adoption task."
+  "2026-10-13T19:51:03.986Z",codex-agent,"Final verification: clean-identity npm run release:check and bun run release:check each passed 390 tests, zero failures/skips, with coverage 100% lines, 98.27% branches and 100% functions across the configured source. All three packed-consumer scenarios pass under both gates. The strengthened linked node --test test/read-output-host.test.ts run passed 13 tests; the same packaged-host suite also passed on Node 22.23.1. Declaration-only reversion failed all nine readers. Ordinary documents, all file variants, row-identity recovery and writer refusal are verified. The SDK long-identifier compaction gap remains an orchestrator observation. Item stays in progress for orchestrator verification."
+files[7]{path,scope}:
+  index.ts,project
+  manifest.json,project
+  package-lock.json,project
+  package.json,project
+  test/read-output-host.test.ts,project
+  test/renderer-ownership.test.ts,project
+  test/version-contract.ts,project
+tests[4]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,codex-agent,"2026-10-13T13:15:54.974Z",local_mutation,feat/read-output-contract
+  "bun run release:check",project,codex-agent,"2026-10-13T13:16:05.999Z",local_mutation,feat/read-output-contract
+  node --test test/read-output-host.test.ts,project,codex-agent,"2026-10-13T13:27:59.137Z",local_mutation,feat/read-output-contract
+  "env HOME=$(mktemp -d) GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 npm run release:check",project,codex-agent,"2026-10-13T18:39:10.611Z",local_mutation,feat/read-output-contract
+docs[1]{path,scope}:
+  README.md,project
+body: ""

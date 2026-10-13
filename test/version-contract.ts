@@ -35,8 +35,8 @@ export function assertToolchainPins(root: string): void {
 }
 
 /** Oldest pm CLI/SDK release whose runtime can load and execute pm-brief's
- * canonical complete-corpus reader contract. */
-export const REQUIRED_MINIMUM_VERSION = "2026.8.20";
+ * complete-corpus reader and extension read-output contracts. */
+export const REQUIRED_MINIMUM_VERSION = "2026.10.13";
 
 /** Public package metadata resolved from the SDK that actually runs the tests. */
 const installed = JSON.parse(readFileSync(

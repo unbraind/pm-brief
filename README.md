@@ -379,3 +379,34 @@ itself lists each affected stream in its output; `pm history --verify <id>` spot
 content, so `reconcile` only re-greens the hash chain (no data loss) — see the authoritative
 [pm-cli merge-safety guide](https://github.com/unbraind/pm-cli/blob/main/docs/MERGE_SAFETY.md). The
 older blunt `pm history-repair --all` remains available as a lower-level primitive.
+
+## Universal read output controls
+
+Requires pm CLI/SDK **2026.10.13 or later**. Read commands accept the host's
+`--output-include`, `--output-limit`, `--output-budget`, `--output-format`,
+`--output-session`, `--output-cursor`, and `--output-row-contract` controls.
+Use `pm contracts --command "brief next" --full` to discover the row paths.
+
+Ordinary document and diagram formats retain their existing rendering. When
+universal controls are supplied, handlers return structured results so the host
+owns projection, omission receipts, budgets, and continuation. `--output` file
+writing cannot be combined with these controls. Writers remain undeclared.
+An infeasible budget returns `output_budget_exceeded` and CLI exit 2; increase
+the budget before using the result. Budget-compacted declared rows include
+per-path continuation cursors: repeat the same semantic inputs with
+`--output-cursor`, keeping the tracker unchanged, until no cursor remains.
+`--output-limit` is an amount ceiling; cursor recovery applies to budget
+compaction. Command-local selection limits and document budgets still apply.
+
+### Adoption recipe
+
+1. Pin the development SDK to 2026.10.13 and align the peer and manifest floor.
+2. Declare `read_output: { row_keys: [...] }` on readers only; use actual,
+   non-overlapping array or object-map paths, or `[]` for a singleton.
+3. Return a structured object. Keep raw document rendering on its ordinary
+   path, declining the output service when canonical controls are requested.
+   Prevent file writes and unbounded diagram stdout on that path.
+4. Test the packed extension through its installed host against real temporary
+   trackers: projection, budget omission, every-row cursor recovery, and writer
+   rejection. Remove only the declarations, rebuild, and prove the tests fail.
+5. Run unchanged npm and Bun release gates and document their exact results.

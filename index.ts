@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve as pathResolve, relative as pathRelative, sep as pathSep, isAbsolute as pathIsAbsolute } from "node:path";
 import { defineExtension } from "@unbrained/pm-cli/sdk/authoring";
-import type { ExtensionApi, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
+import type { ExtensionApi, FlagDefinition, ServiceOverrideContext } from "@unbrained/pm-cli/sdk/authoring";
 import { certifyCompleteListResult, findSimilarItems, inspectCompleteListResult } from "@unbrained/pm-cli/sdk";
 import type { CommandHandlerContext, SimilarItemMatch, ItemMetadata } from "@unbrained/pm-cli/sdk";
 import {
@@ -553,6 +553,38 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/** Command paths whose pre-rendered documents the output service owns. */
+const BRIEF_COMMANDS = ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates", "brief governance"];
+
+/** Detect canonical controls in either the CLI globals or SDK options. */
+function hostReadOutputControlsRequested(
+  options: Record<string, unknown>,
+  global: CommandHandlerContext["global"],
+): boolean {
+  return ["outputInclude", "outputLimit", "outputBudget", "outputFormat", "outputSession", "outputCursor", "outputRowContract"]
+    .some((key) => options[key] !== undefined || global?.[key as keyof typeof global] !== undefined);
+}
+
+/** Return structured rows for host controls, retaining ordinary document output. */
+function readOutputAwareResult(
+  ctx: CommandHandlerContext,
+  structured: object,
+  rendered: object,
+): object {
+  if (hostReadOutputControlsRequested(ctx.options, ctx.global)) return structured;
+  if (ctx.options.output !== undefined) {
+    return { ...rendered, pmBriefFileSummary: true };
+  }
+  return { ...structured, ...rendered };
+}
+
+/** Reject output controls on the file-writing variant before any file is written. */
+function validateReadOnlyOutput(ctx: CommandHandlerContext): void {
+  if (ctx.options.output !== undefined && hostReadOutputControlsRequested(ctx.options, ctx.global)) {
+    throw new CommandError("Universal output controls cannot be combined with --output; request structured stdout instead.", EXIT_CODE.USAGE);
+  }
+}
+
 function renderedCommandResult(output: string): RenderedCommandResult {
   return { pmBriefRendered: true, output: output.endsWith("\n") ? output : `${output}\n` };
 }
@@ -569,8 +601,17 @@ function isRenderedCommandResult(value: unknown): value is RenderedCommandResult
   );
 }
 
-function renderCommandResult(context: { result?: unknown }): string | null {
-  return isRenderedCommandResult(context.result) ? context.result.output : null;
+/** Preserve owned documents as raw output and decline structured host-controlled results. */
+function renderCommandResultService(context: ServiceOverrideContext): string | { handled: false } {
+  const payload = context.payload as { result?: unknown; format?: unknown } | undefined;
+  const result = payload?.result;
+  if (context.command !== undefined && BRIEF_COMMANDS.includes(context.command) && typeof result === "object" && result !== null && "pmBriefFileSummary" in result && result.pmBriefFileSummary === true) {
+    const summary = Object.fromEntries(Object.entries(result).filter(([key]) => key !== "pmBriefFileSummary"));
+    return payload?.format === "json" ? `${JSON.stringify(summary, null, 2)}\n`
+      : `${Object.entries(summary).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\n`;
+  }
+  return context.command !== undefined && BRIEF_COMMANDS.includes(context.command) && isRenderedCommandResult(result)
+    ? result.output : { handled: false };
 }
 
 function asArray(value: unknown): string[] {
@@ -579,6 +620,7 @@ function asArray(value: unknown): string[] {
   return value.split(",").map((entry) => entry.trim()).filter(Boolean);
 }
 
+/** Separate explicit item IDs from type selectors used by brief focus flags. */
 function parseFocus(values: string[]): { focusIds: string[]; focusTypes: string[] } {
   const focusIds: string[] = [];
   const focusTypes: string[] = [];
@@ -619,6 +661,7 @@ function resolveBriefFormat(
   return wantsJson ? "json" : fallback;
 }
 
+/** Read a trimmed nonempty string from the first populated option spelling. */
 function readString(options: Record<string, unknown>, ...keys: string[]): string | undefined {
   for (const key of keys) {
     const value = options[key];
@@ -627,6 +670,7 @@ function readString(options: Record<string, unknown>, ...keys: string[]): string
   return undefined;
 }
 
+/** Read the first populated positive integer option, using the default only when none is supplied. */
 function readInt(options: Record<string, unknown>, keys: string[], fallback: number): number {
   for (const key of keys) {
     const value = options[key];
@@ -640,6 +684,7 @@ function readInt(options: Record<string, unknown>, keys: string[], fallback: num
   return fallback;
 }
 
+/** Reject negative numeric options while preserving the documented default. */
 function readNonNegativeInt(options: Record<string, unknown>, keys: string[], fallback: number): number {
   for (const key of keys) {
     const value = options[key];
@@ -675,6 +720,7 @@ function isClosedStatus(status: string): boolean {
   return value === "closed" || value === "done" || value === "canceled" || value === "cancelled";
 }
 
+/** Normalize string, array, and object relationship values into item IDs. */
 function parseRelationshipValue(value: unknown, fallbackKind: string): Array<{ to: string; kind: string }> {
   if (!value) return [];
   if (typeof value === "string") return asArray(value).map((to) => ({ to, kind: fallbackKind }));
@@ -688,6 +734,7 @@ function parseRelationshipValue(value: unknown, fallbackKind: string): Array<{ t
   return [];
 }
 
+/** Collect dependency relationships from item metadata for ranking and blocker summaries. */
 export function extractRelationships(item: PmItem): Relationship[] {
   const rels = [
     ...parseRelationshipValue(item.deps, "depends_on"),
@@ -717,6 +764,7 @@ function itemUpdatedAt(item: PmItem): string {
   return text(item.updated_at) || text(item.created_at);
 }
 
+/** Calculate whole elapsed days from a valid timestamp, returning zero for invalid dates. */
 function ageDays(item: PmItem, now: Date): number {
   const raw = itemUpdatedAt(item);
   if (!raw) return 0;
@@ -725,6 +773,7 @@ function ageDays(item: PmItem, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - time) / 86_400_000));
 }
 
+/** Extract linked context paths from metadata without inventing absent links. */
 function objectLinkPaths(value: unknown): string[] {
   if (!value) return [];
   if (typeof value === "string") return asArray(value);
@@ -753,6 +802,7 @@ function activeItemIds(items: PmItem[]): Set<string> {
   return new Set(items.filter((item) => !isClosed(item)).map((item) => item.id));
 }
 
+/** Weight approaching deadlines in the next-work ranking against the supplied clock. */
 function deadlineScore(item: PmItem, now: Date): { score: number; reason?: string } {
   if (!item.deadline) return { score: 0 };
   const deadlineTime = Date.parse(item.deadline);
@@ -768,6 +818,7 @@ function deadlineScore(item: PmItem, now: Date): { score: number; reason?: strin
   return { score: 0 };
 }
 
+/** Combine priority, dependency, staleness, and context evidence into a work ranking. */
 function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date): RankEvidence {
   const reasons: string[] = [];
   let score = 0;
@@ -828,6 +879,7 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
   return { score: Math.round(score), confidence, reasons, blocked, activeDependencies: deps, activeDependents: fanout };
 }
 
+/** Project ranked tracker metadata into the compact agent-facing brief item. */
 function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
   const dependencyIds = uniqueStrings(rels.filter((rel) => rel.from === item.id).map((rel) => rel.to));
   const dependentIds = uniqueStrings(rels.filter((rel) => rel.to === item.id).map((rel) => rel.from));
@@ -874,6 +926,7 @@ function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now
   };
 }
 
+/** Expose individual ranking contributions so callers can explain a recommendation. */
 function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<string>, now: Date, rank = rankItem(item, rels, activeIds, now)): NextItemScoreBreakdown {
   const priority = typeof item.priority === "number" ? item.priority : 5;
   const priorityScore = Math.max(0, 100 - priority * 15);
@@ -907,6 +960,7 @@ function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set
   return uniqueStrings(rels.filter((rel) => rel.to === item.id && isBlockingRelationship(rel) && activeIds.has(rel.from)).map((rel) => rel.from)).length;
 }
 
+/** Keep active work matching the requested assignee before ranking it. */
 function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
   return items
     .filter((item) => !isClosed(item))
@@ -914,6 +968,7 @@ function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
     .filter((item) => !options.statuses?.length || options.statuses.includes(statusOf(item)));
 }
 
+/** Rank eligible work deterministically, respecting explicit dependency ordering. */
 function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[], activeIds = activeItemIds(items)): RankedCandidate[] {
   const candidates = filterCandidates(items, options);
   // When `pm next` supplied a canonical order, it is the authoritative ranking
@@ -953,6 +1008,7 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
     });
 }
 
+/** Select the requested number of ranked work items from the full tracker corpus. */
 export function selectNextItems(items: PmItem[], options: BriefOptions = {}): BriefItem[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const rels = items.flatMap(extractRelationships);
@@ -962,6 +1018,7 @@ export function selectNextItems(items: PmItem[], options: BriefOptions = {}): Br
     .map((candidate) => toBriefItem(candidate.item, rels, items, now, activeIds, candidate.rank));
 }
 
+/** Pair each selected work item with its ranking evidence and active dependency counts. */
 export function explainNextItems(items: PmItem[], options: BriefOptions = {}): NextItemExplanation[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const rels = items.flatMap(extractRelationships);
@@ -977,6 +1034,7 @@ export function explainNextItems(items: PmItem[], options: BriefOptions = {}): N
     }));
 }
 
+/** Report open or active items whose last update exceeds the requested age. */
 export function detectStaleContext(items: PmItem[], options: BriefOptions = {}): StaleContextFinding[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const staleDays = options.staleDays ?? 7;
@@ -988,6 +1046,7 @@ export function detectStaleContext(items: PmItem[], options: BriefOptions = {}):
     .map(({ item, days }) => ({ itemId: item.id, title: titleOf(item), updatedAt: itemUpdatedAt(item) || undefined, daysStale: days }));
 }
 
+/** Resolve the item closure timestamp from current metadata and known aliases. */
 function itemClosedAt(item: PmItem): string {
   // pm-cli 2026.7.11+ stamps closed_at when an item is closed. Older builds
   // never recorded a dedicated close timestamp, so fall back to updated_at
@@ -998,6 +1057,7 @@ function itemClosedAt(item: PmItem): string {
   return text(item.closed_at) || text(item.updated_at);
 }
 
+/** Compute the middle observation, averaging the two middle values for an even sample. */
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -1005,6 +1065,7 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 }
 
+/** Select the requested percentile from sorted cycle-time observations. */
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -1016,6 +1077,7 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+/** Aggregate recent closures into throughput, type counts, and observed cycle times. */
 export function summarizeMomentum(items: PmItem[], options: BriefOptions = {}): MomentumSummary {
   const now = new Date(options.generatedAt ?? Date.now());
   const windowDays = Math.max(0, options.completedDays ?? 7);
@@ -1054,6 +1116,7 @@ export function summarizeMomentum(items: PmItem[], options: BriefOptions = {}): 
   return { windowDays, closedCount: closed.length, byType, throughputPerDay, cycleTime, recent };
 }
 
+/** Identify blocked and poorly documented work that can undermine an agent handoff. */
 export function summarizeRisks(items: PmItem[], options: BriefOptions = {}): BriefRisk[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const risks: BriefRisk[] = [];
@@ -1073,6 +1136,7 @@ export function summarizeRisks(items: PmItem[], options: BriefOptions = {}): Bri
   return risks;
 }
 
+/** Resolve explicit focus IDs and type selectors, disclosing absent or excluded items. */
 function selectedFocus(items: PmItem[], options: BriefOptions): FocusSelection {
   const requestedIds = Array.from(new Set(options.focusIds ?? []));
   const requestedTypes = Array.from(new Set((options.focusTypes ?? []).map((entry) => entry.toLowerCase())));
@@ -1122,6 +1186,7 @@ function summarizeIds(ids: string[]): string {
   return `${shown.join(", ")}${suffix}`;
 }
 
+/** Describe applied selection constraints for the brief workspace context. */
 function describeFilters(options: BriefOptions): string {
   const parts: string[] = [];
   if (options.assignee) parts.push(`assignee=${options.assignee}`);
@@ -1129,6 +1194,7 @@ function describeFilters(options: BriefOptions): string {
   return parts.join(", ");
 }
 
+/** Generate actionable context insights from the selected work and observed risks. */
 function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: FocusSelection, next: BriefItem[]): BriefInsight[] {
   const insights: BriefInsight[] = [];
   if (focusSelection.missingIds.length > 0) {
@@ -4627,11 +4693,13 @@ function registerCommands(api: ExtensionApi): void {
   ];
   api.registerCommand({
     name: "brief",
+    read_output: { row_keys: ["focus", "next", "blockers", "risks", "staleContext", "momentum.recent", "decisionsNeeded", "recommendedPmUpdates"] },
     description: "Generate a token-budgeted agent brief from pm items.",
     intent: "turn pm state into compact next-work context for agents",
     examples: ["pm brief", "pm brief --focus pm-1234 --max-tokens 3000", "pm brief --dependency-order --format json"],
     flags: commonFlags,
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const format = resolveBriefFormat(options, ctx.global, "markdown");
       if (format !== "markdown" && format !== "json" && format !== "slack") throw new CommandError("--format must be markdown, json, or slack", EXIT_CODE.USAGE);
@@ -4683,18 +4751,20 @@ function registerCommands(api: ExtensionApi): void {
       const outputPath = readString(options, "output");
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
-        return { ok: true, format, output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+        return readOutputAwareResult(ctx, brief, { ok: true, format, output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated });
       }
-      return renderedCommandResult(output);
+      return readOutputAwareResult(ctx, brief, renderedCommandResult(output));
     },
   });
   api.registerCommand({
     name: "brief prompt",
+    read_output: { row_keys: ["focus", "next", "blockers", "risks", "staleContext", "momentum.recent", "decisionsNeeded", "recommendedPmUpdates"] },
     description: "Render a compact copy-pasteable agent handoff prompt from pm state.",
     intent: "turn pm state into executable next-turn instructions for coding agents",
     examples: ["pm brief prompt", "pm brief prompt --focus pm-1234 --max-tokens 2000", "pm brief prompt --dependency-order --output HANDOFF.md"],
     flags: commonFlags.filter((flag) => flag.long !== "--format"),
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const { focusIds, focusTypes } = parseFocus(asArray(options.focus));
       const includeHistory = readBool(options, "include-history", "includeHistory");
@@ -4732,13 +4802,14 @@ function registerCommands(api: ExtensionApi): void {
       const outputPath = readString(options, "output");
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
-        return { ok: true, format: "prompt", output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated };
+        return readOutputAwareResult(ctx, brief, { ok: true, format: "prompt", output: outputPath, next: brief.next.length, risks: brief.risks.length, truncated: brief.budget.truncated });
       }
-      return renderedCommandResult(output);
+      return readOutputAwareResult(ctx, brief, renderedCommandResult(output));
     },
   });
   api.registerCommand({
     name: "brief next",
+    read_output: { row_keys: ["next"] },
     description: "Return ranked next work items from pm state.",
     examples: ["pm brief next --count 5", "pm brief next --dependency-order --format json"],
     flags: [
@@ -4750,6 +4821,7 @@ function registerCommands(api: ExtensionApi): void {
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -4776,7 +4848,7 @@ function registerCommands(api: ExtensionApi): void {
       const next = explain ? explained.map((entry) => entry.item) : selectNextItems(allItems, nextOptions);
       if (format === "json") {
         const payload = explain ? { next, explanations: explained } : { next };
-        return renderedCommandResult(`${JSON.stringify(payload, null, 2)}\n`);
+        return readOutputAwareResult(ctx, payload, { ...renderedCommandResult(`${JSON.stringify(payload, null, 2)}\n`), next });
       }
       const textOutput = explain
         ? explained.map((entry) => renderNextExplanationLine(entry)).join("\n")
@@ -4785,11 +4857,12 @@ function registerCommands(api: ExtensionApi): void {
           if (confidence) parts.push(`confidence ${item.confidence}`);
           return parts.join(" | ");
         }).join("\n");
-      return renderedCommandResult(`${textOutput}\n`);
+      return readOutputAwareResult(ctx, { next }, { ...renderedCommandResult(`${textOutput}\n`), next });
     },
   });
   api.registerCommand({
     name: "brief stale",
+    read_output: { row_keys: ["stale"] },
     description: "List stale open or in-progress pm items.",
     examples: ["pm brief stale --days 14", "pm brief stale --format json"],
     flags: [
@@ -4797,6 +4870,7 @@ function registerCommands(api: ExtensionApi): void {
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -4805,13 +4879,14 @@ function registerCommands(api: ExtensionApi): void {
         generatedAt: new Date().toISOString(),
       });
       if (format === "json") {
-        return renderedCommandResult(`${JSON.stringify({ stale }, null, 2)}\n`);
+        return readOutputAwareResult(ctx, { stale }, { ...renderedCommandResult(`${JSON.stringify({ stale }, null, 2)}\n`), stale });
       }
-      return renderedCommandResult(`${stale.map((item) => `${item.itemId}: ${escapeLine(item.title)} - ${item.daysStale} day(s) stale`).join("\n")}\n`);
+      return readOutputAwareResult(ctx, { stale }, { ...renderedCommandResult(`${stale.map((item) => `${item.itemId}: ${escapeLine(item.title)} - ${item.daysStale} day(s) stale`).join("\n")}\n`), stale });
     },
   });
   api.registerCommand({
     name: "brief momentum",
+    read_output: { row_keys: ["momentum.recent"] },
     description: "Summarize recently closed pm items with throughput and cycle time.",
     intent: "give agents velocity context (what shipped, how fast) for planning decisions",
     examples: ["pm brief momentum", "pm brief momentum --days 14", "pm brief momentum --format json"],
@@ -4820,6 +4895,7 @@ function registerCommands(api: ExtensionApi): void {
       { long: "--format", value_name: "format", description: "Output format: text or json", type: "string" },
     ],
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
@@ -4828,7 +4904,7 @@ function registerCommands(api: ExtensionApi): void {
         generatedAt: new Date().toISOString(),
       });
       if (format === "json") {
-        return renderedCommandResult(`${JSON.stringify({ momentum }, null, 2)}\n`);
+        return readOutputAwareResult(ctx, { momentum }, renderedCommandResult(`${JSON.stringify({ momentum }, null, 2)}\n`));
       }
       const lines: string[] = [];
       if (momentum.closedCount === 0) {
@@ -4845,11 +4921,12 @@ function registerCommands(api: ExtensionApi): void {
           lines.push(`  ${close.id}: ${escapeLine(close.title)} (${close.type})${cycle}`);
         }
       }
-      return renderedCommandResult(`${lines.join("\n")}\n`);
+      return readOutputAwareResult(ctx, { momentum }, renderedCommandResult(`${lines.join("\n")}\n`));
     },
   });
   api.registerCommand({
     name: "brief since",
+    read_output: { row_keys: ["items"] },
     description: "Summarize what changed in the workspace since a checkpoint (delta brief).",
     intent: "give an agent resuming work a precise, token-budgeted delta instead of a full re-read",
     examples: ["pm brief since 7d", "pm brief since 2026-07-20 --format json", "pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --by alice"],
@@ -4865,6 +4942,7 @@ function registerCommands(api: ExtensionApi): void {
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const rawCheckpoint = (ctx.args?.[0] ?? "").trim();
       if (!rawCheckpoint) throw new CommandError("pm brief since requires a <checkpoint> (ISO timestamp or relative window like 7d)", EXIT_CODE.USAGE);
@@ -4903,20 +4981,21 @@ function registerCommands(api: ExtensionApi): void {
         const output = `${JSON.stringify(summary, null, 2)}\n`;
         if (outputPath) {
           writeFileSync(outputPath, output, "utf-8");
-          return { ok: true, format, output: outputPath, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+          return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false });
         }
-        return renderedCommandResult(output);
+        return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
       }
       const output = format === "text" ? renderTextDelta(summary) : format === "slack" ? renderSlackDelta(summary) : renderMarkdownDelta(summary);
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
-        return { ok: true, format, output: outputPath, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+        return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false });
       }
-      return renderedCommandResult(output);
+      return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
     },
   });
   api.registerCommand({
     name: "brief diverge",
+    read_output: { row_keys: ["items"] },
     description: "Preview pm item divergence between two git branches before merging (multi-agent collision check).",
     intent: "let an agent see which items both branches touched, and whether the field-aware merge driver will resolve them cleanly, before running git merge",
     examples: ["pm brief diverge", "pm brief diverge main", "pm brief diverge --base main --head feat/other --format json"],
@@ -4932,6 +5011,7 @@ function registerCommands(api: ExtensionApi): void {
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const positionalBase = (ctx.args?.[0] ?? "").trim() || undefined;
       const explicitBase = readString(options, "base");
@@ -5052,20 +5132,21 @@ function registerCommands(api: ExtensionApi): void {
         const output = `${JSON.stringify(summary, null, 2)}\n`;
         if (outputPath) {
           writeFileSync(outputPath, output, "utf-8");
-          return { ok: true, format, output: outputPath, verdict: summary.verdict, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+          return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, verdict: summary.verdict, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false });
         }
-        return renderedCommandResult(output);
+        return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
       }
       const output = format === "text" ? renderTextDivergence(summary) : format === "slack" ? renderSlackDivergence(summary) : renderMarkdownDivergence(summary);
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
-        return { ok: true, format, output: outputPath, verdict: summary.verdict, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false };
+        return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, verdict: summary.verdict, itemsChanged: summary.totals.itemsChanged, truncated: summary.truncated ?? false });
       }
-      return renderedCommandResult(output);
+      return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
     },
   });
   api.registerCommand({
     name: "brief duplicates",
+    read_output: { row_keys: ["pairs"] },
     description: "Sweep the merged tracker for near-duplicate items the create-time advisory cannot see across branches.",
     intent: "close the loop after merging multiple agent branches: report the duplicate pairs that landed on main and suggest a relate remediation for each",
     examples: ["pm brief duplicates", "pm brief duplicates --threshold 0.5 --since 2026-07-25", "pm brief duplicates --format json --limit 5"],
@@ -5078,6 +5159,7 @@ function registerCommands(api: ExtensionApi): void {
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "text")).toLowerCase();
       if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
@@ -5115,21 +5197,22 @@ function registerCommands(api: ExtensionApi): void {
         const outputPath = readString(options, "output");
         if (outputPath) {
           writeFileSync(outputPath, output, "utf-8");
-          return { ok: true, format, output: outputPath, count: summary.count, scanned: summary.scanned };
+          return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, count: summary.count, scanned: summary.scanned });
         }
-        return renderedCommandResult(output);
+        return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
       }
       const output = format === "markdown" ? renderMarkdownDuplicates(summary) : renderTextDuplicates(summary);
       const outputPath = readString(options, "output");
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
-        return { ok: true, format, output: outputPath, count: summary.count, scanned: summary.scanned };
+        return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, count: summary.count, scanned: summary.scanned });
       }
-      return renderedCommandResult(output);
+      return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
     },
   });
   api.registerCommand({
     name: "brief governance",
+    read_output: { row_keys: ["duplicateClusters", "staleInProgress", "storageFindings", "secretFindings"] },
     description: "Surface governance findings (duplicate clusters, stale in-progress, storage integrity, secrets) from sdk/governance scanners.",
     intent: "give an agent or CI a cheap, token-budgeted view of the things that will waste its time: duplicates, dead in-progress work, storage corruption, and committed secrets",
     examples: ["pm brief governance", "pm brief governance --threshold 0.5 --format json", "pm brief governance --stale-hours 168"],
@@ -5140,6 +5223,7 @@ function registerCommands(api: ExtensionApi): void {
       { long: "--output", value_name: "file", description: "Write output to a file", type: "string" },
     ],
     async run(ctx: CommandHandlerContext) {
+      validateReadOnlyOutput(ctx);
       const options = ctx.options as Record<string, unknown>;
       const format = (readString(options, "format") ?? (readBool(options, "json") ? "json" : "text")).toLowerCase();
       if (format !== "text" && format !== "json" && format !== "markdown") throw new CommandError("--format must be text, json, or markdown", EXIT_CODE.USAGE);
@@ -5158,17 +5242,17 @@ function registerCommands(api: ExtensionApi): void {
         const outputPath = readString(options, "output");
         if (outputPath) {
           writeFileSync(outputPath, output, "utf-8");
-          return { ok: true, format, output: outputPath, duplicates: summary.duplicateClustersTotal, stale: summary.staleInProgressTotal, storage: summary.storageFindingsTotal, secrets: summary.secretFindingsTotal };
+          return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, duplicates: summary.duplicateClustersTotal, stale: summary.staleInProgressTotal, storage: summary.storageFindingsTotal, secrets: summary.secretFindingsTotal });
         }
-        return renderedCommandResult(output);
+        return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
       }
       const output = format === "markdown" ? renderMarkdownGovernance(summary) : renderTextGovernance(summary);
       const outputPath = readString(options, "output");
       if (outputPath) {
         writeFileSync(outputPath, output, "utf-8");
-        return { ok: true, format, output: outputPath, duplicates: summary.duplicateClustersTotal, stale: summary.staleInProgressTotal, storage: summary.storageFindingsTotal, secrets: summary.secretFindingsTotal };
+        return readOutputAwareResult(ctx, summary, { ok: true, format, output: outputPath, duplicates: summary.duplicateClustersTotal, stale: summary.staleInProgressTotal, storage: summary.storageFindingsTotal, secrets: summary.secretFindingsTotal });
       }
-      return renderedCommandResult(output);
+      return readOutputAwareResult(ctx, summary, renderedCommandResult(output));
     },
   });
 }
@@ -5226,23 +5310,14 @@ export default defineExtension({
   description: "Token-budgeted agent briefs and next-work plans for pm workspaces",
   activate(api: ExtensionApi) {
     registerCommands(api);
-    if (typeof api.registerRenderer === "function") {
-      const rendererOwnership = {
-        commands: [
-          "brief",
-          "brief prompt",
-          "brief next",
-          "brief stale",
-          "brief momentum",
-          "brief since",
-          "brief diverge",
-          "brief duplicates",
-          "brief governance",
-        ],
-        resultDiscriminator: isRenderedCommandResult,
-      };
-      api.registerRenderer("toon", renderCommandResult, rendererOwnership);
-      api.registerRenderer("json", renderCommandResult, rendererOwnership);
+    if (typeof api.registerService === "function") {
+      // Pre-rendered documents claim the raw output string through the
+      // output_format service so the host's read-output engine never reshapes a
+      // document that is already bounded by --token-budget; any other result is
+      // declined and flows to the host engine, which is what carries the
+      // declared read_output contracts (projection, amount, budget,
+      // continuation) when a caller asks for them.
+      api.registerService("output_format", renderCommandResultService);
     }
   },
 });
