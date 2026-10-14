@@ -2,12 +2,17 @@ id: pm-brief-ccwo
 title: Adopt the pm SDK 2026.10.13 read_output contract on every pm-brief read command
 description: "pm-cli 2026.10.13 ships pm-extension-read-output-controls: a read-only extension command can declare read_output on its CommandDefinition and the host then applies the universal projection, amount, token-budget and cursor-continuation controls to it. Declare read_output on all nine pm-brief read commands (pm-brief has no writer commands), honour the host controls by returning structured payloads when host read-output options are requested, and cover the contract with real temp trackers through the installed host."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-10-13T12:07:53.603Z"
-updated_at: "2026-10-13T19:51:06.162Z"
+updated_at: "2026-10-13T22:21:00.755Z"
+closed_at: "2026-10-13T22:21:00.743Z"
+completed_at: "2026-10-13T22:21:00.743Z"
 author: pi-agent
+resolution: Implemented and merged in #148 (a0b44b5).
+expected_result: The change described by this item is on main.
+actual_result: "Merged in #148 as a0b44b5; checks successful at head 46478e7: CodeQL, audit-windows, codeql, semgrep-cloud-platform/scan, test (22), test (26)."
 comments[12]{created_at,author,text}:
   "2026-10-13T12:08:03.273Z",pi-agent,"Adoption design: (1) bump the dev pin, peer floor and manifest pm_min_version to 2026.10.13 so the repo builds and tests against the SDK that actually carries the contract; (2) declare read_output per command - row collections for the two list-shaped reads (brief next: next; brief stale: stale) and singleton row_keys for the document/summary reads (brief, brief prompt, brief momentum, brief since, brief diverge, brief duplicates, brief governance); (3) handlers return the structured payload instead of the pre-rendered document when host read-output controls are requested, so the host output engine owns projection/budget/continuation and the registered renderer stays on the pre-rendered document path."
   "2026-10-13T13:07:08.545Z",codex-agent,"Continuation review: taking ownership of the uncommitted adoption draft, checking the installed SDK contract, adding packaged-host projection/budget/continuation and declaration-revert tests, and re-running npm and Bun release gates at unchanged thresholds."
@@ -36,4 +41,5 @@ tests[4]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   "env HOME=$(mktemp -d) GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 npm run release:check",project,codex-agent,"2026-10-13T18:39:10.611Z",local_mutation,feat/read-output-contract
 docs[1]{path,scope}:
   README.md,project
+close_reason: "Delivered by #148 \"Adopt read_output controls on brief readers\" (merged as a0b44b5). Checks successful at the PR head 46478e7: CodeQL, audit-windows, codeql, semgrep-cloud-platform/scan, test (22), test (26)."
 body: ""
