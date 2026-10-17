@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Enforce the requested brief budget after the final compaction step ([pm-brief-github-7e06b2eb1b44-135](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-135.toon))
+- Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-84](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-84.toon))
+
 ## 2026.10.14 - 2026-10-14
 
 ### Added
