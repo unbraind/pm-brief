@@ -7,12 +7,12 @@ status: in_progress
 priority: 1
 tags[2]: added,handoff
 created_at: "2026-10-21T18:40:07.479Z"
-updated_at: "2026-10-21T19:42:30.829Z"
+updated_at: "2026-10-21T19:53:38.959Z"
 assignee: codex-agent
 claim_principal: codex-agent
 author: codex-agent
 acceptance_criteria: A changed blocker invalidates acknowledgment; two receivers do not overwrite each other; missing required evidence stays visible; typed SDK and CLI with compact TOON/JSON and actionable refusals; non-git public-tracker validation; npm and Bun release gates at unchanged thresholds
-comments[11]{created_at,author,text}:
+comments[13]{created_at,author,text}:
   "2026-10-21T18:40:49.216Z",codex-agent,"Overlap check: core CLI 2026.10.21 claims manage ownership; brief prompt and since emit prose/deltas; pm-memory stores standing knowledge; pm-context context-handoff/context-usage tracks served facts, not receipt-based understanding. Checked pm-context open PRs: only dependency PR #162, no since-delta PR currently. Coordinate with its since-delta work without implementing history delta here. Acceptance criteria recorded on this new item. Design: immutable revision-bound contracts, independent append-only receiver receipts, live stale/evidence assessment, native SDK storage without git."
   "2026-10-21T18:47:14.450Z",codex-agent,"Implemented typed packet/response/refusal SDK and structured create, preview, ack and show commands. Native Decision bodies hold immutable contracts; lock-scoped idempotent comment appends isolate receivers. Full item content digests include transitive declared blockers and inverse blocks edges. Live status retains missing required links. Added README and JSON example; building no-git, concurrent-process, integrity and budget regressions."
   "2026-10-21T18:51:09.213Z",codex-agent,"Coordination refreshed: pm-context has an active feat/since-delta-pack candidate at 6ed5991, with context-pack since --from/--cursor, ranked changes and omission receipts; no PR is open yet. README explicitly references that candidate and assigns delta/cursor ownership there. Real-data validation: public origin/main tracker, 86 items, 5 read-only previews, 5 revision rows, all 5 synthetic required links remained missing; compact JSON 798-876 bytes (4159 total), conservative ceiling 611-650 tokens, median 4445ms and maximum 5225ms under shared-host load. All 179 copied public files remained hash-identical; snapshot was read-only and outside git."
@@ -24,6 +24,8 @@ comments[11]{created_at,author,text}:
   "2026-10-21T19:30:48.627Z",codex-agent,"Exact-head CI at 4d7827f passes: Node 22 and Node 26 each report 404 tests passed, zero failures/skips. Aggregate coverage is 100/98.28/100 on Node 22 and 100/98.32/100 on Node 26 (lines/branches/functions), with both shipped source files measured. All three packed scenarios pass: npm/current SDK 2026.10.17, Bun/current SDK 2026.10.17, npm/minimum SDK 2026.10.13; each retains two receivers and the missing evidence requirement. Fresh CI strict health and Windows audits pass. PR #166 is ready for review; full local npm/Bun runs continue."
   "2026-10-21T19:38:49.341Z",codex-agent,"Addressed the scoped PR documentation finding: the creation example now uses pm brief handoff create, consistent with preview/ack/show. Runtime source and tests are unchanged. Independent automated review remains unavailable: Greptile trial ended, CodeRabbit skipped automatic review under its repository policy, and Sourcery exhausted its weekly budget. Their statuses are missing review evidence, not approval. No bot mentions or billing/configuration changes were made."
   "2026-10-21T19:42:30.621Z",codex-agent,Created deduplicated follow-up pm-brief-1oo2 for unavailable independent PR reviews; it is open and unclaimed for an owner-approved resolution. The requested feature remains scoped to handoff contracts. Documentation correction and gate/review receipts will be pushed together; no runtime source changed after 4d7827f.
+  "2026-10-21T19:49:59.992Z",codex-agent,Boundary validation found and reproduced a fresh-packet read failure for a legitimate native item title of 2121 characters. Native metadata titles were incorrectly revalidated with the 2000-character obligation-input cap. The reader now preserves native title/status text under the aggregate packet budget while retaining obligation input caps. Added a real-tracker long-title round-trip regression; preliminary local full gates were canceled so final gates can run on the corrected source. Prior 404-test CI remains scoped to the earlier head.
+  "2026-10-21T19:53:30.814Z",codex-agent,"The long-title correction passes the real-tracker round-trip regression and the existing invalid-input cases (2/2). Behavioral revert proof: in a disposable source copy, changed only string validation back to its fixed 2000-character cap while preserving the signature; the new long-title test fails with the expected integrity refusal. The corrected implementation preserves full native titles, and obligation size limits remain enforced and documented."
 files[9]{path,scope}:
   docs/handoff-validation.md,project
   handoff.ts,project
@@ -34,10 +36,11 @@ files[9]{path,scope}:
   test/brief.test.ts,project
   test/handoff.test.ts,project
   test/renderer-ownership.test.ts,project
-tests[3]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+tests[4]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
   "npm run release:check",project,3600,codex-agent,"2026-10-21T19:00:24.570Z",local_mutation,feat/acknowledged-handoffs
   "bun run release:check",project,3600,codex-agent,"2026-10-21T19:00:24.570Z",local_mutation,feat/acknowledged-handoffs
   node --test --experimental-test-coverage --test-coverage-include=handoff.ts test/handoff.test.ts,project,1200,codex-agent,"2026-10-21T19:04:29.361Z",local_mutation,feat/acknowledged-handoffs
+  node --test --test-name-pattern=round-trip test/handoff.test.ts,project,300,codex-agent,"2026-10-21T19:53:38.804Z",local_mutation,feat/acknowledged-handoffs
 docs[3]{path,scope}:
   docs/examples/handoff.json,project
   docs/handoff-validation.md,project

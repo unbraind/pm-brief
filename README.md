@@ -443,7 +443,12 @@ A receiver supplies every obligation id, including evidence that is still missin
 ```
 
 Every collection is explicit; use `[]` in contracts and `{}` in responses when
-there are no obligations. Native TOON is the default; `--json` uses the host's
+there are no obligations. Each input collection has at most 32 entries; the
+blocker/evidence closure has at most 64 items. Keys use ASCII letters, digits,
+dots, underscores or hyphens, start with a letter or digit, and have at most 128
+characters. Obligation text and evidence references have at most 2,000 code units.
+Native source titles retain their full text under the aggregate budget.
+Native TOON is the default; `--json` uses the host's
 structured JSON output. The default conservative output ceiling is 4,000 tokens,
 measured from UTF-8 bytes with twice pretty-JSON size plus framing headroom.
 `--token-budget` accepts up to 64,000. Oversized output refuses with a remedy;

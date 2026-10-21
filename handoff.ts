@@ -74,15 +74,15 @@ const TAG = "pm-brief-handoff";
 const KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 
 /** Refuse malformed or excessive agent input without leaking its raw value. */
-function invalid(): never { throw new HandoffError("invalid", "Invalid handoff input", "Supply the documented contract/response JSON; keys must be unique, text nonempty and collections bounded to 32 entries"); }
+function invalid(): never { throw new HandoffError("invalid", "Invalid handoff input", "Supply the documented contract/response JSON: unique ASCII keys of 1-128 characters, nonempty obligation text/references up to 2000 code units, and collections of at most 32 entries"); }
 /** Require a JSON record and reject arrays and null. */
 function record(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return invalid();
   return value as Record<string, unknown>;
 }
-/** Validate bounded text; preserve response whitespace so retries remain lossless. */
-function string(value: unknown): string {
-  if (typeof value !== "string" || !value.trim() || value.length > 2000) return invalid();
+/** Bound obligation text; native snapshot text uses an explicit cap and the aggregate packet budget. */
+function string(value: unknown, maxLength = 2000): string {
+  if (typeof value !== "string" || !value.trim() || value.length > maxLength) return invalid();
   return value;
 }
 /** Validate identifiers independently from prose and paths. */
@@ -224,7 +224,7 @@ function readPacket(id: string, items: ListedItem[]): { packet: HandoffPacket; s
       const row = record(value);
       if (row.revision !== null && (typeof row.revision !== "string" || !/^[a-f0-9]{64}$/.test(row.revision))) throw new Error();
       if (!Array.isArray(row.blockers) || row.blockers.some(id => typeof id !== "string" || !KEY.test(id))) throw new Error();
-      return { id: key(row.id), revision: row.revision, title: string(row.title), status: string(row.status), blockers: row.blockers as string[] };
+      return { id: key(row.id), revision: row.revision, title: string(row.title, Infinity), status: string(row.status, Infinity), blockers: row.blockers as string[] };
     });
     unique(items.map(row => row.id));
     const document: HandoffDocument = { protocol: PROTOCOL, sender: key(raw.sender), createdAt: string(raw.createdAt), ...contract, items };

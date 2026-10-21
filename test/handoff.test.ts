@@ -256,3 +256,14 @@ test("native append failures preserve typed SDK remedies", async () => {
     });
   } finally { await chmod(decisions, 0o755); }
 });
+
+
+test("native source titles longer than obligation limits round-trip through stored packets", async () => {
+  const title = "Synthetic native title " + "x".repeat(2100);
+  const id = (await client.create({ type: "Task", title })).item.id;
+  const packet = await createHandoff({ focus: [id], questions: [], assumptions: [], requiredEvidence: [] }, options);
+  assert.equal(packet.contract.items[0].title, title);
+  assert.equal((await inspectHandoff(packet.id, options)).packet.contract.items[0].title, title);
+  const result = await acknowledgeHandoff(packet.id, response(packet), options);
+  assert.equal(result.receipts[0].valid, true);
+});
