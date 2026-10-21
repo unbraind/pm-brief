@@ -486,7 +486,8 @@ integrity, budget and tracker reads. Validation and budget checks precede writes
 The commands never change source items or claims; `preview` and `show` are read-only.
 
 This complements [pm-context](https://github.com/unbraind/pm-context)'s
-context delivery/usage receipts and the `feat/since-delta-pack` candidate
+context delivery/usage receipts and the [since-delta candidate](https://github.com/unbraind/pm-context/pull/164)
+(`feat/since-delta-pack`)
 (`pm context-pack since --from <timestamp>` or `--cursor <cursor>`). That candidate
 owns cursor progress, changed-context selection and omission receipts. Use its delta to
 refresh changed context, then create a new handoff here. No history delta engine

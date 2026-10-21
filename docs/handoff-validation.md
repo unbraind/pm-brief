@@ -1,7 +1,8 @@
 # Public tracker validation
 
 The read-only input was the public pm-brief `origin/main` tracker at `46295a6`.
-A disposable copy lived outside git. All 179 copied files were made read-only;
+The validated runtime source was `c55c13b`. A disposable copy lived outside git,
+with git absent from the process PATH. All 179 copied files were made read-only;
 the complete relative-path/SHA-256 inventory matched before and after execution.
 The source checkout and source tracker were untouched.
 
@@ -22,7 +23,7 @@ Measured on 2026-10-21:
 | Compact JSON bytes per packet | 798–876 |
 | Compact JSON bytes total | 4,159 |
 | Conservative token ceiling per packet | 611–650 |
-| Generation latency median / maximum | 4,445 / 5,225 ms |
+| Generation latency median / maximum | 658 / 1,290 ms |
 | Original copied files unchanged | 179 of 179 |
 
 These are read-only preview measurements under shared-host load, not a capacity
