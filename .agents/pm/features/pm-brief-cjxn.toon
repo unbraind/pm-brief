@@ -1,0 +1,41 @@
+id: pm-brief-cjxn
+title: Record acknowledged handoff contracts against item revisions
+description: ""
+type: Feature
+pm_format_version: 2
+status: in_progress
+priority: 1
+tags[2]: added,handoff
+created_at: "2026-10-21T18:40:07.479Z"
+updated_at: "2026-10-21T19:11:58.091Z"
+assignee: codex-agent
+claim_principal: codex-agent
+author: codex-agent
+acceptance_criteria: A changed blocker invalidates acknowledgment; two receivers do not overwrite each other; missing required evidence stays visible; typed SDK and CLI with compact TOON/JSON and actionable refusals; non-git public-tracker validation; npm and Bun release gates at unchanged thresholds
+comments[7]{created_at,author,text}:
+  "2026-10-21T18:40:49.216Z",codex-agent,"Overlap check: core CLI 2026.10.21 claims manage ownership; brief prompt and since emit prose/deltas; pm-memory stores standing knowledge; pm-context context-handoff/context-usage tracks served facts, not receipt-based understanding. Checked pm-context open PRs: only dependency PR #162, no since-delta PR currently. Coordinate with its since-delta work without implementing history delta here. Acceptance criteria recorded on this new item. Design: immutable revision-bound contracts, independent append-only receiver receipts, live stale/evidence assessment, native SDK storage without git."
+  "2026-10-21T18:47:14.450Z",codex-agent,"Implemented typed packet/response/refusal SDK and structured create, preview, ack and show commands. Native Decision bodies hold immutable contracts; lock-scoped idempotent comment appends isolate receivers. Full item content digests include transitive declared blockers and inverse blocks edges. Live status retains missing required links. Added README and JSON example; building no-git, concurrent-process, integrity and budget regressions."
+  "2026-10-21T18:51:09.213Z",codex-agent,"Coordination refreshed: pm-context has an active feat/since-delta-pack candidate at 6ed5991, with context-pack since --from/--cursor, ranked changes and omission receipts; no PR is open yet. README explicitly references that candidate and assigns delta/cursor ownership there. Real-data validation: public origin/main tracker, 86 items, 5 read-only previews, 5 revision rows, all 5 synthetic required links remained missing; compact JSON 798-876 bytes (4159 total), conservative ceiling 611-650 tokens, median 4445ms and maximum 5225ms under shared-host load. All 179 copied public files remained hash-identical; snapshot was read-only and outside git."
+  "2026-10-21T18:58:17.316Z",codex-agent,"Real CLI no-git validation passed: create, preview, concurrent acknowledgments from two independent processes, receiver filtering and native TOON/JSON output. Added machine-readable handoff refusal codes and remedies. Public-data measurements are recorded in docs/handoff-validation.md. Existing release thresholds remain unchanged; final exact-source gates and behavioral revert proof are still pending."
+  "2026-10-21T19:04:17.401Z",codex-agent,"Behavioral revert proof: in a disposable non-git source copy, changed only staleItems to return an empty list. The dedicated changed-blocker regression failed with an AssertionError: actual [] versus the changed blocker id. The package source was untouched. Earlier contention-only failure was rejected as insufficient proof. Added bounded native lock retries for certified reads and idempotent appends; creates never auto-retry."
+  "2026-10-21T19:08:02.275Z",codex-agent,"Supplemental local strict health: history_drift passes, stale work is advisory, and shared-clone merge_fence_drift is gate-failing after generated install changes were excluded from this feature. No merge configuration or receipt repair was attempted under the no-git scope rule. Fresh CI installs its own native setup; this local operational finding is separate from the feature and release checks."
+  "2026-10-21T19:11:57.753Z",codex-agent,"Tracked focused run exposed an invalid test assumption: certified reads can succeed while a native item lock is held. Replaced that assertion with a real locked receipt append, verified its typed refusal, then released the lock and verified idempotent retry. Targeted exhausted-lock and filesystem append-refusal regressions both pass; no SDK mocks. The implementation did not need a behavior change for this test correction."
+files[9]{path,scope}:
+  docs/handoff-validation.md,project
+  handoff.ts,project
+  index.ts,project
+  package.json,project
+  scripts/accept-packed.ts,project
+  scripts/validate-handoffs.ts,project
+  test/brief.test.ts,project
+  test/handoff.test.ts,project
+  test/renderer-ownership.test.ts,project
+tests[3]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run release:check",project,3600,codex-agent,"2026-10-21T19:00:24.570Z",local_mutation,feat/acknowledged-handoffs
+  "bun run release:check",project,3600,codex-agent,"2026-10-21T19:00:24.570Z",local_mutation,feat/acknowledged-handoffs
+  node --test --experimental-test-coverage --test-coverage-include=handoff.ts test/handoff.test.ts,project,1200,codex-agent,"2026-10-21T19:04:29.361Z",local_mutation,feat/acknowledged-handoffs
+docs[3]{path,scope}:
+  docs/examples/handoff.json,project
+  docs/handoff-validation.md,project
+  README.md,project
+body: "Produce explicit questions, unresolved assumptions and required evidence with immutable packet revisions and independent receiver receipts. Existing brief prompt/since produce prose; core claims own work ownership; pm-memory owns standing knowledge; pm-context owns context delivery and since-delta. No since-delta implementation belongs here."
