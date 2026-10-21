@@ -267,3 +267,16 @@ test("native source titles longer than obligation limits round-trip through stor
   const result = await acknowledgeHandoff(packet.id, response(packet), options);
   assert.equal(result.receipts[0].valid, true);
 });
+
+
+test("native identifiers and blocker references round-trip without obligation key caps", async () => {
+  const missing = "external-" + "x".repeat(150);
+  const id = (await client.create({ type: "Task", title: "Long native identity and missing blocker", id: "x".repeat(150), dep: [`id=${missing},kind=blocked_by`], allowUnresolvedDeps: true })).item.id;
+  assert.ok(id.length > 128);
+  const packet = await createHandoff({ focus: [id], questions: [], assumptions: [], requiredEvidence: [{ id: "report", item: id, kind: "docs", ref: "docs/report.md" }] }, options);
+  assert.ok(packet.contract.items.some(row => row.id.length > 128 && row.revision === null));
+  const status = await inspectHandoff(packet.id, options);
+  assert.deepEqual(status.packet.contract.focus, [id]);
+  const result = await acknowledgeHandoff(packet.id, response(packet), options);
+  assert.equal(result.receipts[0].valid, true); assert.deepEqual(result.receipts[0].missingEvidence, ["report"]);
+});

@@ -71,10 +71,10 @@ export class HandoffError extends Error {
 const PROTOCOL = "pm-brief.handoff/v1";
 const ACK_PREFIX = "pm-brief.ack/v1 ";
 const TAG = "pm-brief-handoff";
-const KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 /** Refuse malformed or excessive agent input without leaking its raw value. */
-function invalid(): never { throw new HandoffError("invalid", "Invalid handoff input", "Supply the documented contract/response JSON: unique ASCII keys of 1-128 characters, nonempty obligation text/references up to 2000 code units, and collections of at most 32 entries"); }
+function invalid(): never { throw new HandoffError("invalid", "Invalid handoff input", "Supply the documented contract/response JSON: unique ASCII obligation/actor keys of 1-128 characters, native item identifiers using safe ASCII characters, nonempty obligation text/references up to 2000 code units, and collections of at most 32 entries"); }
 /** Require a JSON record and reject arrays and null. */
 function record(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return invalid();
@@ -86,7 +86,7 @@ function string(value: unknown, maxLength = 2000): string {
   return value;
 }
 /** Validate identifiers independently from prose and paths. */
-function key(value: unknown): string { const result = string(value); if (!KEY.test(result)) return invalid(); return result; }
+function key(value: unknown, maxLength = 128): string { const result = string(value, maxLength); if (!KEY.test(result)) return invalid(); return result; }
 /** Require explicitly supplied, bounded collections. */
 function array(value: unknown): unknown[] { if (!Array.isArray(value) || value.length > 32) return invalid(); return value; }
 /** Refuse duplicate obligation ids rather than losing receiver responses in an object map. */
@@ -99,12 +99,12 @@ function prompts(value: unknown): HandoffPrompt[] {
 /** Validate and normalize the SDK and CLI contract through the same runtime boundary. */
 export function parseHandoffContract(value: unknown): HandoffContract {
   const input = record(value);
-  const focus = unique(array(input.focus).map(key));
+  const focus = unique(array(input.focus).map(value => key(value, Infinity)));
   if (focus.length === 0) return invalid();
   const requiredEvidence = array(input.requiredEvidence).map((value): HandoffEvidence => {
     const row = record(value);
     if (row.kind !== "docs" && row.kind !== "files" && row.kind !== "tests") return invalid();
-    return { id: key(row.id), item: key(row.item), kind: row.kind, ref: string(row.ref) };
+    return { id: key(row.id), item: key(row.item, Infinity), kind: row.kind, ref: string(row.ref) };
   });
   unique(requiredEvidence.map(row => row.id));
   return { focus, questions: prompts(input.questions), assumptions: prompts(input.assumptions), requiredEvidence };
@@ -164,10 +164,11 @@ function revisions(contract: HandoffContract, items: ListedItem[]): HandoffRevis
   const pending = [...contract.focus, ...contract.requiredEvidence.map(row => row.item)];
   const result = new Map<string, HandoffRevision>();
   for (const id of pending) {
+    key(id, Infinity);
     if (result.has(id)) continue;
     if (result.size >= 64) throw new HandoffError("budget", "Handoff dependency closure exceeds 64 items", "Split the contract into smaller focused handoffs");
     const item = rows.get(id); const deps = item ? blockers(item, rows) : [];
-    result.set(id, { id, revision: item ? digest(item) : null, title: item?.title ?? "Missing item", status: item?.status ?? "missing", blockers: deps });
+    result.set(id, { id, revision: item ? digest(item) : null, title: item ? string(item.title, Infinity) : "Missing item", status: item ? string(item.status, Infinity) : "missing", blockers: deps });
     pending.push(...deps);
   }
   return [...result.values()].sort((a, b) => a.id.localeCompare(b.id, "en"));
@@ -211,7 +212,7 @@ export async function createHandoff(input: HandoffContract, options: HandoffOpti
 }
 /** Decode only recognized packet artifacts and verify their content-addressed body before use. */
 function readPacket(id: string, items: ListedItem[]): { packet: HandoffPacket; source: ListedItem } {
-  const source = items.find(item => item.id === key(id));
+  const source = items.find(item => item.id === key(id, Infinity));
   if (!source) throw new HandoffError("missing", "Handoff packet does not exist", "Use the packet id returned by pm brief handoff create");
   try {
     if (!source.tags.includes(TAG) || typeof source.body !== "string") throw new Error();
@@ -224,7 +225,7 @@ function readPacket(id: string, items: ListedItem[]): { packet: HandoffPacket; s
       const row = record(value);
       if (row.revision !== null && (typeof row.revision !== "string" || !/^[a-f0-9]{64}$/.test(row.revision))) throw new Error();
       if (!Array.isArray(row.blockers) || row.blockers.some(id => typeof id !== "string" || !KEY.test(id))) throw new Error();
-      return { id: key(row.id), revision: row.revision, title: string(row.title, Infinity), status: string(row.status, Infinity), blockers: row.blockers as string[] };
+      return { id: key(row.id, Infinity), revision: row.revision, title: string(row.title, Infinity), status: string(row.status, Infinity), blockers: row.blockers as string[] };
     });
     unique(items.map(row => row.id));
     const document: HandoffDocument = { protocol: PROTOCOL, sender: key(raw.sender), createdAt: string(raw.createdAt), ...contract, items };
@@ -311,8 +312,8 @@ export function registerHandoffCommands(api: ExtensionApi): void {
           const options = commandOptions(ctx);
           if (action === "preview") return await previewHandoff(parseHandoffContract(await inputFile(ctx.options.input)), options);
           if (action === "create") return await createHandoff(parseHandoffContract(await inputFile(ctx.options.input)), options);
-          if (action === "ack") return await acknowledgeHandoff(key(ctx.args[0]), parseHandoffResponse(await inputFile(ctx.options.input)), options);
-          return await inspectHandoff(key(ctx.args[0]), options, ctx.options.receiver === undefined ? undefined : key(ctx.options.receiver));
+          if (action === "ack") return await acknowledgeHandoff(key(ctx.args[0], Infinity), parseHandoffResponse(await inputFile(ctx.options.input)), options);
+          return await inspectHandoff(key(ctx.args[0], Infinity), options, ctx.options.receiver === undefined ? undefined : key(ctx.options.receiver));
         } catch (error) {
           const refusal = error instanceof HandoffError ? error : new HandoffError("tracker", "Handoff operation could not complete", "Run pm health and check tracker permissions before retrying");
           throw createPmCliExpectedError(`handoff ${refusal.code}: ${refusal.message}. Remedy: ${refusal.remedy}`, { exitCode: refusal.code === "stale" ? 3 : 2, context: { code: `handoff_${refusal.code}`, required: refusal.remedy } });
