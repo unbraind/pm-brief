@@ -425,7 +425,7 @@ by the same author add nothing. Claims continue to own work ownership.
 export PM_AUTHOR=sender
 # Replace the focus/evidence item ids in docs/examples/handoff.json.
 pm brief handoff preview --input docs/examples/handoff.json --json
-npm brief handoff create --input docs/examples/handoff.json --json
+pm brief handoff create --input docs/examples/handoff.json --json
 # Save the returned id and digest. Then write response.json, as shown below.
 PM_AUTHOR=receiver-a pm brief handoff ack <packet-id> --input response.json --json
 pm brief handoff show <packet-id> --receiver receiver-a
