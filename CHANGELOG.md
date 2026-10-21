@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Enable the gated GitHub issue sync ([pm-brief-gp5o](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-gp5o.toon))
+- Adopt pm-github 2026.10.16: default-branch-safe gated sync and daily gated closeout PRs ([pm-brief-b7dy](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-b7dy.toon))
+
+### Fixed
+
+- The publish-attestation gate misses a publish routed through an unquoted shell variable ([pm-brief-tai3](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-tai3.toon))
+- The release job authenticated with a stored npm token that expired, so publishing stopped while every other gate stayed green ([pm-brief-s83v](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-s83v.toon))
+- A release run bumped and committed a new version every night while publishing was impossible, because the only externally-failable step runs last ([pm-brief-4ohy](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-4ohy.toon))
+
+### Other
+
+- Enable GitHub CodeQL code scanning ([pm-brief-1p5o](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-1p5o.toon))
+
 ## 2026.10.21 - 2026-10-21
 
 ### Fixed
