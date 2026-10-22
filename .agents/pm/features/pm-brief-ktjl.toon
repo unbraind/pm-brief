@@ -6,18 +6,21 @@ status: in_progress
 priority: 1
 tags[2]: added,decision-alternatives
 created_at: "2026-10-22T19:20:42.542Z"
-updated_at: "2026-10-22T19:36:40.357Z"
+updated_at: "2026-10-22T19:44:20.729Z"
 assignee: codex-agent
 claim_principal: codex-agent
 author: codex-agent
 acceptance_criteria: Conflicting outcomes remain separate; every sentence maps to recorded evidence; token limits include citations and omissions.
-comments[5]{created_at,author,text}:
+comments[8]{created_at,author,text}:
   "2026-10-22T19:21:21.689Z",codex-agent,"Overlap check completed against core Plan workflow and sibling pm-review, pm-context and pm-memory documentation. Existing merge receipts and acknowledged handoffs are distinct. Design: deterministic extractive comparison of explicitly selected native items using certified full SDK reads; retain separate outcomes and blocker context, cite exact field pointers and character ranges, disclose omitted optional excerpts, refuse if mandatory context cannot fit. No model, ranking, writes or git dependency. Current registry CLI is 2026.10.22; tracker writes use the unchanged pinned 2026.10.17 SDK."
   "2026-10-22T19:30:04.241Z",codex-agent,"Initial public-data validation: archived public origin/main tracker (88 items) into a plain read-only scratch directory. Compared two historical merge-decision records; all 25 emitted citations resolved exactly, 23 optional paragraphs disclosed as omitted, JSON 7800 bytes / 1950 native estimated tokens, conservative ceiling 3964 under budget 4000, build 3375 ms. Full-copy SHA-256 stayed unchanged. Targeted fixtures exposed test setup assumptions (custom SDK option names require camelCase; TOON is the native default, not a --toon flag); corrected both. Recovery commands are being strengthened to request unbounded native reads, then final measurements will be refreshed."
   "2026-10-22T19:32:21.613Z",codex-agent,"Final public-data validation passed with an empty executable search path: 88 certified rows, 2 alternatives, 25/25 exact citations, 23 disclosed omissions, 7843 JSON bytes including newline, 1961 native estimated tokens, conservative ceiling 3986/4000, 4115 ms builder time. Entire read-only copy unchanged; source main commit and before/after SHA-256 are recorded in docs/decision-alternatives-validation.md. No hosted or private data was read."
   "2026-10-22T19:32:37.777Z",codex-agent,"Behavioral revert proof: temporarily replaced only buildDecisionAlternatives with the absent-comparison baseline (empty alternatives), preserving public exports and command registration. node --test --test-reporter=tap --test-name-pattern=\"conflicting recorded outcomes\" test/alternatives.test.ts reached the behavioral assertion and failed 0/1: expected the two selected ids, received []. Restored the exact source (SHA-256 c37841217c81000f660b2a1ac608cfa8fde788449675ee72f47c2f6a0584ee8b). The complete focused suite had passed 7/7 before the final recovery-command improvement; now running all linked targeted checks against the restored implementation."
   "2026-10-22T19:36:28.556Z",codex-agent,"Final linked checks passed 3/3 via pm test --run --progress --timeout 600: targeted suite 7/7 (zero fail/skip/cancel/todo), source and test typechecks, and docstring lint 11 files / 155 declarations. git diff --check passed. Tracker test-result recording is disabled by existing policy, so this comment preserves the measured results. Local strict health reports clone-local pm-github host-version skew (pinned 2026.10.17 versus installed extension host 2026.10.22) and pre-existing merge-fence drift; unrelated driver/extension configuration was left untouched. Fresh-checkout CI health and full npm/Bun release gates remain required."
-files[8]{path,scope}:
+  "2026-10-22T19:39:05.297Z",codex-agent,"Implementation committed as 8d4acdb05ece9356b9012a8505bf46ca510062c8 and PR https://github.com/unbraind/pm-brief/pull/168 is open ready for review. Full npm and Bun release-gate matrix plus fresh-checkout Node 22/26 health/coverage and Windows audit are running at https://github.com/unbraind/pm-brief/actions/runs/39841866860. No merge or release is authorized; item remains in_progress for orchestrator verification."
+  "2026-10-22T19:42:44.634Z",codex-agent,"First CI run exposed two integration test-contract issues: the older brief command inventory also needed the new command, and the publish-attestation auditor correctly refused a shell executable supplied by an expression. Updated the inventory and replaced the expression command with literal npm and bun release-check steps selected by matrix conditions. Feature regressions passed; complete-source coverage was 100% lines / 98.23% branches / 100% functions, above unchanged thresholds. Initial suite result was 411/413, so it is explicitly not passing full-gate evidence. Running the two affected contracts locally before a fresh CI run."
+  "2026-10-22T19:44:20.729Z",codex-agent,"Integration fixes passed the targeted contracts through pm test --run --only-last --progress --timeout 600: 3/3 tests, zero fail/skip/cancel/todo. Source typecheck, docstring lint and the standalone publish-attestation verifier also passed. The feature implementation and its public-data measurements are unchanged. Preparing a new CI run with literal npm/Bun commands and the complete command inventory."
+files[9]{path,scope}:
   .github/workflows/ci.yml,project
   alternatives.ts,project
   index.ts,project
@@ -25,11 +28,13 @@ files[8]{path,scope}:
   scripts/accept-packed.ts,project
   scripts/validate-alternatives.ts,project
   test/alternatives.test.ts,project
+  test/brief.test.ts,project
   test/renderer-ownership.test.ts,project
-tests[3]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+tests[4]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   "npm run build && npm run build:test && node --test test/alternatives.test.ts test/renderer-ownership.test.ts",project,codex-agent,"2026-10-22T19:28:35.768Z",local_mutation,feat/decision-alternatives
   npm run typecheck,project,codex-agent,"2026-10-22T19:28:35.768Z",local_mutation,feat/decision-alternatives
   npm run docstring,project,codex-agent,"2026-10-22T19:28:35.768Z",local_mutation,feat/decision-alternatives
+  "node --test --test-name-pattern=\"extension registers brief commands|this repository\" test/brief.test.ts test/verify-release-publish-attestation.test.ts",project,codex-agent,"2026-10-22T19:43:18.437Z",local_mutation,feat/decision-alternatives
 docs[3]{path,scope}:
   docs/decision-alternatives-validation.md,project
   docs/examples/alternatives.md,project
