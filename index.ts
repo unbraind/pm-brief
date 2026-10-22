@@ -1,3 +1,6 @@
+import { registerDecisionAlternativesCommand } from "./alternatives.ts";
+export { buildDecisionAlternatives, DecisionAlternativesError } from "./alternatives.ts";
+export type { DecisionExcerpt, DecisionAlternative, DecisionAlternativesDigest, DecisionAlternativesOptions, DecisionAlternativesRefusalCode } from "./alternatives.ts";
 import { registerHandoffCommands } from "./handoff.ts";
 export { previewHandoff, createHandoff, acknowledgeHandoff, inspectHandoff, parseHandoffContract, parseHandoffResponse, HandoffError } from "./handoff.ts";
 export type { HandoffContract, HandoffDocument, HandoffEvidence, HandoffOptions, HandoffPacket, HandoffPrompt, HandoffReceipt, HandoffRefusalCode, HandoffResponse, HandoffRevision, HandoffStatus } from "./handoff.ts";
@@ -4677,6 +4680,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
  */
 function registerCommands(api: ExtensionApi): void {
   registerHandoffCommands(api);
+  registerDecisionAlternativesCommand(api);
   const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },

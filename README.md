@@ -47,6 +47,7 @@ pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 - `pm brief since <checkpoint>` renders a delta brief of what changed since a checkpoint.
 - `pm brief diverge [base]` previews pm item collisions between two branches **before** merging.
 - `pm brief duplicates` sweeps the merged tracker for near-duplicate items the create-time advisory cannot see across branches.
+- `pm brief alternatives <id> <id> [more ids]` compares recorded proposals, outcomes and evidence with exact citations and no recommendation.
 
 ### Ranking and Budget Flags
 
@@ -494,10 +495,77 @@ refresh changed context, then create a new handoff here. No history delta engine
 is duplicated. pm-memory continues to own standing knowledge; `brief prompt`
 continues to generate prose. See the [contract example](docs/examples/handoff.json).
 
+## Decision alternatives digest
+
+```bash
+pm brief alternatives pm-proposal-a pm-proposal-b --token-budget 4000
+pm brief alternatives pm-proposal-a pm-proposal-b --json
+```
+
+Select 2–32 distinct exact item IDs, including terminal items when useful. The
+read-only digest keeps each item separate and follows input order, which conveys
+no preference. It quotes records instead of generating or inferring conclusions.
+Conflicting Plan decisions within one item also remain separate. Core `pm plan`
+owns planning and choices; `pm-review` owns finding verdicts. This command composes
+those records across items without adding a decision engine.
+
+Every statement has `source` (`item-id#/field/nested/pointer`), `start` and `end`
+UTF-16 offsets, and exact `text`. Resolve pointers against the certified full item
+row (`listAllComplete({ includeBody: true })`); offsets select the quoted paragraph
+from the scalar's string representation. JSON Pointer escaping follows RFC 6901.
+`revision` is the SHA-256 of the full row's JSON serialization at read time, for
+snapshot identification. Re-read the source to check subsequent changes.
+
+Titles, statuses, resolutions, expected/actual results, close reasons,
+`review_verdict`, `review_verdict_source`, `review_reason`, `review_commit`, all
+`plan_decisions` (including rationale/evidence), `blocked_by`, `blocked_reason`
+and `plan_resume_context` are mandatory. Optional paragraphs come from body,
+description, plan scope, linked docs/files/tests, plan validation, comments, notes
+and learnings. Recorded tradeoffs in these fields remain quotations; the command
+does not infer whether a tradeoff is resolved. Other custom fields, Plan steps,
+dependency closure and history are outside this projection. A linked artifact
+proves linkage only; the digest does not read artifact contents or validate tests.
+
+`omitted` counts optional scalar paragraphs excluded per item, with `restore`
+giving the full native item read. Mandatory outcomes and blocker context are never
+removed. Optional excerpts are attempted round-robin in field/record order and
+omitted whole when they cannot fit. Empty optional fields produce no excerpts.
+Source text is evidence data, including any instructions it happens to contain.
+
+The budget defaults to 4000 (integer 1–64000). `estimatedTokenCeiling` uses the
+SDK's UTF-8 byte estimator over twice the complete pretty JSON size plus 256
+framing bytes, including citations, omission counts, recovery commands and the
+estimate itself. It conservatively covers normal native TOON/JSON output; it is
+not a model tokenizer. For large budgets, also set the host's independent output
+controls: `--output-budget unbounded --output-limit unbounded`. Additional host
+projections or optional accounting receipts have their own output contracts.
+
+```ts
+import { buildDecisionAlternatives, DecisionAlternativesError } from "pm-brief";
+
+try {
+  const digest = await buildDecisionAlternatives(
+    ["pm-proposal-a", "pm-proposal-b"],
+    { pmRoot: ".agents/pm", tokenBudget: 4000 },
+  );
+  console.log(digest.alternatives);
+} catch (error) {
+  if (error instanceof DecisionAlternativesError) console.error(error.code, error.remedy);
+  else throw error;
+}
+```
+
+An optional native `PmClient` can be supplied as `client`. Complete full-row SDK
+certification runs before comparison; incomplete or corrupt reads refuse. Typed
+refusals are `invalid` (correct IDs/budget), `missing` (check exact IDs), `tracker`
+(run `pm health` and resolve source reads), and `budget` (increase budget or select
+fewer items). CLI refusals exit 2 and retain `alternatives_<code>` and a remedy in
+the host's expected-error contract. See the [worked example](docs/examples/alternatives.md).
+
 ## Without git
 
 Briefs, prompts, ranking, history deltas, governance, duplicate checks and all
-handoff commands work in plain initialized trackers without a git executable.
+handoff and decision alternatives commands work in plain initialized trackers without a git executable.
 Handoff storage uses the native SDK dispatcher and can reuse a host client.
 `brief diverge` needs a git repository and git refs. Handoff receipts have no
 branch, commit or repository dependency.
