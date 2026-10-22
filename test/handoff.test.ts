@@ -5,7 +5,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
-import { acquireLock, PmClient } from "@unbrained/pm-cli/sdk";
+import { acquireLock, locateItem, PmClient } from "@unbrained/pm-cli/sdk";
 import { activateExtensionForTest, runRegisteredCommandForTest } from "@unbrained/pm-cli/sdk/testing";
 import extension, { acknowledgeHandoff, createHandoff, inspectHandoff, previewHandoff, parseHandoffContract, parseHandoffResponse, HandoffError } from "../index.ts";
 import type { HandoffContract, HandoffOptions, HandoffPacket, HandoffResponse } from "../index.ts";
@@ -62,6 +62,36 @@ test("contract preview is read-only and revisions include full source rows and b
   assert.deepEqual(packet.contract.items.find(row => row.id === focus)?.blockers, [blocker]);
   assert.match(packet.contract.items[0].revision!, /^[a-f0-9]{64}$/);
   assert.ok(packet.estimatedTokenCeiling < 4000);
+});
+
+test("Unicode key insertion order preserves revisions and acknowledged receipts", async () => {
+  await client.schemaAddField("payload", { type: "object" });
+  const payload = { "é": "composed", "e\u0301": "decomposed" };
+  const fields = { payload: JSON.stringify(payload) };
+  const id = (await client.create({ title: "Unicode custom object keys", type: "Task", ...fields })).item.id;
+  const input: HandoffContract = { focus: [id], questions: [], assumptions: [], requiredEvidence: [] };
+  const packet = await createHandoff(input, options);
+  await acknowledgeHandoff(packet.id, response(packet), options);
+  const located = await locateItem(pmRoot, id); assert.ok(located);
+  const raw = await readFile(located.itemPath, "utf8");
+  const entries = Object.entries(payload).map(([key, value]) => `  ${JSON.stringify(key)}: ${value}\n`);
+  assert.ok(raw.includes(entries.join("")));
+  // Re-encode only property order: no values, timestamps or history entries change.
+  await writeFile(located.itemPath, raw.replace(entries.join(""), [...entries].reverse().join("")));
+  const row = (await client.listAllComplete({ includeBody: true })).items.find(row => row.id === id);
+  assert.deepEqual(row?.payload, payload);
+  assert.deepEqual(Object.keys(row?.payload as Record<string, unknown>), Object.keys(payload).reverse());
+  const fresh = await previewHandoff(input, options);
+  assert.equal(fresh.contract.items[0].revision, packet.contract.items[0].revision);
+  const status = await inspectHandoff(packet.id, options);
+  assert.deepEqual(status.staleItems, []);
+  assert.equal(status.receipts[0].valid, true); assert.equal(status.receipts[0].ready, true);
+  await acknowledgeHandoff(packet.id, response(packet), options);
+  assert.equal((await inspectHandoff(packet.id, options)).receipts.length, 1);
+  const changedFields = { payload: JSON.stringify({ ...payload, "é": "changed" }) };
+  await client.update(id, { author: "fixture", ...changedFields });
+  const changed = await inspectHandoff(packet.id, options);
+  assert.deepEqual(changed.staleItems, [id]); assert.equal(changed.receipts[0].valid, false);
 });
 
 test("independent receivers, idempotent retries, missing evidence and changed blocker validity", async () => {
@@ -182,7 +212,7 @@ test("registered command refusals remain expected errors with remedies", async (
 
 /** Re-sign synthetic protocol corruption to exercise structural validation after the digest check. */
 function signed(document: unknown): string {
-  const canonical = JSON.stringify(document, (_key, value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b, "en"))) : value);
+  const canonical = JSON.stringify(document, (_key, value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value);
   return JSON.stringify({ document, digest: createHash("sha256").update(canonical).digest("hex") });
 }
 

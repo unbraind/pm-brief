@@ -123,7 +123,7 @@ export function parseHandoffResponse(value: unknown): HandoffResponse {
 /** Canonical JSON makes revisions independent of object key insertion order. */
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") return `{${Object.entries(value).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b, "en")).map(([key, value]) => `${JSON.stringify(key)}:${canonical(value)}`).join(",")}}`;
+  if (value !== null && typeof value === "object") return `{${Object.entries(value).filter(([, value]) => value !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, value]) => `${JSON.stringify(key)}:${canonical(value)}`).join(",")}}`;
   return JSON.stringify(value);
 }
 /** Content-address every full tracker row and protocol object with SHA-256. */

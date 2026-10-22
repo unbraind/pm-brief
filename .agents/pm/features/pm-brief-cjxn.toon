@@ -7,10 +7,10 @@ status: in_progress
 priority: 1
 tags[2]: added,handoff
 created_at: "2026-10-21T18:40:07.479Z"
-updated_at: "2026-10-21T20:48:38.978Z"
+updated_at: "2026-10-22T12:46:18.426Z"
 author: codex-agent
 acceptance_criteria: A changed blocker invalidates acknowledgment; two receivers do not overwrite each other; missing required evidence stays visible; typed SDK and CLI with compact TOON/JSON and actionable refusals; non-git public-tracker validation; npm and Bun release gates at unchanged thresholds
-comments[18]{created_at,author,text}:
+comments[21]{created_at,author,text}:
   "2026-10-21T18:40:49.216Z",codex-agent,"Overlap check: core CLI 2026.10.21 claims manage ownership; brief prompt and since emit prose/deltas; pm-memory stores standing knowledge; pm-context context-handoff/context-usage tracks served facts, not receipt-based understanding. Checked pm-context open PRs: only dependency PR #162, no since-delta PR currently. Coordinate with its since-delta work without implementing history delta here. Acceptance criteria recorded on this new item. Design: immutable revision-bound contracts, independent append-only receiver receipts, live stale/evidence assessment, native SDK storage without git."
   "2026-10-21T18:47:14.450Z",codex-agent,"Implemented typed packet/response/refusal SDK and structured create, preview, ack and show commands. Native Decision bodies hold immutable contracts; lock-scoped idempotent comment appends isolate receivers. Full item content digests include transitive declared blockers and inverse blocks edges. Live status retains missing required links. Added README and JSON example; building no-git, concurrent-process, integrity and budget regressions."
   "2026-10-21T18:51:09.213Z",codex-agent,"Coordination refreshed: pm-context has an active feat/since-delta-pack candidate at 6ed5991, with context-pack since --from/--cursor, ranked changes and omission receipts; no PR is open yet. README explicitly references that candidate and assigns delta/cursor ownership there. Real-data validation: public origin/main tracker, 86 items, 5 read-only previews, 5 revision rows, all 5 synthetic required links remained missing; compact JSON 798-876 bytes (4159 total), conservative ceiling 611-650 tokens, median 4445ms and maximum 5225ms under shared-host load. All 179 copied public files remained hash-identical; snapshot was read-only and outside git."
@@ -29,6 +29,9 @@ comments[18]{created_at,author,text}:
   "2026-10-21T20:29:24.166Z",codex-agent,"Final-source read-only validation refreshed at c55c13b with git absent from PATH and the process cwd outside git: 86 certified items, 5 packets, 5 revision rows, all 5 missing requirements retained, JSON 798-876 bytes (4159 total), conservative ceilings 611-650 tokens. Median/max generation measured 658/1290ms. All 179 original snapshot files remained hash-identical; docs/handoff-validation.md now records these final-source measurements."
   "2026-10-21T20:32:26.544Z",codex-agent,"Coordination refresh: pm-context since-delta work is now open as PR #164 (https://github.com/unbraind/pm-context/pull/164). README and PR text link it directly. It owns cursor-based delta selection and resume/omission semantics; pm-brief owns immutable contracts, per-receiver acknowledgments and current revision/evidence assessment. No sibling files or tracker records were modified."
   "2026-10-21T20:48:38.229Z",codex-agent,"Final verification complete for runtime source c55c13b: npm run release:check passes with isolated Git identity and 406/406 tests, zero skipped, 100/98.28/100 aggregate lines/branches/functions; bun run release:check passes in an isolated source-identical checkout with 406/406 tests, zero skipped, 100/98.33/100. Both complete audits, packed npm/Bun/current/minimum-host acceptance, changelog checks and publish attestation. Exact-head Node 22/26 CI also passes 406/406 and 100/98.28/100. Final-source CLI 2026.10.21 npm/Bun packed acceptance passes separately. All three behavioral revert proofs fail as intended. No upstream CLI/SDK defect was identified; native length handling defects were in pm-brief and are fixed. Independent review availability remains open in pm-brief-1oo2. PR #166 remains unmerged and unreleased; this item remains open for orchestrator verification."
+  "2026-10-22T12:08:49.490Z",codex-agent,"Review round for PR #166: pulled remote head 133a611; origin/main is already an ancestor. Retrieved all review threads and comments (one unresolved: PRRT_kwDOSzIO-c6u_RLd); latest CodeRabbit review has no outside-diff findings. Valid finding: locale collation equates distinct Unicode property names, making content digests depend on insertion order. Plan: use code-unit property ordering in implementation and signing helper, add real non-git tracker regression with behavioral revert proof, self-review the entire diff for related digest ordering defects, run unchanged npm and Bun release gates, commit tracker evidence and push without interacting with threads."
+  "2026-10-22T12:13:29.432Z",codex-agent,"PR #166 fix and behavioral revert proof: canonical() and the independent test signing helper now order property keys by UTF-16 code units. New real SDK-initialized non-git tracker regression persists composed and decomposed Unicode keys in a declared object field, changes only their storage insertion order, verifies equal item revisions, valid/ready receipts and idempotent retry, then verifies a value mutation invalidates the receipt. Focused command node --test --test-name-pattern=\"Unicode key insertion\" test/handoff.test.ts passes 1/1 with zero skips. In a disposable source copy, reverted only the production canonical comparator to localeCompare; the same regression fails 0/1 with ERR_ASSERTION at the revision equality check (different hashes). The fixed test helper remained unchanged in that proof. Whole-PR review checked all digest/signing paths, blocker ordering, CLI transport, packing and documentation; no additional instance of this defect class found. Fixed-field packet document ordering is unaffected; older item digests with differently ordered custom properties can conservatively require a fresh handoff. npm ci passed with zero vulnerabilities. Full unchanged npm/Bun release gates follow."
+  "2026-10-22T12:46:16.766Z",codex-agent,"PR #166 final review-round validation: npm run release:check passed in the package worktree with isolated Git identity, 407/407 tests, zero failures/skips/cancellations/todos, aggregate lines/branches/functions 100/98.28/100 across both shipped source files; bun run release:check passed the same 407/407 and 100/98.33/100 in an independently verified source-identical disposable checkout with isolated Git identity. Both passed all three packed consumers (npm/current host 2026.10.17, Bun/current 2026.10.17, npm/minimum 2026.10.13), zero production audit vulnerabilities, docstrings (147 declarations), changelog and publish attestation. Coverage thresholds remain 100/97.85/100. Initial test compilation found ES2023 array syntax and custom-field excess-property fixture typing; corrected without changing production behavior or thresholds, and the full gate passed on retry. No runtime timeout occurred. Repeated comparator-only behavioral revert against the final test source fails 0/1 at revision equality; fixed focused regression passes directly and via pm test (1/1 linked command). dist is rebuilt by both gates and is not tracked. No new pm CLI/SDK bug established. Review finding PRRT_kwDOSzIO-c6u_RLd is fixed; thread interaction, merge and release remain excluded. Keep this item in progress for orchestrator verification."
 files[9]{path,scope}:
   docs/handoff-validation.md,project
   handoff.ts,project
@@ -39,11 +42,46 @@ files[9]{path,scope}:
   test/brief.test.ts,project
   test/handoff.test.ts,project
   test/renderer-ownership.test.ts,project
-tests[4]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
-  "npm run release:check",project,3600,codex-agent,"2026-10-21T19:00:24.570Z",local_mutation,feat/acknowledged-handoffs
-  "bun run release:check",project,3600,codex-agent,"2026-10-21T19:00:24.570Z",local_mutation,feat/acknowledged-handoffs
-  node --test --experimental-test-coverage --test-coverage-include=handoff.ts test/handoff.test.ts,project,1200,codex-agent,"2026-10-21T19:04:29.361Z",local_mutation,feat/acknowledged-handoffs
-  node --test --test-name-pattern=round-trip test/handoff.test.ts,project,300,codex-agent,"2026-10-21T19:53:38.804Z",local_mutation,feat/acknowledged-handoffs
+tests[5]:
+  - command: "npm run release:check"
+    scope: project
+    timeout_seconds: 3600
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-21T19:00:24.570Z"
+      source_kind: local_mutation
+      source_ref: feat/acknowledged-handoffs
+  - command: "bun run release:check"
+    scope: project
+    timeout_seconds: 3600
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-21T19:00:24.570Z"
+      source_kind: local_mutation
+      source_ref: feat/acknowledged-handoffs
+  - command: node --test --experimental-test-coverage --test-coverage-include=handoff.ts test/handoff.test.ts
+    scope: project
+    timeout_seconds: 1200
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-21T19:04:29.361Z"
+      source_kind: local_mutation
+      source_ref: feat/acknowledged-handoffs
+  - command: node --test --test-name-pattern=round-trip test/handoff.test.ts
+    scope: project
+    timeout_seconds: 300
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-21T19:53:38.804Z"
+      source_kind: local_mutation
+      source_ref: feat/acknowledged-handoffs
+  - command: "node --test --test-name-pattern=\"Unicode key insertion\" test/handoff.test.ts"
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-22T12:12:16.555Z"
+      source_kind: local_mutation
+      source_ref: feat/acknowledged-handoffs
 docs[3]{path,scope}:
   docs/examples/handoff.json,project
   docs/handoff-validation.md,project
