@@ -1,0 +1,27 @@
+id: pm-brief-review165
+title: Verify evidence for tracker reconciliation review
+description: Address PR #165 review evidence and recheck all six reconciled records against main without changing runtime code or closed item lifecycle fields.
+type: Chore
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-22T12:48:55.344Z"
+updated_at: "2026-10-22T12:52:48.000Z"
+author: codex-agent
+acceptance_criteria: "Link passing release-workflow evidence while retaining ancestry; verify related closure records; preserve append-only history; pass npm ci, changelog and tracker health gates"
+comments[3]{created_at,author,text}:
+  "2026-10-22T12:49:02.095Z",codex-agent,"PR #165 review round: pulled remote head 81ff451; current origin/main 46295a6 is already an ancestor. Retrieved all comments on the single unresolved thread PRRT_kwDOSzIO-c6vCTHq; latest CodeRabbit review contains no outside-diff findings. Valid finding: pm-brief-4ohy lists only ancestry in tests, which does not demonstrate its release-workflow acceptance criteria. Whole-diff review also found unrelated identity-file citations on pm-brief-4ohy and pm-brief-s83v, and missing executable tests on the caller/attestation records. Recheck all six against unchanged main, add relevant evidence with the pinned CLI, and retain existing closed states, close/completion timestamps and historical entries. New review chore tracks this work because the six delivery items are already terminal; no duplicate active review item was found."
+  "2026-10-22T12:51:26.807Z",codex-agent,"Tracker-only regression evidence for PR #165: original pm-brief-4ohy tests block contains only the delivery ancestry command and fails the evidence-presence assertion; the corrected tests block contains node --test test/release-workflow.test.ts and still retains that ancestry command. Current main 46295a6 has byte-identical runtime, workflow, test, script and package files. Existing release-workflow, canonical attestation-consumer and CodeQL suites passed 18/18 together with zero failures/skips. Verified all four cited deliveries are main ancestors. Corrected relevant release evidence on both pm-brief-4ohy and pm-brief-s83v; added executable caller/attestation/CodeQL evidence across the other records. The two caller assertions verify audited SHA and package version without dispatching workflows. Verified status, closed_at and completed_at unchanged on all 6/6 original items and all 6/6 historical JSONL streams remain byte-prefix-identical; original history is never rewritten. No source-function revert is applicable to this tracker-only change. Latest successful main CodeQL run is retained as historical scan evidence, not certification of this PR head."
+  "2026-10-22T12:52:47.219Z",codex-agent,"Final review evidence: all 6/6 selected linked commands passed through pm test --run --progress (release workflow, attestation consumer, two caller-record checks, CodeQL workflow and changelog). Supplemental focused suites passed 18/18 with zero failures/skips; both audited workflow callers passed SHA/version assertions. npm ci passed with zero vulnerabilities. Isolated pm health --check-only --json exits 0 with ok=true, passing integrity and history_drift; the only advisory is telemetry_queue_pending:1. Optional strict health automatically requires merge drivers and exits 1 for merge_fence_drift:2: committed extension fence is -merge while the pinned CLI expects merge=text. Drivers are configured and no history/parse/receipt defect is reported. This pre-existing fence mismatch is tracked separately as pm-brief-fence165; it is not a passed strict-health gate. No telemetry configuration or operational files were changed. No new pm CLI/SDK defect established. Rechecked all six lifecycle triples and append-only history prefixes; runtime and test scope stays identical to main. Leave this review item in progress and the fence follow-up open for orchestrator verification; no original delivery item is reopened or closed."
+files[6]{path,scope}:
+  .agents/pm/chores/pm-brief-1p5o.toon,project
+  .agents/pm/chores/pm-brief-b7dy.toon,project
+  .agents/pm/chores/pm-brief-gp5o.toon,project
+  .agents/pm/issues/pm-brief-4ohy.toon,project
+  .agents/pm/issues/pm-brief-s83v.toon,project
+  .agents/pm/issues/pm-brief-tai3.toon,project
+tests[1]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run changelog:check",project,600,codex-agent,"2026-10-22T12:50:35.922Z",local_mutation,chore/reconcile-tracker-1021
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+body: ""

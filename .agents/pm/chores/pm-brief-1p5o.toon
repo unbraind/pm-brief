@@ -2,17 +2,25 @@ id: pm-brief-1p5o
 title: Enable GitHub CodeQL code scanning
 description: "Add .github/workflows/codeql.yml (javascript-typescript, build-mode none, weekly staggered schedule). GET code-scanning/alerts returned 404 no-analysis-found, so the Security tab could not distinguish clean from never-ran. Advisory check only, not added to branch protection."
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-08-22T17:02:37.240Z"
-updated_at: "2026-08-22T17:59:48.795Z"
+updated_at: "2026-10-22T12:50:32.263Z"
+closed_at: "2026-10-21T18:54:23.376Z"
+completed_at: "2026-10-21T18:54:23.376Z"
 author: "harness:ox-alpha"
+resolution: Delivered by the audit-linked mainline implementation.
+expected_result: Enable GitHub CodeQL code scanning.
+actual_result: "Re-verified unchanged main 46295a662309: .github/workflows/codeql.yml still registers code scanning."
+comments[2]{created_at,author,text}:
+  "2026-10-21T18:53:50.841Z",codex-agent,"Tracker reconciliation authorized for the audited verdict FIXED-STALE. Re-verified unchanged main 46295a662309: .github/workflows/codeql.yml still registers code scanning. Enable GitHub CodeQL code scanning. The CodeQL workflow is on main and current main CodeQL runs exist. Scope: tracker state only; no new runtime certification or deployment claim."
+  "2026-10-22T12:50:32.259Z",codex-agent,"Whole-PR evidence review: .github/workflows/codeql.yml and test/codeql-workflow.test.ts are unchanged from origin/main 46295a6. Latest successful main-branch CodeQL run found through the API is https://github.com/unbraind/pm-brief/actions/runs/39411278910 at e9e8d85314a20756e3271cfca0cbce3b0bdb8753. This is a recorded successful scan, not a claim of a new scan at the reconciliation head. Added the local CodeQL workflow regression command; retained existing analysis-query evidence and lifecycle fields."
 notes[1]{created_at,author,text}:
   "2026-08-22T17:02:55.175Z","harness:ox-alpha","Verified 2026-08-22: gh api repos/unbraind/pm-brief/code-scanning/alerts -> 404 'no analysis found'. Workflow pins github/codeql-action v4 (fleet major-tag convention), permissions limited to security-events:write/actions:read/contents:read."
 files[1]{path,scope,note}:
   .github/workflows/codeql.yml,project,CodeQL scanning workflow - javascript-typescript build-mode none weekly staggered cron
-tests[2]:
+tests[3]:
   - command: "gh run list -R unbraind/pm-brief --workflow codeql.yml --branch ci/enable-codeql-scanning --limit 1 --json conclusion --jq '.[0].conclusion'"
     scope: project
     assert_stdout_regex[1]: ^success$
@@ -21,4 +29,13 @@ tests[2]:
     scope: project
     assert_stdout_regex[1]: "^[1-9][0-9]*$"
     note: "At least one CodeQL analysis must exist. Deliberately queries /analyses, not /alerts: an empty /alerts array is ambiguous between analysed-and-clean and never-analysed, and that ambiguity is the exact defect this change removes. /analyses answers did-a-scan-run directly, so a clean repo passes and an unscanned one fails closed with HTTP 404."
+  - command: node --test test/codeql-workflow.test.ts
+    scope: project
+    timeout_seconds: 600
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-22T12:50:30.775Z"
+      source_kind: local_mutation
+      source_ref: chore/reconcile-tracker-1021
+close_reason: "Re-verified unchanged main 46295a662309: .github/workflows/codeql.yml still registers code scanning. Audit delivery: Enable GitHub CodeQL code scanning. The CodeQL workflow is on main and current main CodeQL runs exist."
 body: ""
