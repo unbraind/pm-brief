@@ -1,0 +1,6 @@
+{
+  "focus": ["demo-task"],
+  "questions": [{ "id": "fixture", "text": "Which public fixture should the receiver validate?" }],
+  "assumptions": [{ "id": "review", "text": "The blocking review remains unresolved." }],
+  "requiredEvidence": [{ "id": "report", "item": "demo-task", "kind": "docs", "ref": "docs/validation.md" }]
+}

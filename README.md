@@ -410,3 +410,94 @@ compaction. Command-local selection limits and document budgets still apply.
    trackers: projection, budget omission, every-row cursor recovery, and writer
    rejection. Remove only the declarations, rebuild, and prove the tests fail.
 5. Run unchanged npm and Bun release gates and document their exact results.
+
+## Acknowledged handoff contracts
+
+`pm brief handoff` records what each receiving agent understood against exact
+item content revisions. A packet includes explicit questions, unresolved
+assumptions, required evidence and the transitive declared blocker closure.
+A changed blocker, source item or evidence item invalidates its old receipts.
+Two receivers append independent receipts to the same tracker; identical retries
+by the same author add nothing. Claims continue to own work ownership.
+
+```sh
+# Set an explicit identity for each sender or receiver.
+export PM_AUTHOR=sender
+# Replace the focus/evidence item ids in docs/examples/handoff.json.
+pm brief handoff preview --input docs/examples/handoff.json --json
+pm brief handoff create --input docs/examples/handoff.json --json
+# Save the returned id and digest. Then write response.json, as shown below.
+PM_AUTHOR=receiver-a pm brief handoff ack <packet-id> --input response.json --json
+pm brief handoff show <packet-id> --receiver receiver-a
+```
+
+A receiver supplies every obligation id, including evidence that is still missing:
+
+```json
+{
+  "digest": "<64-character digest from the packet>",
+  "questions": { "fixture": "I will use the public tracker fixture." },
+  "assumptions": { "review": "Unresolved; I will verify the blocker before proceeding." },
+  "evidence": { "report": "The report link is missing; validation remains outstanding." }
+}
+```
+
+Every collection is explicit; use `[]` in contracts and `{}` in responses when
+there are no obligations. Each input collection has at most 32 entries; the
+blocker/evidence closure has at most 64 items. Keys use ASCII letters, digits,
+dots, underscores or hyphens and start with a letter or digit. Obligation and actor
+keys have at most 128 characters; native item identifiers retain their full length. Obligation text and evidence references have at most 2,000 code units.
+Native source titles and blocker references retain their full text under the aggregate budget.
+Native TOON is the default; `--json` uses the host's
+structured JSON output. The default conservative output ceiling is 4,000 tokens,
+measured from UTF-8 bytes with twice pretty-JSON size plus framing headroom.
+`--token-budget` accepts up to 64,000. Oversized output refuses with a remedy;
+it never silently drops questions, assumptions, evidence or receiver receipts.
+A receiver filter reduces the selected receipt set without changing storage.
+Universal host output controls can intentionally project or paginate read commands;
+retain their omission receipts and use normal output for a complete contract.
+
+Evidence requirements select exact native `docs`, `files` or `tests` links by
+`item`, `kind` and `ref` (path, or test command). `missingEvidence` remains visible
+in the packet and each receipt. Linkage proves a reference was recorded; it does
+not prove that a file exists, its contents are correct, or a test passed. Receiver
+statements are self-reported understanding, including disagreement or uncertainty.
+`valid` means the source revisions still match; `ready` additionally means all
+required links are present. Neither field grants approval or claims the work.
+
+Packets are native Decision items tagged `pm-brief-handoff`; their JSON bodies are
+immutable protocol artifacts. Receipts are append-only native comments protected
+by the host's comment lock and author/text idempotency. Native lock contention
+is retried up to three times for reads and idempotent appends; creates are never
+automatically retried. Persistent contention refuses with a retry remedy. Do not edit contract bodies
+or receipt comments. Create a fresh packet after a revision changes. A receipt
+racing a source edit is reassessed on return and every subsequent read. All source
+metadata, bodies and linked evidence contribute to content revisions, so even an
+unrelated source comment conservatively invalidates old understanding. Reads are
+certified full-corpus snapshots, not a transaction spanning arbitrary source writers.
+
+The SDK exports `previewHandoff`, `createHandoff`, `acknowledgeHandoff`,
+`inspectHandoff`, their typed contracts, and `HandoffError` (`code`, `remedy`).
+Pass `{ pmRoot, author, tokenBudget? }`, optionally with the active native `PmClient`.
+CLI expected refusals exit 2 (3 for a stale packet), with a stable `handoff_<code>`
+JSON category and a `required` remedy.
+Categories cover invalid input, identity, missing packets/items, response coverage,
+integrity, budget and tracker reads. Validation and budget checks precede writes.
+The commands never change source items or claims; `preview` and `show` are read-only.
+
+This complements [pm-context](https://github.com/unbraind/pm-context)'s
+context delivery/usage receipts and the [since-delta candidate](https://github.com/unbraind/pm-context/pull/164)
+(`feat/since-delta-pack`)
+(`pm context-pack since --from <timestamp>` or `--cursor <cursor>`). That candidate
+owns cursor progress, changed-context selection and omission receipts. Use its delta to
+refresh changed context, then create a new handoff here. No history delta engine
+is duplicated. pm-memory continues to own standing knowledge; `brief prompt`
+continues to generate prose. See the [contract example](docs/examples/handoff.json).
+
+## Without git
+
+Briefs, prompts, ranking, history deltas, governance, duplicate checks and all
+handoff commands work in plain initialized trackers without a git executable.
+Handoff storage uses the native SDK dispatcher and can reuse a host client.
+`brief diverge` needs a git repository and git refs. Handoff receipts have no
+branch, commit or repository dependency.

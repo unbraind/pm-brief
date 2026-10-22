@@ -1,3 +1,6 @@
+import { registerHandoffCommands } from "./handoff.ts";
+export { previewHandoff, createHandoff, acknowledgeHandoff, inspectHandoff, parseHandoffContract, parseHandoffResponse, HandoffError } from "./handoff.ts";
+export type { HandoffContract, HandoffDocument, HandoffEvidence, HandoffOptions, HandoffPacket, HandoffPrompt, HandoffReceipt, HandoffRefusalCode, HandoffResponse, HandoffRevision, HandoffStatus } from "./handoff.ts";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -4673,6 +4676,7 @@ export function renderMarkdownGovernance(g: GovernanceSummary): string {
  * @param api - Extension API the commands are registered against.
  */
 function registerCommands(api: ExtensionApi): void {
+  registerHandoffCommands(api);
   const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },

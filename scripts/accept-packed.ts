@@ -1,7 +1,8 @@
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { readFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { HandoffPacket, HandoffStatus } from "../handoff.ts";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -28,6 +29,10 @@ interface AcceptanceReceipt {
   readonly fixture_present: true;
   readonly bounded_estimate: number;
   readonly cannot_fit_exit_code: 2;
+  /** Both receivers survive native append-only writes on a plain tracker. */
+  readonly handoff_receivers: 2;
+  /** Deliberately missing required linkage remains visible after acknowledgment. */
+  readonly handoff_missing_evidence: true;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -122,7 +127,8 @@ try {
 
     runPm(scenario, scenarioRoot, ["init", "--defaults", "--agent-guidance", "skip", "--prefix", "accept"]);
     const fixtureTitle = `Validate packed pm-brief ${scenario.name}`;
-    runPm(scenario, scenarioRoot, [
+    const created = runPm(scenario, scenarioRoot, [
+      "--json",
       "create",
       "task",
       fixtureTitle,
@@ -163,6 +169,17 @@ try {
     if (refused.status !== 2 || !/minimum budget \d+ required; run pm brief/.test(refused.stdout + refused.stderr)) {
       throw new Error(`${scenario.name} cannot-fit must preserve usage exit 2 and recovery: ${String(refused.status)} ${(refused.stderr || refused.stdout).trim()}`);
     }
+    const createdReceipt = JSON.parse(created.stdout) as { id?: string; item?: { id?: string } };
+    const fixtureId = createdReceipt.id ?? createdReceipt.item?.id;
+    if (!fixtureId) throw new Error(`${scenario.name} create did not return a fixture id`);
+    const contractFile = join(scenarioRoot, "handoff-contract.json");
+    writeFileSync(contractFile, JSON.stringify({ focus: [fixtureId], questions: [{ id: "scope", text: "Which fixture will you use?" }], assumptions: [{ id: "review", text: "Review is unresolved" }], requiredEvidence: [{ id: "report", item: fixtureId, kind: "docs", ref: "docs/report.md" }] }));
+    const packet = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "--author", "packed-sender", "brief", "handoff", "create", "--input", contractFile]).stdout) as HandoffPacket;
+    const responseFile = join(scenarioRoot, "handoff-response.json");
+    writeFileSync(responseFile, JSON.stringify({ digest: packet.digest, questions: { scope: "The installed public fixture" }, assumptions: { review: "Unresolved; verify first" }, evidence: { report: "Missing; do not infer validation" } }));
+    for (const receiver of ["packed-a", "packed-b"]) runPm(scenario, scenarioRoot, ["--json", "--author", receiver, "brief", "handoff", "ack", packet.id, "--input", responseFile]);
+    const handoff = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "handoff", "show", packet.id]).stdout) as HandoffStatus;
+    if (handoff.receipts.length !== 2 || handoff.receipts.some(row => !row.valid || row.ready || !row.missingEvidence.includes("report"))) throw new Error(`${scenario.name} handoff lost receiver receipts or missing evidence`);
     receipts.push({
       scenario: scenario.name,
       host_version: scenario.hostVersion,
@@ -171,6 +188,8 @@ try {
       fixture_present: true,
       bounded_estimate: boundedEstimate,
       cannot_fit_exit_code: 2,
+      handoff_receivers: 2,
+      handoff_missing_evidence: true,
     });
   }
 
