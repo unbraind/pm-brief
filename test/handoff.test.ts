@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
@@ -25,6 +25,15 @@ function response(packet: HandoffPacket): HandoffResponse {
 /** Match machine-readable SDK errors and require every refusal to carry a usable remedy. */
 function refusal(code: string) {
   return (error: unknown): boolean => { assert.ok(error instanceof HandoffError); assert.equal(error.code, code); assert.ok(error.remedy.length > 10); return true; };
+}
+/** Make native history writes fail on every platform, including privileged processes, without changing item reads. */
+async function withBlockedHistory(pmRoot: string, action: () => Promise<void>): Promise<void> {
+  const history = join(pmRoot, "history"); const saved = join(pmRoot, "saved-history");
+  await rename(history, saved);
+  try {
+    await writeFile(history, "A regular file cannot contain history records");
+    await action();
+  } finally { await rm(history, { force: true }); await rename(saved, history); }
 }
 /** Run the real installed CLI in a directory whose PATH cannot resolve git. */
 function run(args: string[], author = "receiver-a") {
@@ -79,8 +88,11 @@ test("Unicode key insertion order preserves revisions and acknowledged receipts"
   // Re-encode only property order: no values, timestamps or history entries change.
   await writeFile(located.itemPath, raw.replace(entries.join(""), [...entries].reverse().join("")));
   const row = (await client.listAllComplete({ includeBody: true })).items.find(row => row.id === id);
-  assert.deepEqual(row?.payload, payload);
-  assert.deepEqual(Object.keys(row?.payload as Record<string, unknown>), Object.keys(payload).reverse());
+  if (!row) throw new Error("Expected the persisted Unicode fixture row");
+  const storedPayload = row.payload;
+  if (storedPayload === null || typeof storedPayload !== "object") throw new Error("Expected the persisted custom object");
+  assert.deepEqual(storedPayload, payload);
+  assert.deepEqual(Object.keys(storedPayload), Object.keys(payload).reverse());
   const fresh = await previewHandoff(input, options);
   assert.equal(fresh.contract.items[0].revision, packet.contract.items[0].revision);
   const status = await inspectHandoff(packet.id, options);
@@ -243,12 +255,11 @@ test("native write failures are translated to actionable CLI tracker refusals", 
   const item = (await native.create({ title: "Read-only source", type: "Task" })).item.id;
   const input = join(workspace, "readonly-contract.json");
   await writeFile(input, JSON.stringify({ focus: [item], questions: [], assumptions: [], requiredEvidence: [] }));
-  const decisions = join(otherRoot, "decisions");
-  await mkdir(decisions, { recursive: true }); await chmod(decisions, 0o555);
   const activation = await activateExtensionForTest(extension, { name: "pm-brief", capabilities: ["commands", "services", "schema"] });
-  try {
+  await withBlockedHistory(otherRoot, async () => {
     await assert.rejects(runRegisteredCommandForTest(activation.commands, { command: "brief handoff create", pmRoot: otherRoot, global: { author: "harness-agent" }, options: { input } }), /handoff tracker: Handoff operation could not complete.*Remedy/);
-  } finally { await chmod(decisions, 0o755); }
+  });
+  assert.equal((await runRegisteredCommandForTest(activation.commands, { command: "brief handoff create", pmRoot: otherRoot, global: { author: "harness-agent" }, options: { input } })).handled, true);
 });
 
 
@@ -279,12 +290,13 @@ test("native append failures preserve typed SDK remedies", async () => {
   const id = (await native.create({ title: "Append refusal source", type: "Task" })).item.id;
   const otherOptions = { pmRoot: otherRoot, author: "receiver" };
   const packet = await createHandoff({ focus: [id], questions: [], assumptions: [], requiredEvidence: [] }, otherOptions);
-  const decisions = join(otherRoot, "decisions"); await chmod(decisions, 0o555);
-  try {
+  await withBlockedHistory(otherRoot, async () => {
     await assert.rejects(acknowledgeHandoff(packet.id, response(packet), otherOptions), (error: unknown) => {
       assert.ok(error instanceof HandoffError); assert.equal(error.code, "tracker"); assert.match(error.message, /receipt could not be appended/); assert.match(error.remedy, /Retry the same/); return true;
     });
-  } finally { await chmod(decisions, 0o755); }
+  });
+  assert.equal((await inspectHandoff(packet.id, otherOptions)).receipts.length, 0);
+  assert.equal((await acknowledgeHandoff(packet.id, response(packet), otherOptions)).receipts[0].valid, true);
 });
 
 
