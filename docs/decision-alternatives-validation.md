@@ -33,4 +33,23 @@ independent review verdicts and reasoning, unresolved blocker context, exact
 Unicode/CRLF citation ranges, structured values, omission accounting, typed
 refusals and native JSON/TOON CLI operation without git. Packed acceptance checks
 the command through npm/current, Bun/current and npm/minimum host installations.
-The PR records the exact-head CI release-gate run and counts.
+Implementation commit `d150db42d71aba10c3da374e722e788051482af0` passed
+[CI run 39842819350](https://github.com/unbraind/pm-brief/actions/runs/39842819350):
+
+| Gate | Tests | Packed install scenarios | Source coverage: lines / branches / functions |
+| --- | ---: | ---: | --- |
+| `npm run release:check` | 413 / 413 | 3 / 3 | 100 / 98.23 / 100 |
+| `bun run release:check` | 413 / 413 | 3 / 3 | 100 / 98.18 / 100 |
+| Node 22 CI | 413 / 413 | 3 / 3 | 100 / 98.23 / 100 |
+| Node 26 CI | 413 / 413 | 3 / 3 | 100 / 98.18 / 100 |
+
+Every suite had zero failures, skips, cancellations and todos. All three source
+modules were measured at unchanged thresholds. Windows audit and fresh-checkout
+tracker health passed. Packed scenarios used the unchanged development pin
+2026.10.17 under npm/Bun and minimum host 2026.10.13 under npm.
+
+Local linked checks passed: feature/renderer regressions 7/7, integration
+contracts 3/3, source/test typechecks and docstring lint (155 declarations across
+11 files). Disabling only the SDK builder's comparison behavior made the selected
+alternative assertion fail (0/1); the exact implementation was restored before
+the passing runs. The PR also records final-head CI after these evidence updates.
