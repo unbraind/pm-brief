@@ -1,0 +1,14 @@
+id: pm-brief-1oo2
+title: Restore independent PR review availability
+description: ""
+type: Chore
+status: open
+priority: 2
+tags[2]: blocked,review
+created_at: "2026-10-21T19:40:48.134Z"
+updated_at: "2026-10-21T19:40:48.134Z"
+author: codex-agent
+acceptance_criteria: "Obtain a complete independent review against the final PR head; address actionable findings; preserve skipped, quota-limited or unavailable providers as missing evidence rather than approval; record review provenance and exact commit"
+dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
+  pm-brief-cjxn,related,"2026-10-21T19:40:48.134Z",codex-agent,"cli:create:dep",detected
+body: "PR #166 has passing exact-head CI but missing independent automated review evidence: Greptile reports an ended trial, CodeRabbit skips automatic review under its repository policy, and Sourcery reports an exhausted weekly review budget. Search across all 18 Greptile matches found no existing availability item; active coverage and publish-attestation items have different scope. Resolve through an owner-approved service/configuration decision or a complete independent human review. No billing changes or bot mentions are authorized by this follow-up."

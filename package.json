@@ -10,7 +10,8 @@
     "manifest.json",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/examples/handoff.json"
   ],
   "scripts": {
     "build": "tsc",
@@ -92,7 +93,8 @@
       "CHANGELOG.md"
     ],
     "examples": [
-      "README.md"
+      "README.md",
+      "docs/examples/handoff.json"
     ],
     "capabilities": [
       "commands",
