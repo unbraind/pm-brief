@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { devNull, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { HandoffPacket, HandoffStatus } from "../handoff.ts";
+import type { DecisionAlternativesDigest } from "../alternatives.ts";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -33,6 +34,8 @@ interface AcceptanceReceipt {
   readonly handoff_receivers: 2;
   /** Deliberately missing required linkage remains visible after acknowledgment. */
   readonly handoff_missing_evidence: true;
+  /** Packed command preserves two independently cited records within its budget. */
+  readonly decision_alternatives: 2;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -180,6 +183,8 @@ try {
     for (const receiver of ["packed-a", "packed-b"]) runPm(scenario, scenarioRoot, ["--json", "--author", receiver, "brief", "handoff", "ack", packet.id, "--input", responseFile]);
     const handoff = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "handoff", "show", packet.id]).stdout) as HandoffStatus;
     if (handoff.receipts.length !== 2 || handoff.receipts.some(row => !row.valid || row.ready || !row.missingEvidence.includes("report"))) throw new Error(`${scenario.name} handoff lost receiver receipts or missing evidence`);
+    const alternatives = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "alternatives", fixtureId, packet.id]).stdout) as DecisionAlternativesDigest;
+    if (alternatives.alternatives.length !== 2 || alternatives.estimatedTokenCeiling > 4000 || alternatives.alternatives.some(row => row.statements.length < 2 || row.statements.some(statement => !statement.source.startsWith(`${row.id}#/`)))) throw new Error(`${scenario.name} alternatives lost independent cited records or exceeded the budget`);
     receipts.push({
       scenario: scenario.name,
       host_version: scenario.hostVersion,
@@ -190,6 +195,7 @@ try {
       cannot_fit_exit_code: 2,
       handoff_receivers: 2,
       handoff_missing_evidence: true,
+      decision_alternatives: 2,
     });
   }
 
