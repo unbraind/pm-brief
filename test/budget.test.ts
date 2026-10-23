@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { activateExtensionForTest, runRegisteredCommandForTest } from "@unbrained/pm-cli/sdk/testing";
 import type { ExtensionCapability } from "@unbrained/pm-cli/sdk/authoring";
+import { estimatePmOutputTokens } from "@unbrained/pm-cli/sdk";
 import extension, { buildBrief, CommandError, EXIT_CODE, renderBrief, selectNextItems,
   type BriefFormat, type BriefOptions, type PmItem, type GovernanceSummary,
   type MergeDecisionsSummary } from "../index.ts";
@@ -38,7 +39,7 @@ function checkBudget(items: PmItem[], options: BriefOptions & { format: BriefFor
   try {
     const brief = buildBrief(items, options);
     assert.ok(brief.budget.estimatedTokens <= options.tokenBudget, "buildBrief cannot return an overrun");
-    const estimate = Math.ceil(renderBrief(brief, options.format).length / 4);
+    const estimate = estimatePmOutputTokens(Buffer.byteLength(renderBrief(brief, options.format), "utf8"));
     assert.ok(estimate <= options.tokenBudget, `${options.format}: ${estimate} > ${options.tokenBudget}`);
     assert.equal(brief.budget.estimatedTokens, estimate, "disclosure must include its own digits");
     const ranked = selectNextItems(items, options);
@@ -53,7 +54,7 @@ function checkBudget(items: PmItem[], options: BriefOptions & { format: BriefFor
     const minimum = minimumBudget(error);
     assert.ok(minimum > options.tokenBudget);
     const retry = buildBrief(items, { ...options, tokenBudget: minimum });
-    assert.ok(Math.ceil(renderBrief(retry, options.format).length / 4) <= minimum);
+    assert.ok(estimatePmOutputTokens(Buffer.byteLength(renderBrief(retry, options.format), "utf8")) <= minimum);
   }
 }
 
@@ -207,7 +208,7 @@ test("focus-only minimal briefs retain an ID and missing focus warnings disclose
 });
 
 
-test("escaped and Unicode display fields use character estimates, and rendering leaves input unchanged", () => {
+test("escaped and Unicode display fields use UTF-8 estimates, and rendering leaves input unchanged", () => {
   const items = fixture(12, 0).map((item) => ({ ...item, title: '\"\n😀'.repeat(600) }));
   for (const format of formats) checkBudget(items, { generatedAt, format, tokenBudget: 1000 });
   const brief = buildBrief(items, { generatedAt, tokenBudget: 1000, format: "markdown" });

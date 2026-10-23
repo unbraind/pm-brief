@@ -1,0 +1,29 @@
+id: pm-brief-agze
+title: "Honor SDK blockers, lifecycle roles and UTF-8 brief budgets"
+description: "Verify and address audit F03, F05 and F14 using the pinned SDK, real non-git trackers and independent behavioural revert proofs."
+type: Task
+status: in_progress
+priority: 2
+tags[2]: fix,sdk
+created_at: "2026-10-23T20:24:45.673Z"
+updated_at: "2026-10-23T21:02:47.342Z"
+assignee: codex-agent
+claim_principal: codex-agent
+author: codex-agent
+acceptance_criteria: "F03: reverse blocks and unresolved prerequisites are held with blocker evidence until resolved; F05: custom terminal roles are excluded and custom active statuses remain eligible across brief lifecycle views; F14: multilingual brief delta and divergence budgets use SDK UTF-8 estimates for exact output"
+comments[4]{created_at,author,text}:
+  "2026-10-23T20:25:08.967Z",codex-agent,"Verified F03 F05 F14 against origin/main cdcd1e3: outgoing-only active-ID blockers miss reverse blocks and missing targets, lifecycle helpers hard-code spellings, and both estimators divide UTF-16 length by four. All findings valid. The pinned SDK exports runtime status and UTF-8 estimation helpers plus blocker resolution; preserve legacy depends_on aliases at the SDK boundary. Owner explicitly groups these findings in one PR."
+  "2026-10-23T20:33:07.947Z",codex-agent,"Implementation uses public isTerminalStatus (the SDK alias-normalizing terminal-role wrapper), resolveRuntimeStatusRegistry/readSettings, indexBlockedByIds plus resolveItemBlockers, and estimatePmOutputTokens. Published minimum SDK 2026.10.13 exports all imports, so dev/peer and manifest floors remain unchanged. Preserve depends_on as a blocker alias and external source provenance. Divergence classification has no lifecycle predicate, while delta transitions and duplicate remediation now receive the workspace registry. Focused native non-git regressions pass 4/4; pm-linked run passed 3/3 before the external-provenance case was added."
+  "2026-10-23T20:39:54.269Z",codex-agent,"Isolated behavioural revert proofs after rebuilding: F03 reverting only blockerRelationships fails F03 at reverse blocks must hold A (exit 1). F05 restoring only legacy isClosed/isClosedStatus bodies fails F05 because accepted and the accepted Decision return to next candidates (exit 1). F14 reverting only estimateTokens and measureRenderedBrief to UTF-16 length fails F14 at the emitted-byte ceiling (exit 1). Each proof ran node --test --test-name-pattern=<finding>: test/sdk-semantics.test.ts after npm run build. Restored all functions and rebuilt. Final lifecycle helper uses the named statusIsTerminal SDK export. Existing optional local strict-health warnings are extension host skew and merge_fence_drift:2 tracked by pm-brief-fence165, with history_drift clean. No fence or history repair is in scope."
+  "2026-10-23T21:02:47.341Z",codex-agent,"Clean-identity npm run release:check passed: 429 tests, 0 failures, 0 skipped; coverage 100.00 percent lines, 98.11 percent branches, 100.00 percent functions across all 4 production sources at unchanged thresholds. Packed acceptance passed npm-current and bun-current on SDK 2026.10.20 plus npm-minimum on SDK 2026.10.13, each with typed cannot-fit exit 2. Changelog and publish-attestation checks passed. Clean-identity bun run release:check is running. Preparing a draft PR so remote CI can run concurrently."
+files[4]{path,scope}:
+  index.ts,project
+  test/brief.test.ts,project
+  test/budget.test.ts,project
+  test/sdk-semantics.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/sdk-semantics.test.ts,project,codex-agent,"2026-10-23T20:30:36.334Z",local_mutation,refactor/sdk-blocker-and-lifecycle-roles
+docs[2]{path,scope}:
+  docs/brief-budget.md,project
+  README.md,project
+body: ""

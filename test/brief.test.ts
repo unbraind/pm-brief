@@ -291,12 +291,12 @@ test("item adapters preserve legacy relationship and evidence-link object shapes
     { from: "pm-legacy-shapes", to: "pm-item-id", kind: "depends_on" },
     { from: "pm-legacy-shapes", to: "pm-id", kind: "depends_on" },
   ]);
-  const [next] = selectNextItems([item], { generatedAt: "2026-08-07T00:00:00Z" });
+  const [next] = buildBrief([item], { generatedAt: "2026-08-07T00:00:00Z", focusIds: [item.id] }).focus;
   assert.ok(next);
   assert.equal(next.title, "(untitled)");
   assert.equal(next.type, "Item");
   assert.equal(next.status, "unknown");
-  assert.equal(next.whyNow, "active open work");
+  assert.equal(next.whyNow, "blocked: resolve prerequisite before implementation");
   assert.deepEqual(next.requiredContext, [
     "dependency:pm-to",
     "dependency:pm-target",
@@ -820,34 +820,33 @@ test("full activity parser validates envelopes and preserves optional evidence",
 
 test("selectNextItems ranks unblocked priority before blocked work", () => {
   const next = selectNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
-  assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-c", "pm-a"]);
-  assert.equal(next[2]?.whyNow, "blocked: resolve prerequisite before implementation");
+  assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-c"]);
+  assert.ok(!next.some(item => item.id === "pm-a"));
 });
 
 test("selectNextItems honors the canonical pm next order over the local scorer", () => {
   // `pm next` supplies the authoritative ranking so `brief next` agrees with it.
   // Here the canonical order deliberately contradicts the local score ordering
-  // (which would be pm-b, pm-c, pm-a) to prove delegation wins.
+  // (which would be pm-b, pm-c) to prove delegation wins after blocker checks.
   const next = selectNextItems(items, {
     generatedAt: "2026-06-06T00:00:00Z",
     nextCount: 3,
     nextOrder: ["pm-c", "pm-a", "pm-b"],
   });
-  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-a", "pm-b"]);
+  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-b"]);
 });
 
 test("selectNextItems keeps candidates absent from pm next order after ranked ones", () => {
   // A partial canonical order (only pm-c) must place pm-c first; the rest keep
-  // the deterministic local tiebreak so no candidate is dropped.
+  // the deterministic local tiebreak among executable candidates.
   const next = selectNextItems(items, {
     generatedAt: "2026-06-06T00:00:00Z",
     nextCount: 5,
     nextOrder: ["pm-c"],
   });
-  // pm-c is canonically ranked first; pm-a and pm-b are both unranked and must
-  // fall back to the deterministic local tiebreak (pm-b before the blocked pm-a),
-  // never NaN-driven insertion order.
-  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-b", "pm-a"]);
+  // pm-c is canonically ranked first; unranked pm-b follows, while blocked pm-a
+  // remains held regardless of its position in the canonical order.
+  assert.deepEqual(next.map((item) => item.id), ["pm-c", "pm-b"]);
 });
 
 test("explicit dependency-order overrides the canonical pm next order", () => {
@@ -862,7 +861,7 @@ test("explicit dependency-order overrides the canonical pm next order", () => {
   });
   assert.equal(next[0]?.id !== "pm-a", true, "blocked pm-a must not lead under dependency-order");
   // Matches the dedicated dependency-order behavior (prerequisites before dependents).
-  assert.equal(next.at(-1)?.id, "pm-a");
+  assert.ok(!next.some(item => item.id === "pm-a"));
 });
 
 test("selectNextItems includes evidence-weighted ranking details", () => {
@@ -934,7 +933,7 @@ test("selectNextItems supports dependency-first ordering for prerequisite planni
     dependencyOrder: true,
     nextCount: 3,
   });
-  assert.deepEqual(next.map((item) => item.id), ["pm-b", "pm-a", "pm-c"]);
+  assert.deepEqual(next.map((item) => item.id), ["pm-b"]);
 });
 
 test("selectNextItems does not penalize work blocked only by closed items", () => {
@@ -991,10 +990,10 @@ test("selectNextItems keeps overdue deadlines more urgent than due-today deadlin
 
 test("explainNextItems provides score breakdown and dependency signals", () => {
   const explained = explainNextItems(items, { generatedAt: "2026-06-06T00:00:00Z", nextCount: 3 });
-  assert.deepEqual(explained.map((entry) => entry.item.id), ["pm-b", "pm-c", "pm-a"]);
+  assert.deepEqual(explained.map((entry) => entry.item.id), ["pm-b", "pm-c"]);
   assert.equal(explained[0]?.activeDependents, 1);
-  assert.equal(explained[2]?.score.blocked, -80);
-  assert.ok((explained[2]?.score.total ?? 0) < (explained[1]?.score.total ?? 0));
+  assert.ok(explained.every(entry => entry.score.blocked === 45));
+  assert.ok(buildBrief(items, { focusIds: ["pm-a"] }).focus[0].rankingReasons.includes("blocked_by_active_dependency:1"));
   for (const entry of explained) {
     const { total, ...components } = entry.score;
     const componentTotal = Object.values(components).reduce((sum, value) => sum + value, 0);
@@ -1020,12 +1019,10 @@ test("explainNextItems deduplicates repeated relationship signals", () => {
       priority: 2,
     },
   ], { generatedAt: "2026-06-06T00:00:00Z", nextCount: 2 });
-  const work = explained.find((entry) => entry.item.id === "pm-work");
-  assert.ok(work);
-  assert.equal(work.activeDependencies, 1);
-  assert.deepEqual(work.item.dependencyIds, ["pm-dep"]);
-  assert.deepEqual(work.item.requiredContext, ["dependency:pm-dep"]);
-  assert.equal(work.score.dependencies, -20);
+  assert.deepEqual(explained.map(entry => entry.item.id), ["pm-dep"]);
+  assert.equal(explained[0].activeDependents, 1);
+  assert.deepEqual(explained[0].item.dependentIds, ["pm-work"]);
+  assert.equal(explained[0].score.dependents, 8);
 });
 
 test("next-work defaults and filters preserve only matching open work", () => {
@@ -1104,7 +1101,7 @@ test("buildBrief explains empty workspaces and filters that narrow a non-empty r
     suggestion: "pm list --status open --limit 20",
   }]);
 
-  const narrowed = buildBrief(items, {
+  const narrowed = buildBrief(items.map(item => item.id === "pm-c" ? { ...item, assignee: "codex" } : item), {
     generatedAt: "2026-06-06T00:00:00Z",
     assignee: "codex",
     nextCount: 4,
@@ -1404,7 +1401,7 @@ test("renderAgentPrompt includes recent activity when history is present", () =>
 
 const momentumItems: PmItem[] = [
   { id: "pm-m1", title: "Fast task", type: "Task", status: "closed", created_at: "2026-06-06T00:00:00Z", closed_at: "2026-06-09T00:00:00Z" },
-  { id: "pm-m2", title: "Slow issue", type: "Issue", status: "done", created_at: "2026-06-01T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
+  { id: "pm-m2", title: "Slow issue", type: "Issue", status: "closed", created_at: "2026-06-01T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
   { id: "pm-m3", title: "Stale close (no closed_at)", type: "Task", status: "closed", updated_at: "2026-06-09T00:00:00Z" },
   { id: "pm-m4", title: "Old close outside window", type: "Task", status: "closed", created_at: "2026-04-01T00:00:00Z", closed_at: "2026-05-01T00:00:00Z" },
   { id: "pm-m5", title: "Still open", type: "Task", status: "open", created_at: "2026-06-05T00:00:00Z" },
