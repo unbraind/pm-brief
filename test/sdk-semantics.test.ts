@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { PmClient, readSettings, resolveRuntimeStatusRegistry, estimatePmOutputTokens } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
-import extension, { buildBrief, buildDelta, CommandError, detectStaleContext, duplicateRemediationCommand, explainNextItems, extractRelationships, renderBrief, selectNextItems, summarizeMomentum, summarizeRisks, type PmItem } from "../index.ts";
+import extension, { buildBrief, buildDelta, buildDisclosureBrief, CommandError, detectStaleContext, duplicateRemediationCommand, explainNextItems, extractRelationships, renderBrief, selectNextItems, summarizeMomentum, summarizeRisks, type PmItem } from "../index.ts";
 
 
 /** Initialize an isolated native tracker outside git and guarantee cleanup before its first write. */
@@ -199,3 +199,70 @@ test("external reverse isolation: URI targets never create local blocker or cont
   assert.deepEqual(brief.focus[0].dependencyIds, []);
   assert.deepEqual(brief.focus[0].dependentIds, []);
 });
+
+test("B1: legacy done remains terminal across readiness, dependencies and lifecycle views", async (t) => {
+  const { client } = await tracker(t);
+  await client.schemaAddStatus("done", { role: ["terminal_done"] });
+  const done = (await client.create({ type: "Decision", title: "Completed prerequisite", status: "done", closeReason: "Delivered" })).item.id;
+  const direct = (await client.create({ type: "Task", title: "Released direct work", dep: [`id=${done},kind=blocked_by`] })).item.id;
+  const reverse = (await client.create({ type: "Task", title: "Released reverse work" })).item.id;
+  await client.update(done, { dep: [`id=${reverse},kind=blocks`] });
+  const items = await corpus(client);
+  const brief = buildBrief(items, { focusIds: [done], tokenBudget: 32000 });
+  assert.deepEqual(brief.next.map(item => item.id).sort(), [direct, reverse].sort());
+  assert.deepEqual(brief.blockers, []);
+  assert.deepEqual(brief.focus, []);
+  assert.deepEqual(brief.decisionsNeeded, []);
+  assert.ok(!detectStaleContext(items, { staleDays: 0 }).some(item => item.itemId === done));
+  assert.ok(!summarizeRisks(items).some(item => item.itemId === done));
+  assert.equal(summarizeMomentum(items).closedCount, 1);
+  assert.equal(duplicateRemediationCommand({ id: done, title: "Done", status: "done", type: "Decision" }, { id: direct, title: "Open", status: "open", type: "Task" }), `pm update ${direct} --dep id=${done},kind=related`);
+  const delta = buildDelta([{ id: done, ts: new Date().toISOString(), op: "update", patch: [{ op: "replace", path: "/metadata/status", value: "done" }] }], new Map(items.map(item => [item.id, item])));
+  assert.equal(delta.items[0].closed, true);
+  // A configured active status with the same spelling takes precedence over compatibility.
+  const configured = await tracker(t);
+  await configured.client.schemaAddStatus("done", { role: ["active"] });
+  const active = (await configured.client.create({ type: "Task", title: "Custom active done", status: "done" })).item.id;
+  const statusRegistry = resolveRuntimeStatusRegistry((await readSettings(configured.pmRoot)).schema);
+  assert.deepEqual(selectNextItems(await corpus(configured.client), { statusRegistry }).map(item => item.id), [active]);
+});
+
+test("B2: native disclosure and its command honor workspace terminal roles", async (t) => {
+  const { client, pmRoot } = await tracker(t);
+  await client.schemaAddStatus("accepted", { role: ["terminal_done"] });
+  const accepted = (await client.create({ type: "Task", title: "Accepted delivery", status: "accepted", closeReason: "Accepted" })).item.id;
+  const ready = (await client.create({ type: "Task", title: "Released work", dep: [`id=${accepted},kind=blocked_by`] })).item.id;
+  for (const profile of ["internal", "external", "public"] as const) {
+    const result = await buildDisclosureBrief({ profile }, { pmRoot, client, tokenBudget: 64000 });
+    assert.deepEqual((result.brief?.next as Array<{ id: string }>).map(item => item.id), [ready]);
+    assert.deepEqual((result.brief?.focus as Array<{ id: string }>).map(item => item.id), [ready]);
+  }
+  const harness = await createExtensionTestHarness(extension, { name: "pm-brief", capabilities: ["commands", "services", "schema"] });
+  t.after(() => harness.deactivate());
+  const output = await harness.runCommand({ command: "brief disclose", pmRoot, options: { audience: "public", tokenBudget: "64000" } });
+  assert.ok(!JSON.stringify(output.result).includes("Accepted delivery"));
+  assert.match(JSON.stringify(output.result), /Released work/);
+});
+
+for (const sourceKind of ["global", "external"]) {
+  test(`B3: same-ID local and ${sourceKind} blockers retain independent evidence and ranking`, async (t) => {
+    const { client } = await tracker(t);
+    const target = (await client.create({ type: "Task", title: "Local prerequisite" })).item.id;
+    const work = (await client.create({ type: "Task", title: "Wait for both namespaces", dep: [`id=${target},kind=blocked_by`, `id=${target},kind=blocked_by,source_kind=${sourceKind}`] })).item.id;
+    const items = await corpus(client);
+    const brief = buildBrief(items, { tokenBudget: 32000, focusIds: [work] });
+    assert.deepEqual(brief.blockers.map(edge => ({ id: edge.blockedBy, title: edge.title, status: edge.status })), [
+      { id: target, title: "Local prerequisite", status: "open" },
+      { id: target, title: undefined, status: undefined },
+    ]);
+    const ranking = explainNextItems(items).find(row => row.item.id === target);
+    assert.equal(ranking?.activeDependents, 1);
+    assert.equal(ranking?.score.dependents, 8);
+    assert.deepEqual(brief.next.map(item => item.id), [target]);
+    await client.close(target, "Local prerequisite completed");
+    const after = buildBrief(await corpus(client), { tokenBudget: 32000 });
+    assert.deepEqual(after.next, []);
+    assert.equal(after.blockers.length, 1);
+    assert.equal(after.blockers[0].status, undefined);
+  });
+}

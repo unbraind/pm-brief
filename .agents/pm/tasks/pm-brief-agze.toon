@@ -6,10 +6,12 @@ status: in_progress
 priority: 2
 tags[3]: fix,"gh:unbraind/pm-brief#173",sdk
 created_at: "2026-10-23T20:24:45.673Z"
-updated_at: "2026-10-23T22:25:05.450Z"
+updated_at: "2026-10-23T22:41:23.425Z"
+assignee: codex-agent
+claim_principal: codex-agent
 author: codex-agent
 acceptance_criteria: "F03: reverse blocks and unresolved prerequisites are held with blocker evidence until resolved; F05: custom terminal roles are excluded and custom active statuses remain eligible across brief lifecycle views; F14: multilingual brief delta and divergence budgets use SDK UTF-8 estimates for exact output"
-comments[14]{created_at,author,text}:
+comments[18]{created_at,author,text}:
   "2026-10-23T20:25:08.967Z",codex-agent,"Verified F03 F05 F14 against origin/main cdcd1e3: outgoing-only active-ID blockers miss reverse blocks and missing targets, lifecycle helpers hard-code spellings, and both estimators divide UTF-16 length by four. All findings valid. The pinned SDK exports runtime status and UTF-8 estimation helpers plus blocker resolution; preserve legacy depends_on aliases at the SDK boundary. Owner explicitly groups these findings in one PR."
   "2026-10-23T20:33:07.947Z",codex-agent,"Implementation uses public isTerminalStatus (the SDK alias-normalizing terminal-role wrapper), resolveRuntimeStatusRegistry/readSettings, indexBlockedByIds plus resolveItemBlockers, and estimatePmOutputTokens. Published minimum SDK 2026.10.13 exports all imports, so dev/peer and manifest floors remain unchanged. Preserve depends_on as a blocker alias and external source provenance. Divergence classification has no lifecycle predicate, while delta transitions and duplicate remediation now receive the workspace registry. Focused native non-git regressions pass 4/4; pm-linked run passed 3/3 before the external-provenance case was added."
   "2026-10-23T20:39:54.269Z",codex-agent,"Isolated behavioural revert proofs after rebuilding: F03 reverting only blockerRelationships fails F03 at reverse blocks must hold A (exit 1). F05 restoring only legacy isClosed/isClosedStatus bodies fails F05 because accepted and the accepted Decision return to next candidates (exit 1). F14 reverting only estimateTokens and measureRenderedBrief to UTF-16 length fails F14 at the emitted-byte ceiling (exit 1). Each proof ran node --test --test-name-pattern=<finding>: test/sdk-semantics.test.ts after npm run build. Restored all functions and rebuilt. Final lifecycle helper uses the named statusIsTerminal SDK export. Existing optional local strict-health warnings are extension host skew and merge_fence_drift:2 tracked by pm-brief-fence165, with history_drift clean. No fence or history repair is in scope."
@@ -24,14 +26,47 @@ comments[14]{created_at,author,text}:
   "2026-10-23T22:08:43.836Z",codex-agent,"Full clean-identity npm run release:check exited 0: 434 tests passed, 0 failed/skipped/cancelled; all 4 sources meet unchanged thresholds at 100.00/98.08/100.00 percent lines/branches/functions. Packed acceptance passed 3/3: npm-current and bun-current on SDK 2026.10.20, npm-minimum on SDK 2026.10.13. Production audit reports 0 vulnerabilities; changelog check and publish-attestation verification pass. No timeouts or retries. Final self-review clarified only the deduplication comment, preserving executable code and line count; Bun gate remains running and will rebuild the final package."
   "2026-10-23T22:14:26.424Z",codex-agent,"Bun first attempt passed all 434 tests with 0 failed/skipped/cancelled, but the line coverage gate failed at 99.83 percent (branches 98.12, functions 100). A two-line source-comment clarification occurred while instrumented processes were running, changing byte offsets without changing executable code or line count. That can invalidate merged V8 coverage offsets, so this is not a valid final coverage measurement. No thresholds or tests changed; source is now frozen and a full clean-identity Bun release gate retry is running. This was not a timeout. Preserve the failed attempt and report the retry outcome explicitly."
   "2026-10-23T22:25:04.667Z",codex-agent,"Final validation: npm run release:check and the frozen-source bun run release:check retry both exit 0 with 434/434 tests, 0 failed/skipped/cancelled, and all 4 production sources reported. Npm coverage lines/branches/functions is 100.00/98.08/100.00 percent; Bun is 100.00/98.12/100.00 percent, at unchanged 100/97.85/100 thresholds. Both gates pass packed acceptance 3/3 (npm-current, bun-current, npm-minimum), production audit with 0 vulnerabilities, changelog validation and publish-attestation verification. The first Bun attempt passed 434 tests but failed line coverage at 99.83 percent after a comment edit during instrumentation; the complete retry with frozen hashes passes. No timeout occurred. Four isolated function revert proofs remain documented above; focused and pm-linked suite passed 9/9. Fresh GitHub fetch returns zero review threads and no CodeRabbit review body; automated review remains unavailable. SDK gap encountered: indexBlockedByIds drops external reverse-edge provenance, guarded locally without a pin change. Releasing the claim and retaining in_progress for orchestrator verification; no replies, thread resolution, merge or release."
-files[4]{path,scope}:
-  index.ts,project
-  test/brief.test.ts,project
-  test/budget.test.ts,project
-  test/sdk-semantics.test.ts,project
-tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  node --test test/sdk-semantics.test.ts,project,codex-agent,"2026-10-23T20:30:36.334Z",local_mutation,refactor/sdk-blocker-and-lifecycle-roles
-docs[2]{path,scope}:
-  docs/brief-budget.md,project
-  README.md,project
+  "2026-10-23T22:33:20.759Z",codex-agent,"Review round: remote head is current and includes main. GraphQL enumerated all review threads (zero unresolved); paginated reviews contain no CodeRabbit review or Outside diff range findings. Verified second read-only verdict: restore default done terminal semantics, pass workspace status roles into native disclosure, and isolate local/global same-ID direct blocker resolution. Preserve existing reverse-edge external isolation. Add native non-git table-driven relationship/readiness tests and behavioral revert proofs, then unchanged npm and Bun release gates."
+  "2026-10-23T22:38:51.250Z",codex-agent,"Self-review found two further instances: imported local self blockers were discarded, and active dependency counts collapsed same-ID local/external resources. Both now fail closed and retain namespace identity. Added 152 native non-git relationship cases covering blocks, blocked_by, parent, related, legacy depends_on; implicit/explicit local, global/external; open/terminal/missing/self/cycle/duplicate/collision targets; URI references and scalar blocked_by including the no-active-blocker sentinel. Fixtures use SDK serialization and certified complete reads; import-only self/duplicate shapes bypass mutation restrictions only in disposable trackers. Initial URI fixture writes required allowUnresolvedDeps under the pinned SDK; adjusted fixture setup without changing production behavior."
+  "2026-10-23T22:40:45.484Z",codex-agent,"Seven isolated behavioral revert proofs passed (each npm run build then node --test --test-name-pattern=<pattern> <file>, each reverted run exited 1 with AssertionError): (1) restore HEAD isClosedStatus, pattern ^B1: includes completed done in next; (2) restore HEAD blockerRelationships, ^B1: keeps done prerequisites blocked; (3) restore HEAD buildDisclosureBrief, ^B2: recommends accepted work; (4) restore HEAD blockerRelationships, ^B3: loses local title/status evidence for both global/external collisions; (5) restore HEAD extractRelationships, matrix blocks/implicit-local/self: recommends self-blocked work; (6) restore HEAD activeDependencyCount, matrix blocked_by/implicit-local/collision: loses distinct namespace count; (7) remove only local reverse-index provenance guard in blockerRelationships, external reverse isolation: global: local namesake incorrectly blocked. All functions restored in finally and rebuilt; the preceding fixed focused run passed 165/165. Original F03/F05/F14 revert proofs remain above. No review threads were replied to or resolved."
+  "2026-10-23T22:41:23.425Z",codex-agent,"After restoring all revert proofs, pm test pm-brief-agze --run --progress passed both linked commands: node --test test/sdk-semantics.test.ts (13/13) and node --test test/relationship-shapes.test.ts (152/152), with all failure categories zero. Source is frozen for full clean-identity release gates at unchanged thresholds. SDK compatibility observations: default runtime registry omits legacy done; reverse index drops provenance; direct blocker resolver conflates local/global same-ID references; URI fixture writes require explicit unresolved-dependency allowance. No upstream reports filed in this round."
+files[6]:
+  - path: disclosure.ts
+    scope: project
+    note: Workspace lifecycle registry in native disclosure
+  - path: index.ts
+    scope: project
+  - path: test/brief.test.ts
+    scope: project
+  - path: test/budget.test.ts
+    scope: project
+  - path: test/relationship-shapes.test.ts
+    scope: project
+    note: Certified non-git SDK graph matrix
+  - path: test/sdk-semantics.test.ts
+    scope: project
+tests[2]:
+  - command: node --test test/sdk-semantics.test.ts
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-23T20:30:36.334Z"
+      source_kind: local_mutation
+      source_ref: refactor/sdk-blocker-and-lifecycle-roles
+  - command: node --test test/relationship-shapes.test.ts
+    scope: project
+    timeout_seconds: 300
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-23T22:40:46.263Z"
+      source_kind: local_mutation
+      source_ref: refactor/sdk-blocker-and-lifecycle-roles
+docs[3]:
+  - path: docs/brief-budget.md
+    scope: project
+  - path: docs/relationship-readiness.md
+    scope: project
+    note: Readiness semantics and regression matrix
+  - path: README.md
+    scope: project
 body: ""

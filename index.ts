@@ -737,7 +737,12 @@ function isClosed(item: PmItem, registry = DEFAULT_STATUS_REGISTRY): boolean {
 
 /** Apply SDK terminal roles to a status, including configured aliases. */
 function isClosedStatus(status: string, registry = DEFAULT_STATUS_REGISTRY): boolean {
-  return statusIsTerminal(status, registry);
+  return statusIsTerminal(normalizeLifecycleStatus(status, registry), registry);
+}
+
+/** Preserve legacy done only when the workspace has not assigned it its own role. */
+function normalizeLifecycleStatus(status: string, registry: RuntimeStatusRegistry): string {
+  return normalizeStatusInput(status, registry) ?? (status.trim().toLowerCase() === "done" ? registry.close_status : status);
 }
 
 /** Resolve workspace lifecycle roles once at a command boundary. */
@@ -766,7 +771,7 @@ export function extractRelationships(item: PmItem): Relationship[] {
     ...parseRelationshipValue(item.dependencies, "depends_on"),
     ...parseRelationshipValue(item.blocked_by, "blocked_by"),
     ...parseRelationshipValue(item.blockedBy, "blocked_by"),
-  ].filter((rel) => rel.to && (rel.to !== item.id || isExternalRelationship(rel))).map((rel) => ({ from: item.id, ...rel }));
+  ].filter((rel) => rel.to && (rel.to !== item.id || isExternalRelationship(rel) || isBlockingRelationship(rel) || rel.kind === "blocks")).map((rel) => ({ from: item.id, ...rel }));
   // pm's `update --blocked-by <id>` denormalizes the edge into BOTH item.dependencies
   // (a blocked_by-kind object) AND item.blocked_by (a string), so the same edge is
   // parsed twice. Include provenance in the identity so an external reference
@@ -820,7 +825,7 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function isBlockingRelationship(rel: Relationship): boolean {
+function isBlockingRelationship(rel: Pick<Relationship, "kind">): boolean {
   return rel.kind === "blocked_by" || rel.kind === "depends_on";
 }
 
@@ -833,7 +838,7 @@ function isExternalRelationship(rel: { to: string; source_kind?: string; externa
 function blockerRelationships(items: PmItem[], registry = DEFAULT_STATUS_REGISTRY): Relationship[] {
   const corpus = items.map((item) => ({
     id: item.id, title: titleOf(item), description: "", type: typeOf(item),
-    status: statusOf(item), priority: 2, tags: [], created_at: "", updated_at: itemUpdatedAt(item),
+    status: normalizeLifecycleStatus(statusOf(item), registry), priority: 2, tags: [], created_at: "", updated_at: itemUpdatedAt(item),
     dependencies: extractRelationships(item).map((rel) => ({
       id: rel.to, kind: rel.kind === "depends_on" ? "blocked_by" : rel.kind, source_kind: rel.source_kind,
     })),
@@ -845,11 +850,16 @@ function blockerRelationships(items: PmItem[], registry = DEFAULT_STATUS_REGISTR
     dependencies: item.dependencies.filter((dep) => dep.kind === "blocks" &&
       !isExternalRelationship({ to: dep.id, source_kind: dep.source_kind })),
   })));
-  return corpus.flatMap((item) => resolveItemBlockers({ updated_at: item.updated_at,
-    dependencies: [...item.dependencies, ...(blockers.get(item.id.trim().toLowerCase()) ?? []).map((id) => ({ id, kind: "blocked_by" }))],
-  }, byId, registry).filter((blocker) => !blocker.resolved).map((blocker) => ({
-    from: item.id, to: blocker.id, kind: "blocked_by", external: blocker.external,
-  })));
+  return corpus.flatMap((item) => {
+    const dependencies = [...item.dependencies, ...(blockers.get(item.id.trim().toLowerCase()) ?? []).map((id) => ({ id, kind: "blocked_by", source_kind: undefined }))];
+    // Resolve namespaces independently: the pinned SDK otherwise marks both
+    // local and external references external when they share a target ID.
+    return [false, true].flatMap((external) => resolveItemBlockers({ updated_at: item.updated_at,
+      dependencies: dependencies.filter((dep) => isExternalRelationship({ to: dep.id, source_kind: dep.source_kind }) === external),
+    }, byId, registry).filter((blocker) => !blocker.resolved).map((blocker) => ({
+      from: item.id, to: blocker.id, kind: "blocked_by", external: blocker.external,
+    })));
+  });
 }
 
 function activeItemIds(items: PmItem[], registry = DEFAULT_STATUS_REGISTRY): Set<string> {
@@ -1009,7 +1019,7 @@ function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<strin
 }
 
 function activeDependencyCount(item: PmItem, rels: Relationship[]): number {
-  return uniqueStrings(rels.filter((rel) => rel.from === item.id && isBlockingRelationship(rel)).map((rel) => rel.to)).length;
+  return uniqueStrings(rels.filter((rel) => rel.from === item.id && isBlockingRelationship(rel)).map((rel) => JSON.stringify([rel.to, isExternalRelationship(rel)]))).length;
 }
 
 function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
@@ -2902,7 +2912,7 @@ export function buildDelta(
         if (path === "/metadata/status") {
           if (typeof p.value === "string") {
             statusValues.push(p.value);
-            const status = normalizeStatusInput(p.value, statusRegistry) ?? p.value;
+            const status = normalizeLifecycleStatus(p.value, statusRegistry);
             if (isClosedStatus(status, statusRegistry)) latestLifecycle = statusRegistry.terminal_canceled_statuses.has(status) ? "canceled" : "closed";
             else if (statusRegistry.active_statuses.has(status) && (latestLifecycle === "closed" || latestLifecycle === "canceled")) latestLifecycle = "reopened";
           }

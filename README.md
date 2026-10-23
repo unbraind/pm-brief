@@ -100,7 +100,11 @@ external reverse edges cannot block local namesakes, and external references
 cannot add local dependent context or ranking credit. Workspace terminal roles govern lifecycle
 filters; library callers can supply `BriefOptions.statusRegistry` from
 `resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema)`. Omitted
-registries use SDK core defaults, so custom terminal names need their registry.
+registries use SDK core defaults plus the legacy terminal `done` spelling, so
+custom terminal names need their registry. An explicitly configured `done` role
+takes precedence over that compatibility fallback. Native disclosure reads the
+workspace registry too. See [relationship readiness](docs/relationship-readiness.md)
+for the graph-shape matrix.
 
 ## Agent Brief Contents
 
