@@ -1401,7 +1401,7 @@ test("renderAgentPrompt includes recent activity when history is present", () =>
 
 const momentumItems: PmItem[] = [
   { id: "pm-m1", title: "Fast task", type: "Task", status: "closed", created_at: "2026-06-06T00:00:00Z", closed_at: "2026-06-09T00:00:00Z" },
-  { id: "pm-m2", title: "Slow issue", type: "Issue", status: "closed", created_at: "2026-06-01T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
+  { id: "pm-m2", title: "Slow issue", type: "Issue", status: "done", created_at: "2026-06-01T00:00:00Z", closed_at: "2026-06-08T00:00:00Z" },
   { id: "pm-m3", title: "Stale close (no closed_at)", type: "Task", status: "closed", updated_at: "2026-06-09T00:00:00Z" },
   { id: "pm-m4", title: "Old close outside window", type: "Task", status: "closed", created_at: "2026-04-01T00:00:00Z", closed_at: "2026-05-01T00:00:00Z" },
   { id: "pm-m5", title: "Still open", type: "Task", status: "open", created_at: "2026-06-05T00:00:00Z" },
