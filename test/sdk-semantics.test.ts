@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { PmClient, readSettings, resolveRuntimeStatusRegistry, estimatePmOutputTokens } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { buildBrief, buildDelta, CommandError, detectStaleContext, duplicateRemediationCommand, renderBrief, selectNextItems, summarizeMomentum, summarizeRisks, type PmItem } from "../index.ts";
 
-const root = resolve(import.meta.dirname, "..");
 
 /** Initialize an isolated native tracker outside git and guarantee cleanup before its first write. */
 async function tracker(t: TestContext) {
