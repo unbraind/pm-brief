@@ -290,6 +290,7 @@ test("item adapters preserve legacy relationship and evidence-link object shapes
     { from: "pm-legacy-shapes", to: "pm-target-id", kind: "depends_on" },
     { from: "pm-legacy-shapes", to: "pm-item-id", kind: "depends_on" },
     { from: "pm-legacy-shapes", to: "pm-id", kind: "depends_on" },
+    { from: "pm-legacy-shapes", to: "pm-legacy-shapes", kind: "depends_on" },
   ]);
   const [next] = buildBrief([item], { generatedAt: "2026-08-07T00:00:00Z", focusIds: [item.id] }).focus;
   assert.ok(next);
@@ -303,9 +304,9 @@ test("item adapters preserve legacy relationship and evidence-link object shapes
     "dependency:pm-target-id",
     "dependency:pm-item-id",
     "dependency:pm-id",
+    "dependency:pm-legacy-shapes",
+    "dependent:pm-legacy-shapes",
     "https://example.invalid/context",
-    "docs/legacy.md",
-    "pm-doc",
   ]);
   assert.ok(!next.requiredContext.includes("src/legacy.ts"), "the eight-entry context cap excludes later file evidence");
   assert.doesNotMatch(next.rankingReasons.join(","), /stale_days|deadline_/);
