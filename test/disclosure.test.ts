@@ -79,6 +79,38 @@ test("dry run explains the same exclusions and never returns permitted or forbid
   assert.equal(parseDisclosurePolicy(policy).exclude?.length, 2);
 });
 
+test("selector-shaped data keys remain unknown field exclusions", () => {
+  const keys = ["focus.*.title", "workspace.itemCount", "budget.truncated", "tags.*", "focus[0].title", ".", "*", "[", "]", "title.with.dot", "title*", "title[", "title]"];
+  const marker = "SELECTOR-DATA-MUST-STAY-PRIVATE";
+  for (const profile of ["public", "external", "internal"] as const) {
+    const baseline = renderDisclosureBrief(source(), { profile });
+    for (const key of keys) {
+      const brief = source();
+      Object.assign(brief, { [key]: marker }); Object.assign(brief.focus[0], { [key]: marker });
+      const result = renderDisclosureBrief(brief, { profile });
+      assert.ok(!JSON.stringify(result).includes(marker), "Literal selector-shaped keys must never become permitted nested fields");
+      assert.deepEqual(result.brief, baseline.brief, "Only unknown custom properties were added");
+      const unknown = Object.values(result.exclusions.unknown_field).reduce((sum, count) => sum + count, 0);
+      const original = Object.values(baseline.exclusions.unknown_field).reduce((sum, count) => sum + count, 0);
+      assert.equal(unknown - original, 2, "Both the root and nested custom key have an unknown-field exclusion");
+      const preview = renderDisclosureBrief(brief, { profile }, { dryRun: true });
+      assert.deepEqual(preview.exclusions, result.exclusions); assert.equal(preview.brief, undefined);
+      assert.ok(!JSON.stringify(preview).includes(marker));
+    }
+  }
+});
+
+test("object keys cannot impersonate array wildcard segments", () => {
+  const marker = "WILDCARD-DATA-MUST-STAY-PRIVATE";
+  for (const profile of ["public", "external", "internal"] as const) {
+    const brief = source();
+    Object.assign(brief, { focus: { "*": { title: marker }, "0": { title: marker }, "[0]": { title: marker } } });
+    const result = renderDisclosureBrief(brief, { profile });
+    assert.ok(!JSON.stringify(result).includes(marker)); assert.deepEqual(result.brief?.focus, {});
+    for (let i = 0; i < 3; i++) assert.equal(result.exclusions.unknown_field[`/focus/@${i}`], 1);
+  }
+});
+
 test("unknown policy keys and selectors fail closed without echoing policy text", async () => {
   for (const policy of [null, [], "public", {}, Object.create({ profile: "public" }) as unknown, Object.defineProperty({ profile: "public" }, "hidden", { value: forbidden }), { profile: "public", [Symbol("hidden")]: forbidden }, { profile: "unknown" }, { profile: "__proto__" }, { profile: "public", allow: [forbidden] }, { profile: "public", [synthetic]: true }, { profile: "public", exclude: [forbidden] }, { profile: "public", exclude: "focus.*.title" }, { profile: "public", exclude: [5] }, { profile: "public", exclude: Array(1000).fill("generatedAt") }]) {
     assert.throws(() => parseDisclosurePolicy(policy), refusal("policy"));

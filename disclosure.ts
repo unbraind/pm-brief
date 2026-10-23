@@ -78,6 +78,14 @@ for (const field of ["timestamp", "author", "operation", "itemId", "message"]) F
 for (const field of ["itemId", "command", "reason", "safeToAutoApply"]) FIELDS.set(`recommendedPmUpdates.*.${field}`, 2);
 for (const field of ["level", "message", "suggestion"]) FIELDS.set(`insights.*.${field}`, 2);
 
+/** Compile only trusted profile selectors; data keys remain exact path segments. */
+const FIELD_PATHS = [...FIELDS].map(([field, level]) => ({ field: field as DisclosureField, level, segments: field.split(".") }));
+
+/** Match a structured data-path prefix; profile wildcards accept only numeric array indices. */
+function matchesDisclosurePath(pattern: readonly string[], path: readonly (string | number)[]): boolean {
+  return path.length <= pattern.length && path.every((segment, i) => pattern[i] === "*" ? typeof segment === "number" : pattern[i] === segment);
+}
+
 /** Refuse a malformed or widening policy without echoing its contents. */
 function invalidPolicy(): never {
   throw new DisclosureError("policy", "Unknown or invalid disclosure policy", "Use only profile (internal, external or public) and optional exclude containing documented field selectors; policies can only remove fields");
@@ -113,24 +121,24 @@ export function renderDisclosureBrief(brief: AgentBrief, input: DisclosurePolicy
   /** Aggregate repeated policy paths without source values or redundant per-row metadata. */
   function exclude(reason: DisclosureExclusionReason, path: string): void { exclusions[reason][path] = (exclusions[reason][path] ?? 0) + 1; }
   /** Traverse only known containers; never expose unknown key text or scan diagnostics. */
-  function walk(value: unknown, selector: string, path: string): DisclosureValue | undefined {
+  function walk(value: unknown, segments: readonly (string | number)[], path: string): DisclosureValue | undefined {
     if (typeof value === "object" && value !== null && active.has(value)) throw new DisclosureError("invalid", "Invalid recursive brief", "Supply an acyclic buildBrief result; known containers have a fixed vocabulary and nesting shape");
-    const level = FIELDS.get(selector);
-    if (level !== undefined) {
-      const field = selector as DisclosureField;
-      if (level > LEVEL[policy.profile]) { exclude("profile", `/${selector.replaceAll(".", "/")}`); return undefined; }
-      if (denied.has(field)) { exclude("policy", `/${selector.replaceAll(".", "/")}`); return undefined; }
+    const matches = FIELD_PATHS.filter(entry => matchesDisclosurePath(entry.segments, segments));
+    const exact = matches.find(entry => entry.segments.length === segments.length);
+    if (exact !== undefined) {
+      const { field, level } = exact;
+      if (level > LEVEL[policy.profile]) { exclude("profile", `/${field.replaceAll(".", "/")}`); return undefined; }
+      if (denied.has(field)) { exclude("policy", `/${field.replaceAll(".", "/")}`); return undefined; }
       if (!(typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)))) { exclude("invalid_value", path); return undefined; }
       if (scanMutationSecrets(value).length > 0) { exclude("secret", path); return undefined; }
       return value;
     }
-    const prefix = selector === "" ? "" : `${selector}.`;
-    if (![...FIELDS.keys()].some(field => field.startsWith(prefix))) { exclude("unknown_field", path); return undefined; }
+    if (matches.length === 0) { exclude("unknown_field", path); return undefined; }
     if (Array.isArray(value)) {
       active.add(value);
       const result: DisclosureValue[] = [];
       for (let i = 0; i < value.length; i++) {
-        const entry = walk(value[i], `${prefix}*`, `${path}/${i}`); if (entry !== undefined) result.push(entry);
+        const entry = walk(value[i], [...segments, i], `${path}/${i}`); if (entry !== undefined) result.push(entry);
       }
       active.delete(value); return result;
     }
@@ -139,16 +147,16 @@ export function renderDisclosureBrief(brief: AgentBrief, input: DisclosurePolicy
       const result: Record<string, DisclosureValue> = {};
       for (const [i, [key, entry]] of Object.entries(value).entries()) {
         if (entry === undefined) continue;
-        const child = `${prefix}${key}`;
-        const known = FIELDS.has(child) || [...FIELDS.keys()].some(field => field.startsWith(`${child}.`));
-        const rendered = walk(entry, known ? child : "@unknown", `${path}/${known ? key : `@${i}`}`);
+        const child = [...segments, key];
+        const known = FIELD_PATHS.some(field => matchesDisclosurePath(field.segments, child));
+        const rendered = walk(entry, child, `${path}/${known ? key : `@${i}`}`);
         if (rendered !== undefined) result[key] = rendered;
       }
       active.delete(value); return result;
     }
     exclude("invalid_value", path); return undefined;
   }
-  const filtered = walk(brief, "", "") as Record<string, DisclosureValue>;
+  const filtered = walk(brief, [], "") as Record<string, DisclosureValue>;
   const result: DisclosureResult = { protocol: "pm-brief.disclosure/v1", profile: policy.profile, dryRun: options.dryRun ?? false, sourceTruncated: brief.budget?.truncated === true, exclusions, estimatedTokenCeiling: 64000 };
   if (!result.dryRun) result.brief = filtered;
   return bounded(result, limit);
