@@ -86,7 +86,7 @@ function invalidPolicy(): never {
 function object(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 /** Validate policy keys and every field selector before any tracker read or render. */
 export function parseDisclosurePolicy(value: unknown): DisclosurePolicy {
-  if (!object(value) || Object.keys(value).some(key => key !== "profile" && key !== "exclude") || typeof value.profile !== "string" || !Object.hasOwn(LEVEL, value.profile)) return invalidPolicy();
+  if (!object(value) || !Object.hasOwn(value, "profile") || Reflect.ownKeys(value).some(key => key !== "profile" && key !== "exclude") || typeof value.profile !== "string" || !Object.hasOwn(LEVEL, value.profile)) return invalidPolicy();
   if (value.exclude !== undefined && (!Array.isArray(value.exclude) || value.exclude.length > FIELDS.size || value.exclude.some(field => typeof field !== "string" || !FIELDS.has(field)))) return invalidPolicy();
   return { profile: value.profile as DisclosureProfile, exclude: value.exclude === undefined ? [] : [...new Set(value.exclude as DisclosureField[])] };
 }

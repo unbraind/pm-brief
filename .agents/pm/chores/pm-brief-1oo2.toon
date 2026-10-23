@@ -6,9 +6,11 @@ status: open
 priority: 2
 tags[2]: blocked,review
 created_at: "2026-10-21T19:40:48.134Z"
-updated_at: "2026-10-21T19:40:48.134Z"
+updated_at: "2026-10-23T15:47:07.850Z"
 author: codex-agent
 acceptance_criteria: "Obtain a complete independent review against the final PR head; address actionable findings; preserve skipped, quota-limited or unavailable providers as missing evidence rather than approval; record review provenance and exact commit"
 dependencies[1]{id,kind,created_at,author,source_kind,author_source}:
   pm-brief-cjxn,related,"2026-10-21T19:40:48.134Z",codex-agent,"cli:create:dep",detected
+comments[1]{created_at,author,text}:
+  "2026-10-23T15:47:07.849Z",codex-agent,"Disclosure PR https://github.com/unbraind/pm-brief/pull/172 confirms the existing review-availability gap: Greptile reports an expired trial, Sourcery reports its seven-day review budget exhausted, CodeRabbit reports automatic review skipped by repository policy, and Cubic is neutral. No substantive inline findings or independent approval were returned. No review triggers or mentions were sent. This remains missing evidence, not approval; the feature PR is open for review."
 body: "PR #166 has passing exact-head CI but missing independent automated review evidence: Greptile reports an ended trial, CodeRabbit skips automatic review under its repository policy, and Sourcery reports an exhausted weekly review budget. Search across all 18 Greptile matches found no existing availability item; active coverage and publish-attestation items have different scope. Resolve through an owner-approved service/configuration decision or a complete independent human review. No billing changes or bot mentions are authorized by this follow-up."

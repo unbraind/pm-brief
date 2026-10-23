@@ -40,6 +40,7 @@ before(async () => {
   await client.schemaAddField("customer_private", { type: "string" });
   const customFields = { customerPrivate: forbidden };
   await client.create({ type: "Task", title: "Visible release", body: forbidden, ...customFields });
+  await client.create({ type: "Task", title: synthetic, body: forbidden, ...customFields });
   const extensionRoot = join(pmRoot, "extensions/pm-brief"); await mkdir(extensionRoot, { recursive: true });
   for (const file of ["manifest.json", "package.json"]) await cp(join(root, file), join(extensionRoot, file));
   await cp(join(root, "dist"), join(extensionRoot, "dist"), { recursive: true }); await symlink(join(root, "node_modules"), join(extensionRoot, "node_modules"));
@@ -79,7 +80,7 @@ test("dry run explains the same exclusions and never returns permitted or forbid
 });
 
 test("unknown policy keys and selectors fail closed without echoing policy text", async () => {
-  for (const policy of [null, [], "public", {}, { profile: "unknown" }, { profile: "__proto__" }, { profile: "public", allow: [forbidden] }, { profile: "public", [synthetic]: true }, { profile: "public", exclude: [forbidden] }, { profile: "public", exclude: "focus.*.title" }, { profile: "public", exclude: [5] }, { profile: "public", exclude: Array(1000).fill("generatedAt") }]) {
+  for (const policy of [null, [], "public", {}, Object.create({ profile: "public" }) as unknown, Object.defineProperty({ profile: "public" }, "hidden", { value: forbidden }), { profile: "public", [Symbol("hidden")]: forbidden }, { profile: "unknown" }, { profile: "__proto__" }, { profile: "public", allow: [forbidden] }, { profile: "public", [synthetic]: true }, { profile: "public", exclude: [forbidden] }, { profile: "public", exclude: "focus.*.title" }, { profile: "public", exclude: [5] }, { profile: "public", exclude: Array(1000).fill("generatedAt") }]) {
     assert.throws(() => parseDisclosurePolicy(policy), refusal("policy"));
     await assert.rejects(buildDisclosureBrief(policy as DisclosurePolicy, { pmRoot: "unreadable" }), refusal("policy"));
   }
@@ -161,7 +162,7 @@ test("native CLI JSON and TOON work without git and remain inside the measured c
   for (const format of ["json", "toon"]) for (const dryRun of [false, true]) {
     const result = run([...(format === "json" ? ["--json"] : []), "brief", "disclose", "--audience", "public", ...(dryRun ? ["--dry-run"] : [])]);
     assert.equal(result.status, 0, result.stderr + result.stdout); assert.equal(result.stderr, "");
-    assert.match(result.stdout, /pm-brief.disclosure\/v1/); assert.ok(!result.stdout.includes(forbidden));
+    assert.match(result.stdout, /pm-brief.disclosure\/v1/); assert.doesNotMatch(result.stdout, /FORBIDDEN|SYNTHETIC/);
     if (dryRun) assert.ok(!result.stdout.includes("Visible release")); else assert.match(result.stdout, /Visible release/);
     if (format === "json") { const value = JSON.parse(result.stdout) as DisclosureResult; assert.ok(estimatePmOutputTokens(Buffer.byteLength(result.stdout)) <= value.estimatedTokenCeiling); }
     assert.ok(estimatePmOutputTokens(Buffer.byteLength(result.stdout)) <= 8000);

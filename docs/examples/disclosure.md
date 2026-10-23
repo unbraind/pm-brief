@@ -110,3 +110,18 @@ try {
 For reproducible numbers, supply the same `generatedAt` to each SDK call.
 The replay measures rendering, source completeness and unchanged bytes; it does
 not claim that heuristic secret recognition can classify arbitrary private prose.
+
+Reference replay: public pm-brief tracker commit
+`7172186062a0398ffe585a593f7636a84b847671`, with extensions excluded and generation
+time `2026-10-23T12:00:00.000Z`. The read-only non-git copy certified 91 records
+and 91 unique IDs. All three renders and three dry runs passed; source and copy
+fingerprints were unchanged, with no source compaction.
+
+| Profile | Compact JSON bytes | Conservative token ceiling | Profile-excluded occurrences |
+| --- | ---: | ---: | ---: |
+| internal | 5549 | 4347 | 0 |
+| external | 4361 | 3441 | 61 |
+| public | 3274 | 2412 | 151 |
+
+Each profile also reported one recognized secret-field exclusion and one
+unknown-field exclusion. Counts refer to field occurrences, not unique items.
