@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Record acknowledged handoff contracts against item revisions ([pm-brief-cjxn](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-cjxn.toon))
+- Compare recorded decision alternatives with cited evidence ([pm-brief-ktjl](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-ktjl.toon))
+
+### Other
+
+- Verify evidence for tracker reconciliation review ([pm-brief-review165](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-review165.toon))
+
 ## 2026.10.23 - 2026-10-23
 
 ### Changed
