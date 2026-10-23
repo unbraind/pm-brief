@@ -12,7 +12,8 @@
     "LICENSE",
     "CHANGELOG.md",
     "docs/examples/handoff.json",
-    "docs/examples/alternatives.md"
+    "docs/examples/alternatives.md",
+    "docs/examples/disclosure.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -96,7 +97,8 @@
     "examples": [
       "README.md",
       "docs/examples/handoff.json",
-      "docs/examples/alternatives.md"
+      "docs/examples/alternatives.md",
+      "docs/examples/disclosure.md"
     ],
     "capabilities": [
       "commands",

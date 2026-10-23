@@ -562,10 +562,78 @@ refusals are `invalid` (correct IDs/budget), `missing` (check exact IDs), `track
 fewer items). CLI refusals exit 2 and retain `alternatives_<code>` and a remedy in
 the host's expected-error contract. See the [worked example](docs/examples/alternatives.md).
 
+## Stakeholder disclosure profiles
+
+Render a brief for an explicit audience using native compact TOON (default) or
+JSON. This is a read-only operation and does not require git:
+
+```bash
+pm brief disclose --audience public
+pm --json brief disclose --audience external --dry-run
+pm --json brief disclose --policy disclosure.json --token-budget 8000
+```
+
+| Audience | Permitted brief fields |
+| --- | --- |
+| `public` | Generation time, item count, and ranked item IDs, titles, types, statuses and priorities |
+| `external` | Public fields plus ranking explanations, tags, dependencies, blockers, risks and staleness |
+| `internal` | External fields plus workspace metadata, assignees, required context, activity, recommendations, insights and source budget metadata |
+
+All profiles exclude unmodeled fields, including custom fields, momentum,
+governance and merge receipts. Recognized credential-shaped values are removed
+using the core SDK guard. The tracker path applies this guard before ranking
+and compaction so shortening cannot conceal a recognized secret. This reuses
+core detection; it is not a universal credential scanner or a guarantee that
+arbitrary prose contains no confidential information. Review permitted titles
+and labels before sharing them.
+
+Policies can only narrow a profile. For example, `disclosure.json`:
+
+```json
+{"profile":"public","exclude":["focus.*.title","next.*.title","decisionsNeeded.*.title"]}
+```
+
+Only `profile` and `exclude` are accepted. Unknown keys, audiences or field
+selectors refuse before reading the tracker. `DisclosureField` in the SDK
+enumerates supported selectors; `*` denotes an array index. There is no override
+for adding custom fields or bypassing the credential guard.
+
+Every result contains an exclusion manifest grouped by reason (`profile`,
+`policy`, `secret`, `unknown_field`, `invalid_value`). Each entry maps a
+JSON Pointer path to an occurrence count. Profile/policy paths aggregate array
+indices as `*`; secret paths identify individual rendered occurrences. Unknown
+field names are replaced by `@N`, their zero-based position in their parent
+object's property enumeration. Pre-compaction secret exclusions use
+`/source/N/@M` for record/field positions; `/source/N` means a secret-bearing
+identity caused the whole record to be withheld. These paths describe the
+snapshot and never contain field values, item identifiers or unknown key text.
+Dry runs return the same manifest without any brief values.
+
+```ts
+import { buildBrief, renderDisclosureBrief, buildDisclosureBrief, DisclosureError } from "pm-brief";
+
+const brief = buildBrief(items); // One source; multiple independent renderings.
+const publicView = renderDisclosureBrief(brief, { profile: "public" });
+const reviewPreview = renderDisclosureBrief(brief, { profile: "external" }, { dryRun: true });
+// Or read a complete, certified native snapshot using an optional host PmClient:
+const view = await buildDisclosureBrief({ profile: "public" }, { pmRoot: ".agents/pm" });
+```
+
+The native tracker path reuses the existing 4000-token source brief selection;
+`sourceTruncated` discloses source compaction. The default disclosure ceiling is
+8000 estimated tokens, covering native JSON/TOON framing and every exclusion.
+Use `renderDisclosureBrief` with your own `buildBrief` controls for a different
+source selection. Rendering never silently drops manifest entries to fit.
+`DisclosureError` provides `code` and `remedy`: `policy` (correct the policy),
+`invalid` (correct controls/input), `tracker` (resolve the incomplete/unreadable
+source), or `budget` (increase the ceiling or supply a smaller brief). CLI
+refusals exit 2 with `disclosure_<code>` and a remedy, without source text or
+nested error details. See the [worked example and public-tracker replay](docs/examples/disclosure.md).
+
 ## Without git
 
 Briefs, prompts, ranking, history deltas, governance, duplicate checks and all
-handoff and decision alternatives commands work in plain initialized trackers without a git executable.
+handoff, decision alternatives and stakeholder disclosure commands work in plain initialized trackers without a git executable.
 Handoff storage uses the native SDK dispatcher and can reuse a host client.
 `brief diverge` needs a git repository and git refs. Handoff receipts have no
 branch, commit or repository dependency.

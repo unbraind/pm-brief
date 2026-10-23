@@ -4,6 +4,7 @@ import { devNull, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { HandoffPacket, HandoffStatus } from "../handoff.ts";
 import type { DecisionAlternativesDigest } from "../alternatives.ts";
+import type { DisclosureResult } from "../disclosure.ts";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -36,6 +37,8 @@ interface AcceptanceReceipt {
   readonly handoff_missing_evidence: true;
   /** Packed command preserves two independently cited records within its budget. */
   readonly decision_alternatives: 2;
+  /** All audiences and a value-free dry run execute from the installed tarball. */
+  readonly disclosure_profiles: 3;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -185,6 +188,13 @@ try {
     if (handoff.receipts.length !== 2 || handoff.receipts.some(row => !row.valid || row.ready || !row.missingEvidence.includes("report"))) throw new Error(`${scenario.name} handoff lost receiver receipts or missing evidence`);
     const alternatives = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "alternatives", fixtureId, packet.id]).stdout) as DecisionAlternativesDigest;
     if (alternatives.alternatives.length !== 2 || alternatives.estimatedTokenCeiling > 4000 || alternatives.alternatives.some(row => row.statements.length < 2 || row.statements.some(statement => !statement.source.startsWith(`${row.id}#/`)))) throw new Error(`${scenario.name} alternatives lost independent cited records or exceeded the budget`);
+    for (const audience of ["internal", "external", "public"]) {
+      const disclosed = runPm(scenario, scenarioRoot, ["--json", "brief", "disclose", "--audience", audience]);
+      const output = JSON.parse(disclosed.stdout) as DisclosureResult;
+      if (output.profile !== audience || !output.brief || output.estimatedTokenCeiling > 8000 || disclosed.stderr !== "" || !disclosed.stdout.includes(fixtureTitle)) throw new Error(`${scenario.name} disclosure lost its audience, fixture or budget`);
+    }
+    const preview = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "disclose", "--audience", "public", "--dry-run"]).stdout) as DisclosureResult;
+    if (!preview.dryRun || preview.brief !== undefined || JSON.stringify(preview).includes(fixtureTitle)) throw new Error(`${scenario.name} disclosure dry run returned source values`);
     receipts.push({
       scenario: scenario.name,
       host_version: scenario.hostVersion,
@@ -196,6 +206,7 @@ try {
       handoff_receivers: 2,
       handoff_missing_evidence: true,
       decision_alternatives: 2,
+      disclosure_profiles: 3,
     });
   }
 

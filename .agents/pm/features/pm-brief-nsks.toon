@@ -1,0 +1,32 @@
+id: pm-brief-nsks
+title: Render stakeholder briefs through explicit disclosure profiles
+description: "Acceptance: render one brief for internal agents, external reviewers or public sharing with a field-level exclusion manifest. Synthetic secrets and disallowed custom fields never enter public output. Unknown policy fields fail closed. Dry run explains exclusions without echoing forbidden text. Provide typed SDK and native CLI, bounded TOON/JSON, typed refusals with remedies, README and example, non-git public tracker replay, and npm plus Bun CI release gates."
+type: Feature
+status: in_progress
+priority: 2
+tags[2]: added,disclosure
+created_at: "2026-10-23T15:28:21.049Z"
+updated_at: "2026-10-23T15:42:31.901Z"
+assignee: codex-agent
+claim_principal: codex-agent
+author: codex-agent
+comments[4]{created_at,author,text}:
+  "2026-10-23T15:29:08.533Z",codex-agent,"Overlap rechecked against the pinned SDK and sibling package sources: core sdk/context-intent-contracts bounds read projections; pm-github README public import gate owns staged publication; pm-memory README input privacy gate owns mutations/import. This item owns only brief-specific disclosure/rendering. Reuse native PmClient.listAllComplete plus certifyCompleteListResult, existing buildBrief ranking, scanMutationSecrets, estimatePmOutputTokens, native JSON/TOON formatting and expected-error contracts. Policy is a closed audience allowlist with deny-only selectors; unknown policy keys/selectors refuse before reads. Exclusion paths use array indices and opaque ordinals for unknown keys; no source values in dry runs or refusals. Local targeted tests and static gates only; full release checks use the npm/Bun CI matrix at unchanged thresholds."
+  "2026-10-23T15:40:28.236Z",codex-agent,"Implementation: typed SDK renderDisclosureBrief/buildDisclosureBrief/parseDisclosurePolicy plus brief disclose --audience or --policy. Profiles can only narrow. Guard native source fields before compaction, then permitted rendered values; value-free manifests aggregate profile denials and retain ordinal secret paths. Default complete output ceiling 8000 estimated tokens; dry runs contain no brief. Source compaction remains visible. Five behavioural reversions each produced the expected regression failure: credential guard, closed policy keys, dry-run suppression, unknown-field exclusion, and pre-compaction source guard. Each mutant changed only its guard branch, ran the matching node --test --test-name-pattern regression, and was restored byte-for-byte. No SDK mocks. Initial nine targeted tests passed; expanded ten-test suite now adds source-secret and native error coverage."
+  "2026-10-23T15:40:29.597Z",codex-agent,"Public-data replay: exported committed public pm-brief tracker at 7172186062a0398ffe585a593f7636a84b847671, excluded extensions, copied into a non-git scratch project and made all tracker files/directories read-only. Certified 91 records and 91 unique IDs. All 3 profiles plus 3 dry runs passed with identical exclusion manifests, no source compaction, and unchanged source/copy fingerprints. Internal: 5549 compact JSON bytes, conservative 4347-token ceiling; external: 4361 bytes/3441 tokens; public: 3274 bytes/2412 tokens. Profile exclusions 0/61/151 respectively; each profile reports one recognized secret-field exclusion and one unknown-field exclusion. No source values or private data are reproduced. The worked replay is docs/examples/disclosure.md."
+  "2026-10-23T15:42:31.898Z",codex-agent,"Local verification passed via pm test --run --progress: 10/10 feature tests, zero failures/skips; disclosure.ts 100% lines, 99.15% branches, 100% functions. Typecheck, test typecheck, docstring lint (171 declarations) and git diff --check passed. Updated existing command-registration and renderer-ownership contracts to include brief disclose and preserve native structured output. Two focused host-contract tests passed. Linked-test automatic evidence recording is disabled in project settings, so this comment preserves the measured results without changing policy. Full npm/Bun release checks and packed current/minimum-host acceptance will run in CI; no local full-suite run on the saturated host."
+files[6]{path,scope}:
+  disclosure.ts,project
+  index.ts,project
+  scripts/accept-packed.ts,project
+  test/brief.test.ts,project
+  test/disclosure.test.ts,project
+  test/renderer-ownership.test.ts,project
+tests[3]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "npm run build && npm run build:test && node --experimental-test-coverage --test-coverage-include=disclosure.ts --test test/disclosure.test.ts",project,codex-agent,"2026-10-23T15:40:24.983Z",local_mutation,feat/disclosure-profiles
+  npm run typecheck && npm run docstring && git diff --check,project,codex-agent,"2026-10-23T15:40:26.475Z",local_mutation,feat/disclosure-profiles
+  "node --test --test-name-pattern=\"extension registers brief commands|output service preserves\" test/brief.test.ts test/renderer-ownership.test.ts",project,codex-agent,"2026-10-23T15:42:28.581Z",local_mutation,feat/disclosure-profiles
+docs[2]{path,scope}:
+  docs/examples/disclosure.md,project
+  README.md,project
+body: ""
