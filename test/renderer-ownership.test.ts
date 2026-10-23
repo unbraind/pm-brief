@@ -9,13 +9,13 @@ test("output service preserves owned documents and declines foreign or structure
   try {
     const owned = { pmBriefRendered: true, output: "# brief\n" };
     const commands = ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates", "brief governance"];
-    assert.deepEqual(harness.activation.registrations.commands.map((entry) => entry.command).sort(), [...commands, "brief alternatives", "brief handoff create", "brief handoff show", "brief handoff ack", "brief handoff preview"].sort());
+    assert.deepEqual(harness.activation.registrations.commands.map((entry) => entry.command).sort(), [...commands, "brief disclose", "brief alternatives", "brief handoff create", "brief handoff show", "brief handoff ack", "brief handoff preview"].sort());
     for (const command of commands) {
       const result = await harness.runServiceOverride({ service: "output_format", command, payload: { result: owned } });
       assert.equal(result.handled, true);
       assert.equal(result.result, owned.output);
     }
-    for (const command of [undefined, "context-pack", "brief"]) {
+    for (const command of [undefined, "context-pack", "brief", "brief disclose"]) {
       for (const result of [undefined, null, "text", {}, { output: "x" }, { pmBriefRendered: false, output: "x" }, { pmBriefRendered: true, output: 1 }, { items: [] }]) {
         const decision = await harness.runServiceOverride({ service: "output_format", command, payload: { result } });
         assert.equal(decision.handled, false);
