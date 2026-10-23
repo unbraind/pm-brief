@@ -51,7 +51,7 @@ pm brief since 2026-07-20T00:00:00Z --until 2026-07-22 --author alice
 
 ### Ranking and Budget Flags
 
-- `--max-tokens` is an alias for `--token-budget`: a ceiling on the chosen rendered brief, estimated as `ceil(characters / 4)` (not a model tokenizer).
+- `--max-tokens` is an alias for `--token-budget`: a ceiling on the chosen rendered brief, estimated by the SDK as `ceil(UTF-8 bytes / 4)` (not a model tokenizer).
 - `--dependency-order` prefers prerequisite items before dependent work in next-work ranking.
 - `--focus` highlights specific item ids, or `type:Type` to highlight every item of a type (repeatable or comma-separated).
 - `--include-history` adds a Recent Activity section sourced from `pm activity` to briefs and prompts; `--history-limit` controls the entry count (default 10).
@@ -88,9 +88,23 @@ const output = renderBrief(brief, "markdown");
 `renderMarkdownBrief`, `renderSlackBrief` and `renderAgentPrompt` enforce the
 selected rendering again if callers change format or modify the returned object.
 `budget.estimatedTokens` measures the rendering chosen at build time, including
-its own digit count. An unchanged ordinary tracker that already fits keeps its
+its own digit count and trailing newline, using the SDK UTF-8 byte estimator. An unchanged ordinary tracker that already fits keeps its
 sections and fields; only the estimate disclosure can differ from older versions.
 See [budget evidence and recovery](docs/brief-budget.md) for the regression matrix.
+
+Next-work recommendations exclude items with unresolved prerequisites, including
+reverse `blocks` edges and missing targets. Held work remains visible in explicit
+focus, blocker and risk evidence. External targets (`source_kind=global`, its
+`external` alias, or external reference syntax) stay separate from local IDs:
+external reverse edges cannot block local namesakes, and external references
+cannot add local dependent context or ranking credit. Workspace terminal roles govern lifecycle
+filters; library callers can supply `BriefOptions.statusRegistry` from
+`resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema)`. Omitted
+registries use SDK core defaults plus the legacy terminal `done` spelling, so
+custom terminal names need their registry. An explicitly configured `done` role
+takes precedence over that compatibility fallback. Native disclosure reads the
+workspace registry too. See [relationship readiness](docs/relationship-readiness.md)
+for the graph-shape matrix.
 
 ## Agent Brief Contents
 

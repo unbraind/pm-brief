@@ -29,7 +29,12 @@ import type {
 } from "@unbrained/pm-cli/sdk/governance";
 import { listMergeReceipts, findGitWorkspaceRoot } from "@unbrained/pm-cli/sdk/merge";
 import type { MergeDecisionReceipt, MergePreferredSide } from "@unbrained/pm-cli/sdk/merge";
-import { readSettings, resolveItemTypeRegistry } from "@unbrained/pm-cli/sdk";
+import {
+  readSettings, SETTINGS_DEFAULTS, resolveItemTypeRegistry, resolveRuntimeStatusRegistry,
+  statusIsTerminal, normalizeStatusInput, indexBlockedByIds, resolveItemBlockers,
+  isExternalDependencyReference, isExternalDependencySourceKind,
+  estimatePmOutputTokens, type RuntimeStatusRegistry,
+} from "@unbrained/pm-cli/sdk";
 
 export type { SimilarItemMatch } from "@unbrained/pm-cli/sdk";
 export type {
@@ -126,11 +131,13 @@ export interface PmItem {
   [key: string]: unknown;
 }
 
-/** Renderings whose complete character estimate can be budgeted by buildBrief. */
+/** Renderings whose complete UTF-8 byte estimate can be budgeted by buildBrief. */
 export type BriefFormat = "json" | "markdown" | "prompt" | "slack";
 
 /** Selection and rendering controls for a brief whose output must fit the requested ceiling. */
 export interface BriefOptions {
+  /** Workspace lifecycle roles; omitted library calls use the SDK core defaults. */
+  statusRegistry?: RuntimeStatusRegistry;
   /** Rendering to budget, including whitespace and disclosure (default: json). */
   format?: BriefFormat;
   tokenBudget?: number;
@@ -528,6 +535,8 @@ interface Relationship {
   from: string;
   to: string;
   kind: string;
+  source_kind?: string;
+  external?: boolean;
 }
 
 interface RankedCandidate {
@@ -719,18 +728,30 @@ function titleOf(item: PmItem): string {
   return text(item.title) || "(untitled)";
 }
 
-function isClosed(item: PmItem): boolean {
-  const status = statusOf(item).toLowerCase();
-  return status === "closed" || status === "done" || status === "canceled" || status === "cancelled";
+const DEFAULT_STATUS_REGISTRY = resolveRuntimeStatusRegistry(SETTINGS_DEFAULTS.schema);
+
+/** Classify lifecycle state using the workspace registry and SDK alias normalization. */
+function isClosed(item: PmItem, registry = DEFAULT_STATUS_REGISTRY): boolean {
+  return isClosedStatus(statusOf(item), registry);
 }
 
-function isClosedStatus(status: string): boolean {
-  const value = status.trim().toLowerCase();
-  return value === "closed" || value === "done" || value === "canceled" || value === "cancelled";
+/** Apply SDK terminal roles to a status, including configured aliases. */
+function isClosedStatus(status: string, registry = DEFAULT_STATUS_REGISTRY): boolean {
+  return statusIsTerminal(normalizeLifecycleStatus(status, registry), registry);
+}
+
+/** Preserve legacy done only when the workspace has not assigned it its own role. */
+function normalizeLifecycleStatus(status: string, registry: RuntimeStatusRegistry): string {
+  return normalizeStatusInput(status, registry) ?? (status.trim().toLowerCase() === "done" ? registry.close_status : status);
+}
+
+/** Resolve workspace lifecycle roles once at a command boundary. */
+async function readStatusRegistry(pmRoot: string): Promise<RuntimeStatusRegistry> {
+  return resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema);
 }
 
 /** Normalize string, array, and object relationship values into item IDs. */
-function parseRelationshipValue(value: unknown, fallbackKind: string): Array<{ to: string; kind: string }> {
+function parseRelationshipValue(value: unknown, fallbackKind: string): Array<{ to: string; kind: string; source_kind?: string }> {
   if (!value) return [];
   if (typeof value === "string") return asArray(value).map((to) => ({ to, kind: fallbackKind }));
   if (Array.isArray(value)) return value.flatMap((entry) => parseRelationshipValue(entry, fallbackKind));
@@ -738,7 +759,7 @@ function parseRelationshipValue(value: unknown, fallbackKind: string): Array<{ t
     const record = value as Record<string, unknown>;
     const to = text(record.id) || text(record.to) || text(record.target) || text(record.target_id) || text(record.item_id);
     if (!to) return [];
-    return [{ to, kind: text(record.kind) || text(record.type) || fallbackKind }];
+    return [{ to, kind: text(record.kind) || text(record.type) || fallbackKind, ...(text(record.source_kind) ? { source_kind: text(record.source_kind) } : {}) }];
   }
   return [];
 }
@@ -750,15 +771,15 @@ export function extractRelationships(item: PmItem): Relationship[] {
     ...parseRelationshipValue(item.dependencies, "depends_on"),
     ...parseRelationshipValue(item.blocked_by, "blocked_by"),
     ...parseRelationshipValue(item.blockedBy, "blocked_by"),
-  ].filter((rel) => rel.to && rel.to !== item.id).map((rel) => ({ from: item.id, to: rel.to, kind: rel.kind }));
+  ].filter((rel) => rel.to && (rel.to !== item.id || isExternalRelationship(rel) || isBlockingRelationship(rel) || rel.kind === "blocks")).map((rel) => ({ from: item.id, ...rel }));
   // pm's `update --blocked-by <id>` denormalizes the edge into BOTH item.dependencies
   // (a blocked_by-kind object) AND item.blocked_by (a string), so the same edge is
-  // parsed twice. Dedup by (from,to,kind): a relationship is uniquely identified by
-  // that triple, so this drops only redundant duplicates and is a no-op for
-  // singly-sourced edges (e.g. depends_on, which has no denormalized string field).
+  // parsed twice. Include provenance in the identity so an external reference
+  // never hides a local edge with the same ID. Only duplicate identities collapse;
+  // edges stored once retain their context.
   const seen = new Set<string>();
   return rels.filter((rel) => {
-    const key = JSON.stringify([rel.from, rel.to, rel.kind]);
+    const key = JSON.stringify([rel.from, rel.to, rel.kind, isExternalRelationship(rel)]);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -766,7 +787,8 @@ export function extractRelationships(item: PmItem): Relationship[] {
 }
 
 function estimateTokens(value: unknown): number {
-  return Math.max(1, Math.ceil(JSON.stringify(value).length / 4));
+  // Delta/divergence retain the stricter JSON-string bound, including escaping.
+  return Math.max(1, estimatePmOutputTokens(Buffer.byteLength(JSON.stringify(value), "utf8")));
 }
 
 function itemUpdatedAt(item: PmItem): string {
@@ -803,12 +825,45 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function isBlockingRelationship(rel: Relationship): boolean {
+function isBlockingRelationship(rel: Pick<Relationship, "kind">): boolean {
   return rel.kind === "blocked_by" || rel.kind === "depends_on";
 }
 
-function activeItemIds(items: PmItem[]): Set<string> {
-  return new Set(items.filter((item) => !isClosed(item)).map((item) => item.id));
+/** Keep external targets distinct from local IDs in every relationship projection. */
+function isExternalRelationship(rel: { to: string; source_kind?: string; external?: boolean }): boolean {
+  return rel.external === true || isExternalDependencyReference(rel.to) || isExternalDependencySourceKind(rel.source_kind);
+}
+
+/** Adapt legacy relationship aliases to the SDK, then retain canonical blocker orientation and unresolved targets. */
+function blockerRelationships(items: PmItem[], registry = DEFAULT_STATUS_REGISTRY): Relationship[] {
+  const corpus = items.map((item) => ({
+    id: item.id, title: titleOf(item), description: "", type: typeOf(item),
+    status: normalizeLifecycleStatus(statusOf(item), registry), priority: 2, tags: [], created_at: "", updated_at: itemUpdatedAt(item),
+    dependencies: extractRelationships(item).map((rel) => ({
+      id: rel.to, kind: rel.kind === "depends_on" ? "blocked_by" : rel.kind, source_kind: rel.source_kind,
+    })),
+  } satisfies ItemMetadata));
+  const byId = new Map(corpus.map((item) => [item.id.trim().toLowerCase(), item]));
+  // The pinned SDK reverse index drops provenance. Only local reverse edges
+  // belong in that index; direct blockers retain their original metadata below.
+  const blockers = indexBlockedByIds(corpus.map((item) => ({ ...item,
+    dependencies: item.dependencies.filter((dep) => dep.kind === "blocks" &&
+      !isExternalRelationship({ to: dep.id, source_kind: dep.source_kind })),
+  })));
+  return corpus.flatMap((item) => {
+    const dependencies = [...item.dependencies, ...(blockers.get(item.id.trim().toLowerCase()) ?? []).map((id) => ({ id, kind: "blocked_by", source_kind: undefined }))];
+    // Resolve namespaces independently: the pinned SDK otherwise marks both
+    // local and external references external when they share a target ID.
+    return [false, true].flatMap((external) => resolveItemBlockers({ updated_at: item.updated_at,
+      dependencies: dependencies.filter((dep) => isExternalRelationship({ to: dep.id, source_kind: dep.source_kind }) === external),
+    }, byId, registry).filter((blocker) => !blocker.resolved).map((blocker) => ({
+      from: item.id, to: blocker.id, kind: "blocked_by", external: blocker.external,
+    })));
+  });
+}
+
+function activeItemIds(items: PmItem[], registry = DEFAULT_STATUS_REGISTRY): Set<string> {
+  return new Set(items.filter((item) => !isClosed(item, registry)).map((item) => item.id));
 }
 
 /** Weight approaching deadlines in the next-work ranking against the supplied clock. */
@@ -836,9 +891,9 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
   score += priorityScore;
   reasons.push(`priority:${priority}`);
 
-  const deps = activeDependencyCount(item, rels, activeIds);
+  const deps = activeDependencyCount(item, rels);
   const fanout = activeDependentCount(item, rels, activeIds);
-  const blocked = deps > 0 && rels.some((rel) => rel.from === item.id && isBlockingRelationship(rel) && activeIds.has(rel.to));
+  const blocked = deps > 0;
   if (blocked) {
     score -= 80;
     reasons.push(`blocked_by_active_dependency:${deps}`);
@@ -890,8 +945,10 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
 
 /** Project ranked tracker metadata into the compact agent-facing brief item. */
 function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
-  const dependencyIds = uniqueStrings(rels.filter((rel) => rel.from === item.id).map((rel) => rel.to));
-  const dependentIds = uniqueStrings(rels.filter((rel) => rel.to === item.id).map((rel) => rel.from));
+  const contextRelationships = [...allItems.flatMap(extractRelationships).map((rel) =>
+    rel.kind === "blocks" && !isExternalRelationship(rel) ? { ...rel, from: rel.to, to: rel.from, kind: "blocked_by" } : rel), ...rels];
+  const dependencyIds = uniqueStrings(contextRelationships.filter((rel) => rel.from === item.id).map((rel) => rel.to));
+  const dependentIds = uniqueStrings(contextRelationships.filter((rel) => rel.to === item.id && !isExternalRelationship(rel)).map((rel) => rel.from));
   const stale = ageDays(item, now);
   const requiredContext = uniqueStrings([
     ...dependencyIds.map((id) => `dependency:${id}`),
@@ -961,24 +1018,24 @@ function scoreBreakdown(item: PmItem, rels: Relationship[], activeIds: Set<strin
   };
 }
 
-function activeDependencyCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return uniqueStrings(rels.filter((rel) => rel.from === item.id && isBlockingRelationship(rel) && activeIds.has(rel.to)).map((rel) => rel.to)).length;
+function activeDependencyCount(item: PmItem, rels: Relationship[]): number {
+  return uniqueStrings(rels.filter((rel) => rel.from === item.id && isBlockingRelationship(rel)).map((rel) => JSON.stringify([rel.to, isExternalRelationship(rel)]))).length;
 }
 
 function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return uniqueStrings(rels.filter((rel) => rel.to === item.id && isBlockingRelationship(rel) && activeIds.has(rel.from)).map((rel) => rel.from)).length;
+  return uniqueStrings(rels.filter((rel) => rel.to === item.id && !isExternalRelationship(rel) && isBlockingRelationship(rel) && activeIds.has(rel.from)).map((rel) => rel.from)).length;
 }
 
 /** Keep active work matching the requested assignee before ranking it. */
 function filterCandidates(items: PmItem[], options: BriefOptions): PmItem[] {
   return items
-    .filter((item) => !isClosed(item))
+    .filter((item) => !isClosed(item, options.statusRegistry))
     .filter((item) => !options.assignee || text(item.assignee) === options.assignee)
     .filter((item) => !options.statuses?.length || options.statuses.includes(statusOf(item)));
 }
 
 /** Rank eligible work deterministically, respecting explicit dependency ordering. */
-function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[], activeIds = activeItemIds(items)): RankedCandidate[] {
+function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels: Relationship[], activeIds = activeItemIds(items, options.statusRegistry)): RankedCandidate[] {
   const candidates = filterCandidates(items, options);
   // When `pm next` supplied a canonical order, it is the authoritative ranking
   // so `brief next` agrees with `pm next`. Unranked candidates fall after ranked
@@ -1014,14 +1071,14 @@ function rankCandidates(items: PmItem[], options: BriefOptions, now: Date, rels:
         if (a.activeDependents !== b.activeDependents) return b.activeDependents - a.activeDependents;
       }
       return b.score.total - a.score.total || itemUpdatedAt(b.item).localeCompare(itemUpdatedAt(a.item)) || a.item.id.localeCompare(b.item.id);
-    });
+    }).filter((candidate) => !candidate.rank.blocked);
 }
 
 /** Select the requested number of ranked work items from the full tracker corpus. */
 export function selectNextItems(items: PmItem[], options: BriefOptions = {}): BriefItem[] {
   const now = new Date(options.generatedAt ?? Date.now());
-  const rels = items.flatMap(extractRelationships);
-  const activeIds = activeItemIds(items);
+  const rels = blockerRelationships(items, options.statusRegistry);
+  const activeIds = activeItemIds(items, options.statusRegistry);
   return rankCandidates(items, options, now, rels, activeIds)
     .slice(0, options.nextCount ?? 5)
     .map((candidate) => toBriefItem(candidate.item, rels, items, now, activeIds, candidate.rank));
@@ -1030,8 +1087,8 @@ export function selectNextItems(items: PmItem[], options: BriefOptions = {}): Br
 /** Pair each selected work item with its ranking evidence and active dependency counts. */
 export function explainNextItems(items: PmItem[], options: BriefOptions = {}): NextItemExplanation[] {
   const now = new Date(options.generatedAt ?? Date.now());
-  const rels = items.flatMap(extractRelationships);
-  const activeIds = activeItemIds(items);
+  const rels = blockerRelationships(items, options.statusRegistry);
+  const activeIds = activeItemIds(items, options.statusRegistry);
   return rankCandidates(items, options, now, rels, activeIds)
     .slice(0, options.nextCount ?? 5)
     .map((candidate, index) => ({
@@ -1048,7 +1105,7 @@ export function detectStaleContext(items: PmItem[], options: BriefOptions = {}):
   const now = new Date(options.generatedAt ?? Date.now());
   const staleDays = options.staleDays ?? 7;
   return items
-    .filter((item) => !isClosed(item))
+    .filter((item) => !isClosed(item, options.statusRegistry))
     .map((item) => ({ item, days: ageDays(item, now) }))
     .filter(({ days }) => days >= staleDays)
     .sort((a, b) => b.days - a.days || a.item.id.localeCompare(b.item.id))
@@ -1092,7 +1149,7 @@ export function summarizeMomentum(items: PmItem[], options: BriefOptions = {}): 
   const windowDays = Math.max(0, options.completedDays ?? 7);
   const cutoff = now.getTime() - windowDays * 86_400_000;
   const closed = items
-    .filter((item) => isClosed(item))
+    .filter((item) => isClosed(item, options.statusRegistry))
     .map((item) => {
       const closedRaw = itemClosedAt(item);
       return { item, closedRaw, closedTime: Date.parse(closedRaw) };
@@ -1129,8 +1186,8 @@ export function summarizeMomentum(items: PmItem[], options: BriefOptions = {}): 
 export function summarizeRisks(items: PmItem[], options: BriefOptions = {}): BriefRisk[] {
   const now = new Date(options.generatedAt ?? Date.now());
   const risks: BriefRisk[] = [];
-  const rels = items.flatMap(extractRelationships);
-  for (const item of items.filter((candidate) => !isClosed(candidate))) {
+  const rels = blockerRelationships(items, options.statusRegistry);
+  for (const item of items.filter((candidate) => !isClosed(candidate, options.statusRegistry))) {
     if (rels.some((rel) => rel.from === item.id && (rel.kind === "blocked_by" || rel.kind === "depends_on"))) {
       risks.push({ itemId: item.id, severity: "high", reason: "blocked by visible dependency" });
     }
@@ -1166,7 +1223,7 @@ function selectedFocus(items: PmItem[], options: BriefOptions): FocusSelection {
   const selected: PmItem[] = [];
   const keep = (item: PmItem, explicitId = false): void => {
     if (seenIds.has(item.id)) return;
-    if (options.includeClosed || !isClosed(item)) {
+    if (options.includeClosed || !isClosed(item, options.statusRegistry)) {
       seenIds.add(item.id);
       selected.push(item);
     } else if (explicitId) {
@@ -1220,7 +1277,7 @@ function buildInsights(items: PmItem[], options: BriefOptions, focusSelection: F
       suggestion: "pm brief --include-closed --format markdown",
     });
   }
-  const openItems = items.filter((item) => !isClosed(item));
+  const openItems = items.filter((item) => !isClosed(item, options.statusRegistry));
   const candidates = filterCandidates(items, options);
   if (next.length === 0) {
     if (openItems.length === 0) {
@@ -1705,14 +1762,14 @@ function renderBriefContent(brief: AgentBrief, format: BriefFormat): string {
 /**
  * Settle the estimate's own digit count before measuring the complete rendering.
  * Increasing from zero reaches a fixed point after at most the number of digits
- * in a JavaScript string length; disclosure can never create a silent overrun.
+ * in the rendered UTF-8 byte count; disclosure can never create a silent overrun.
  */
 function measureRenderedBrief(brief: AgentBrief, format: BriefFormat): AgentBrief {
   const measured = { ...brief, budget: { ...brief.budget, estimatedTokens: 0 } };
-  let estimate = Math.ceil(renderBriefContent(measured, format).length / 4);
+  let estimate = estimatePmOutputTokens(Buffer.byteLength(renderBriefContent(measured, format), "utf8"));
   while (estimate !== measured.budget.estimatedTokens) {
     measured.budget.estimatedTokens = estimate;
-    estimate = Math.ceil(renderBriefContent(measured, format).length / 4);
+    estimate = estimatePmOutputTokens(Buffer.byteLength(renderBriefContent(measured, format), "utf8"));
   }
   return measured;
 }
@@ -1839,8 +1896,8 @@ function compactToBudget(brief: AgentBrief, format: BriefFormat): AgentBrief {
 export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBrief {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
   const now = new Date(generatedAt);
-  const rels = items.flatMap(extractRelationships);
-  const activeIds = activeItemIds(items);
+  const rels = blockerRelationships(items, options.statusRegistry);
+  const activeIds = activeItemIds(items, options.statusRegistry);
   const focusSelection = selectedFocus(items, options);
   const focus = focusSelection.items.map((item) => toBriefItem(item, rels, items, now, activeIds));
   const next = selectNextItems(items, options);
@@ -1853,11 +1910,11 @@ export function buildBrief(items: PmItem[], options: BriefOptions = {}): AgentBr
   const blockers = rels
     .filter((rel) => rel.kind === "blocked_by" || rel.kind === "depends_on")
     .map((rel) => {
-      const blocker = items.find((item) => item.id === rel.to);
+      const blocker = rel.external ? undefined : items.find((item) => item.id === rel.to);
       return { itemId: rel.from, blockedBy: rel.to, kind: rel.kind, title: blocker ? titleOf(blocker) : undefined, status: blocker ? statusOf(blocker) : undefined };
     });
   const decisionsNeeded = items
-    .filter((item) => !isClosed(item) && typeOf(item).toLowerCase() === "decision")
+    .filter((item) => !isClosed(item, options.statusRegistry) && typeOf(item).toLowerCase() === "decision")
     .slice(0, 5)
     .map((item) => toBriefItem(item, rels, items, now, activeIds));
   const markedFocus = mark(focus);
@@ -2758,7 +2815,7 @@ export function parseActivitySinceOutput(output: string): DeltaActivityEntry[] {
   return normalized;
 }
 
-const OPEN_STATUSES = new Set(["open", "in_progress", "ready"]);
+
 
 /** JSON-Patch paths that represent a dependency/relationship edit, across pm
  * versions and extension schemas. Real pm 2026.7.22 uses `/metadata/dependencies`. */
@@ -2780,6 +2837,7 @@ export function buildDelta(
   itemsById: Map<string, PmItem>,
   options: {
     since: string;
+    statusRegistry?: RuntimeStatusRegistry;
     until?: string;
     author?: string;
     generatedAt?: string;
@@ -2791,6 +2849,7 @@ export function buildDelta(
   } = { since: "" },
 ): DeltaSummary {
   const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const statusRegistry = options.statusRegistry ?? DEFAULT_STATUS_REGISTRY;
 
   const byId = new Map<string, DeltaActivityEntry[]>();
   for (const entry of entries) {
@@ -2853,9 +2912,9 @@ export function buildDelta(
         if (path === "/metadata/status") {
           if (typeof p.value === "string") {
             statusValues.push(p.value);
-            if (p.value === "closed" || p.value === "done") latestLifecycle = "closed";
-            else if (p.value === "canceled" || p.value === "cancelled") latestLifecycle = "canceled";
-            else if (OPEN_STATUSES.has(p.value) && (latestLifecycle === "closed" || latestLifecycle === "canceled")) latestLifecycle = "reopened";
+            const status = normalizeLifecycleStatus(p.value, statusRegistry);
+            if (isClosedStatus(status, statusRegistry)) latestLifecycle = statusRegistry.terminal_canceled_statuses.has(status) ? "canceled" : "closed";
+            else if (statusRegistry.active_statuses.has(status) && (latestLifecycle === "closed" || latestLifecycle === "canceled")) latestLifecycle = "reopened";
           }
         }
         if (path === "/metadata/close_reason" && (pop === "add" || pop === "replace")) {
@@ -4286,6 +4345,8 @@ export interface DuplicatePair {
 
 /** Options controlling which items are scanned and how pairs are ranked/truncated. */
 export interface DuplicateSweepOptions {
+  /** Lifecycle registry used by duplicate remediation. */
+  statusRegistry?: RuntimeStatusRegistry;
   /** Inclusive similarity threshold on the 0..1 scale (default 0.6). */
   threshold?: number;
   /** Maximum pairs to report, after ranking (default 20). */
@@ -4408,9 +4469,9 @@ function duplicatePairItem(item: PmItem): DuplicatePairItem {
  *   `created_at`) as canonical and relate the newer to it, falling back to id
  *   ordering when creation timestamps are missing.
  */
-export function duplicateRemediationCommand(a: DuplicatePairItem, b: DuplicatePairItem): string {
-  const aClosed = isClosedStatus(a.status);
-  const bClosed = isClosedStatus(b.status);
+export function duplicateRemediationCommand(a: DuplicatePairItem, b: DuplicatePairItem, statusRegistry = DEFAULT_STATUS_REGISTRY): string {
+  const aClosed = isClosedStatus(a.status, statusRegistry);
+  const bClosed = isClosedStatus(b.status, statusRegistry);
   if (aClosed !== bClosed) {
     const open = aClosed ? b : a;
     const closed = aClosed ? a : b;
@@ -4443,6 +4504,7 @@ export function collapseDuplicatePairs(
   candidates: readonly PmItem[],
   matchesByCandidate: ReadonlyMap<string, readonly SimilarItemMatch[]>,
   itemsById: ReadonlyMap<string, PmItem>,
+  statusRegistry = DEFAULT_STATUS_REGISTRY,
 ): DuplicatePair[] {
   const best = new Map<
     string,
@@ -4478,7 +4540,7 @@ export function collapseDuplicatePairs(
       items: [a, b],
       score: Math.round(entry.score * 1000) / 1000,
       reason: entry.reason,
-      remediation: duplicateRemediationCommand(a, b),
+      remediation: duplicateRemediationCommand(a, b, statusRegistry),
     });
   }
   pairs.sort((x, y) => (y.score - x.score) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
@@ -4555,7 +4617,7 @@ export function buildDuplicateSweep(
   // pass that exact list through. Re-deriving it here would run the same filter a
   // second time and leave two places that must agree about what a candidate is.
   const candidates = options.candidates ?? selectDuplicateCandidates(items, options);
-  const ranked = collapseDuplicatePairs(candidates, matchesByCandidate, itemsById);
+  const ranked = collapseDuplicatePairs(candidates, matchesByCandidate, itemsById, options.statusRegistry);
   const pairs = ranked.slice(0, limit);
   return {
     pairs,
@@ -4738,6 +4800,7 @@ function registerCommands(api: ExtensionApi): void {
       // ok: true and never mentions receipts (unbraind/pm-cli#770).
       const mergeDecisions = await collectPendingMergeDecisions(ctx.pm_root);
       const brief = buildBrief(items, {
+        statusRegistry: await readStatusRegistry(ctx.pm_root),
         format,
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 4000),
         dependencyOrder: briefDependencyOrder,
@@ -4792,6 +4855,7 @@ function registerCommands(api: ExtensionApi): void {
       });
       const mergeDecisions = await collectPendingMergeDecisions(ctx.pm_root);
       const brief = buildBrief(items, {
+        statusRegistry: await readStatusRegistry(ctx.pm_root),
         format: "prompt",
         tokenBudget: readInt(options, ["token-budget", "tokenBudget", "max-tokens", "maxTokens"], 2500),
         dependencyOrder: readBool(options, "dependency-order", "dependencyOrder"),
@@ -4841,6 +4905,7 @@ function registerCommands(api: ExtensionApi): void {
       const assignee = readString(options, "assignee");
       const dependencyOrder = readBool(options, "dependency-order", "dependencyOrder");
       const nextOptions: BriefOptions = {
+        statusRegistry: await readStatusRegistry(ctx.pm_root),
         nextCount,
         assignee,
         dependencyOrder,
@@ -4887,6 +4952,7 @@ function registerCommands(api: ExtensionApi): void {
       const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
       const stale = detectStaleContext(readPmItems(ctx.pm_root), {
+        statusRegistry: await readStatusRegistry(ctx.pm_root),
         staleDays: readNonNegativeInt(options, ["days"], 7),
         generatedAt: new Date().toISOString(),
       });
@@ -4912,6 +4978,7 @@ function registerCommands(api: ExtensionApi): void {
       const format = resolveBriefFormat(options, ctx.global, "text");
       if (format !== "text" && format !== "json") throw new CommandError("--format must be text or json", EXIT_CODE.USAGE);
       const momentum = summarizeMomentum(readPmItems(ctx.pm_root), {
+        statusRegistry: await readStatusRegistry(ctx.pm_root),
         completedDays: readInt(options, ["days"], 7),
         generatedAt: new Date().toISOString(),
       });
@@ -4978,6 +5045,7 @@ function registerCommands(api: ExtensionApi): void {
       const itemsById = new Map<string, PmItem>();
       for (const item of items) itemsById.set(item.id, item);
       const summary = buildDelta(entries, itemsById, {
+        statusRegistry: await readStatusRegistry(ctx.pm_root),
         since: checkpoint,
         until,
         author,
@@ -5202,7 +5270,10 @@ function registerCommands(api: ExtensionApi): void {
       // remaining cost needs an SDK-side batch primitive (filed upstream as
       // pm-cli#709); `--since` remains the mitigation that actually matters.
       const matchesByCandidate = await scanCandidatesForDuplicates(candidates, workspace, threshold);
-      const summary = buildDuplicateSweep(items, matchesByCandidate, { threshold, limit, statuses, since, generatedAt: new Date().toISOString(), candidates });
+      const summary = buildDuplicateSweep(items, matchesByCandidate, {
+        statusRegistry: await readStatusRegistry(ctx.pm_root),
+        threshold, limit, statuses, since, generatedAt: new Date().toISOString(), candidates,
+      });
 
       if (format === "json") {
         const output = `${JSON.stringify(summary, null, 2)}\n`;

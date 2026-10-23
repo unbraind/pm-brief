@@ -1,9 +1,11 @@
 # Rendered brief budgets
 
 `pm brief --max-tokens N` and `pm brief prompt --max-tokens N` enforce
-`ceil(output.length / 4) <= N` on the chosen output. This is the existing
-character heuristic, using JavaScript string length, rather than measured model
-tokens or UTF-8 bytes. JSON includes indentation and the final newline.
+`estimatePmOutputTokens(Buffer.byteLength(output, "utf8")) <= N` on the chosen
+output. This is the SDK UTF-8 byte heuristic, rather than measured model tokens.
+JSON includes indentation and the final newline. Multilingual text uses its full
+UTF-8 size. Delta and divergence estimates retain a stricter JSON-string bound
+that also accounts for string escaping.
 
 `buildBrief(items, { tokenBudget, format })` budgets `json` by default; set
 `format` to `markdown`, `prompt` or `slack` to keep all the context that the chosen

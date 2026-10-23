@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { PmClient, certifyCompleteListResult, createPmCliExpectedError, estimatePmOutputTokens, scanMutationSecrets } from "@unbrained/pm-cli/sdk";
+import { PmClient, certifyCompleteListResult, createPmCliExpectedError, estimatePmOutputTokens, readSettings, resolveRuntimeStatusRegistry, scanMutationSecrets } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 import { buildBrief } from "./index.ts";
 import type { AgentBrief } from "./index.ts";
@@ -178,7 +178,8 @@ export async function buildDisclosureBrief(input: DisclosurePolicy, options: Dis
       }
       return [safe];
     });
-    brief = buildBrief(protectedItems, { pmRoot: ".agents/pm", generatedAt: options.generatedAt });
+    const statusRegistry = resolveRuntimeStatusRegistry((await readSettings(options.pmRoot)).schema);
+    brief = buildBrief(protectedItems, { pmRoot: ".agents/pm", generatedAt: options.generatedAt, statusRegistry });
   } catch {
     throw new DisclosureError("tracker", "Cannot build a certified disclosure brief", "Run pm health and resolve unreadable or incomplete records before retrying");
   }
