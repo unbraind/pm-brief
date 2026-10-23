@@ -94,7 +94,10 @@ See [budget evidence and recovery](docs/brief-budget.md) for the regression matr
 
 Next-work recommendations exclude items with unresolved prerequisites, including
 reverse `blocks` edges and missing targets. Held work remains visible in explicit
-focus, blocker and risk evidence. Workspace terminal roles govern lifecycle
+focus, blocker and risk evidence. External targets (`source_kind=global`, its
+`external` alias, or external reference syntax) stay separate from local IDs:
+external reverse edges cannot block local namesakes, and external references
+cannot add local dependent context or ranking credit. Workspace terminal roles govern lifecycle
 filters; library callers can supply `BriefOptions.statusRegistry` from
 `resolveRuntimeStatusRegistry((await readSettings(pmRoot)).schema)`. Omitted
 registries use SDK core defaults, so custom terminal names need their registry.

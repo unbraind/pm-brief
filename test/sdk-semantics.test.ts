@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { PmClient, readSettings, resolveRuntimeStatusRegistry, estimatePmOutputTokens } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
-import extension, { buildBrief, buildDelta, CommandError, detectStaleContext, duplicateRemediationCommand, renderBrief, selectNextItems, summarizeMomentum, summarizeRisks, type PmItem } from "../index.ts";
+import extension, { buildBrief, buildDelta, CommandError, detectStaleContext, duplicateRemediationCommand, explainNextItems, extractRelationships, renderBrief, selectNextItems, summarizeMomentum, summarizeRisks, type PmItem } from "../index.ts";
 
 
 /** Initialize an isolated native tracker outside git and guarantee cleanup before its first write. */
@@ -133,4 +133,69 @@ test("SDK blocker adaptation preserves external source provenance and unrelated 
   assert.equal(brief.next.length, 0);
   assert.deepEqual(brief.focus[0].dependencyIds, ["fixture-local", "fixture-related"]);
   assert.ok(brief.blockers.some(edge => edge.blockedBy === "fixture-local" && edge.status === undefined));
+});
+
+for (const sourceKind of ["global", "external"]) {
+  test(`external reverse isolation: ${sourceKind} blocks never target a same-ID local item`, async (t) => {
+    const { client } = await tracker(t);
+    const a = (await client.create({ type: "Task", title: "Independent local work" })).item.id;
+    const b = (await client.create({ type: "Task", title: "Blocks external work", dep: [`id=${a},kind=blocks,source_kind=${sourceKind}`] })).item.id;
+    const items = await corpus(client);
+    const brief = buildBrief(items, { tokenBudget: 32000, focusIds: [a, b] });
+    assert.ok(brief.next.some(item => item.id === a), "external reverse edge must not block local A");
+    assert.deepEqual(brief.blockers, []);
+    assert.deepEqual(summarizeRisks(items), []);
+    assert.deepEqual(brief.focus.find(item => item.id === a)?.dependencyIds, []);
+    assert.deepEqual(brief.focus.find(item => item.id === a)?.dependentIds, []);
+    assert.deepEqual(brief.focus.find(item => item.id === b)?.dependentIds, []);
+    assert.deepEqual(brief.focus.find(item => item.id === b)?.dependencyIds, [a]);
+    assert.ok(!brief.focus.find(item => item.id === a)?.requiredContext.includes(`dependency:${b}`));
+    assert.ok(explainNextItems(items).every(row => row.activeDependents === 0 && row.activeDependencies === 0));
+  });
+}
+
+test("external context isolation: direct external blockers do not inflate local dependents", async (t) => {
+  const { client } = await tracker(t);
+  const a = (await client.create({ type: "Task", title: "Local work with external namesake" })).item.id;
+  const b = (await client.create({ type: "Task", title: "Wait for external prerequisite", dep: [`id=${a},kind=blocked_by,source_kind=global`] })).item.id;
+  const c = (await client.create({ type: "Task", title: "Wait for local prerequisite", dep: [`id=${a},kind=blocked_by`] })).item.id;
+  const items = await corpus(client);
+  const brief = buildBrief(items, { tokenBudget: 32000, focusIds: [a, b, c] });
+  assert.deepEqual(brief.next.map(item => item.id), [a]);
+  assert.deepEqual(brief.next[0].dependentIds, [c]);
+  assert.equal(explainNextItems(items)[0].activeDependents, 1);
+  assert.equal(explainNextItems(items)[0].score.dependents, 8);
+  assert.ok(brief.blockers.some(edge => edge.itemId === b && edge.status === undefined));
+  assert.ok(brief.blockers.some(edge => edge.itemId === c && edge.status === "open"));
+  await client.close(a, "Local prerequisite complete");
+  const after = buildBrief(await corpus(client), { tokenBudget: 32000 });
+  assert.deepEqual(after.next.map(item => item.id), [c]);
+  assert.deepEqual(after.blockers.map(edge => edge.itemId), [b]);
+});
+
+test("external identity isolation: colliding edges and external self-ID targets survive extraction", () => {
+  const item: PmItem = { id: "fixture-work", status: "open", dependencies: [
+    { id: "fixture-work", kind: "blocked_by", source_kind: "global" },
+    { id: "fixture-work", kind: "related" },
+    { id: "fixture-a", kind: "blocks", source_kind: "external" },
+    { id: "fixture-a", kind: "blocks" },
+    { id: "fixture-a", kind: "blocks", source_kind: "global" },
+  ] };
+  const relationships = extractRelationships(item);
+  assert.equal(relationships.length, 3, "preserve external self-ID and both target namespaces; deduplicate external aliases");
+  const brief = buildBrief([item, { id: "fixture-a", status: "open" }], { tokenBudget: 32000, focusIds: [item.id, "fixture-a"] });
+  assert.deepEqual(brief.next, []);
+  assert.ok(brief.blockers.some(edge => edge.itemId === item.id && edge.blockedBy === item.id && edge.status === undefined));
+  assert.deepEqual(brief.focus.find(row => row.id === "fixture-a")?.dependencyIds, [item.id]);
+  assert.deepEqual(brief.focus.find(row => row.id === item.id)?.dependentIds, ["fixture-a"]);
+});
+
+test("external reverse isolation: URI targets never create local blocker or context links", () => {
+  const target = "github:fixture/project#1";
+  const items: PmItem[] = [{ id: target, status: "open" }, { id: "fixture-source", status: "open", dependencies: [{ id: target, kind: "blocks" }] }];
+  const brief = buildBrief(items, { tokenBudget: 32000, focusIds: [target] });
+  assert.equal(brief.next.length, 2);
+  assert.deepEqual(brief.blockers, []);
+  assert.deepEqual(brief.focus[0].dependencyIds, []);
+  assert.deepEqual(brief.focus[0].dependentIds, []);
 });

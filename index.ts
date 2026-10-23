@@ -32,6 +32,7 @@ import type { MergeDecisionReceipt, MergePreferredSide } from "@unbrained/pm-cli
 import {
   readSettings, SETTINGS_DEFAULTS, resolveItemTypeRegistry, resolveRuntimeStatusRegistry,
   statusIsTerminal, normalizeStatusInput, indexBlockedByIds, resolveItemBlockers,
+  isExternalDependencyReference, isExternalDependencySourceKind,
   estimatePmOutputTokens, type RuntimeStatusRegistry,
 } from "@unbrained/pm-cli/sdk";
 
@@ -765,15 +766,15 @@ export function extractRelationships(item: PmItem): Relationship[] {
     ...parseRelationshipValue(item.dependencies, "depends_on"),
     ...parseRelationshipValue(item.blocked_by, "blocked_by"),
     ...parseRelationshipValue(item.blockedBy, "blocked_by"),
-  ].filter((rel) => rel.to && rel.to !== item.id).map((rel) => ({ from: item.id, ...rel }));
+  ].filter((rel) => rel.to && (rel.to !== item.id || isExternalRelationship(rel))).map((rel) => ({ from: item.id, ...rel }));
   // pm's `update --blocked-by <id>` denormalizes the edge into BOTH item.dependencies
   // (a blocked_by-kind object) AND item.blocked_by (a string), so the same edge is
-  // parsed twice. Dedup by (from,to,kind): a relationship is uniquely identified by
-  // that triple, so this drops only redundant duplicates and is a no-op for
-  // singly-sourced edges (e.g. depends_on, which has no denormalized string field).
+  // parsed twice. Include provenance in the identity so an external reference
+  // never hides a local edge with the same ID. Only duplicate identities collapse;
+  // edges stored once retain their context.
   const seen = new Set<string>();
   return rels.filter((rel) => {
-    const key = JSON.stringify([rel.from, rel.to, rel.kind]);
+    const key = JSON.stringify([rel.from, rel.to, rel.kind, isExternalRelationship(rel)]);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -823,6 +824,11 @@ function isBlockingRelationship(rel: Relationship): boolean {
   return rel.kind === "blocked_by" || rel.kind === "depends_on";
 }
 
+/** Keep external targets distinct from local IDs in every relationship projection. */
+function isExternalRelationship(rel: { to: string; source_kind?: string; external?: boolean }): boolean {
+  return rel.external === true || isExternalDependencyReference(rel.to) || isExternalDependencySourceKind(rel.source_kind);
+}
+
 /** Adapt legacy relationship aliases to the SDK, then retain canonical blocker orientation and unresolved targets. */
 function blockerRelationships(items: PmItem[], registry = DEFAULT_STATUS_REGISTRY): Relationship[] {
   const corpus = items.map((item) => ({
@@ -833,7 +839,12 @@ function blockerRelationships(items: PmItem[], registry = DEFAULT_STATUS_REGISTR
     })),
   } satisfies ItemMetadata));
   const byId = new Map(corpus.map((item) => [item.id.trim().toLowerCase(), item]));
-  const blockers = indexBlockedByIds(corpus);
+  // The pinned SDK reverse index drops provenance. Only local reverse edges
+  // belong in that index; direct blockers retain their original metadata below.
+  const blockers = indexBlockedByIds(corpus.map((item) => ({ ...item,
+    dependencies: item.dependencies.filter((dep) => dep.kind === "blocks" &&
+      !isExternalRelationship({ to: dep.id, source_kind: dep.source_kind })),
+  })));
   return corpus.flatMap((item) => resolveItemBlockers({ updated_at: item.updated_at,
     dependencies: [...item.dependencies, ...(blockers.get(item.id.trim().toLowerCase()) ?? []).map((id) => ({ id, kind: "blocked_by" }))],
   }, byId, registry).filter((blocker) => !blocker.resolved).map((blocker) => ({
@@ -925,9 +936,9 @@ function rankItem(item: PmItem, rels: Relationship[], activeIds: Set<string>, no
 /** Project ranked tracker metadata into the compact agent-facing brief item. */
 function toBriefItem(item: PmItem, rels: Relationship[], allItems: PmItem[], now: Date, activeIds?: Set<string>, rankOverride?: RankEvidence): BriefItem {
   const contextRelationships = [...allItems.flatMap(extractRelationships).map((rel) =>
-    rel.kind === "blocks" ? { ...rel, from: rel.to, to: rel.from, kind: "blocked_by" } : rel), ...rels];
+    rel.kind === "blocks" && !isExternalRelationship(rel) ? { ...rel, from: rel.to, to: rel.from, kind: "blocked_by" } : rel), ...rels];
   const dependencyIds = uniqueStrings(contextRelationships.filter((rel) => rel.from === item.id).map((rel) => rel.to));
-  const dependentIds = uniqueStrings(contextRelationships.filter((rel) => rel.to === item.id).map((rel) => rel.from));
+  const dependentIds = uniqueStrings(contextRelationships.filter((rel) => rel.to === item.id && !isExternalRelationship(rel)).map((rel) => rel.from));
   const stale = ageDays(item, now);
   const requiredContext = uniqueStrings([
     ...dependencyIds.map((id) => `dependency:${id}`),
@@ -1002,7 +1013,7 @@ function activeDependencyCount(item: PmItem, rels: Relationship[]): number {
 }
 
 function activeDependentCount(item: PmItem, rels: Relationship[], activeIds: Set<string>): number {
-  return uniqueStrings(rels.filter((rel) => rel.to === item.id && isBlockingRelationship(rel) && activeIds.has(rel.from)).map((rel) => rel.from)).length;
+  return uniqueStrings(rels.filter((rel) => rel.to === item.id && !isExternalRelationship(rel) && isBlockingRelationship(rel) && activeIds.has(rel.from)).map((rel) => rel.from)).length;
 }
 
 /** Keep active work matching the requested assignee before ranking it. */
