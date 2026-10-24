@@ -2,13 +2,18 @@ id: pm-brief-agze
 title: "Honor SDK blockers, lifecycle roles and UTF-8 brief budgets"
 description: "Verify and address audit F03, F05 and F14 using the pinned SDK, real non-git trackers and independent behavioural revert proofs."
 type: Task
-status: in_progress
+status: closed
 priority: 2
 tags[3]: fix,"gh:unbraind/pm-brief#173",sdk
 created_at: "2026-10-23T20:24:45.673Z"
-updated_at: "2026-10-23T23:02:31.051Z"
+updated_at: "2026-10-24T23:09:37.067Z"
+closed_at: "2026-10-24T21:43:41.418Z"
+completed_at: "2026-10-23T23:07:11.000Z"
 author: codex-agent
 acceptance_criteria: "F03: reverse blocks and unresolved prerequisites are held with blocker evidence until resolved; F05: custom terminal roles are excluded and custom active statuses remain eligible across brief lifecycle views; F14: multilingual brief delta and divergence budgets use SDK UTF-8 estimates for exact output"
+resolution: "Honors reverse blockers and unresolved prerequisites, custom lifecycle roles and UTF-8 output budgets with targeted regressions and full release gates."
+expected_result: "F03: reverse blocks and unresolved prerequisites are held with blocker evidence until resolved; F05: custom terminal roles are excluded and custom active statuses remain eligible across brief lifecycle views; F14: multilingual brief delta and divergence budgets use SDK UTF-8 estimates for exact output"
+actual_result: "https://github.com/unbraind/pm-brief/pull/173, merged 2026-10-23T23:07:11Z, merge 094629558dd38cfea756357c06fb0d3c69c9e378: Honors reverse blockers and unresolved prerequisites, custom lifecycle roles and UTF-8 output budgets with targeted regressions and full release gates."
 comments[24]{created_at,author,text}:
   "2026-10-23T20:25:08.967Z",codex-agent,"Verified F03 F05 F14 against origin/main cdcd1e3: outgoing-only active-ID blockers miss reverse blocks and missing targets, lifecycle helpers hard-code spellings, and both estimators divide UTF-16 length by four. All findings valid. The pinned SDK exports runtime status and UTF-8 estimation helpers plus blocker resolution; preserve legacy depends_on aliases at the SDK boundary. Owner explicitly groups these findings in one PR."
   "2026-10-23T20:33:07.947Z",codex-agent,"Implementation uses public isTerminalStatus (the SDK alias-normalizing terminal-role wrapper), resolveRuntimeStatusRegistry/readSettings, indexBlockedByIds plus resolveItemBlockers, and estimatePmOutputTokens. Published minimum SDK 2026.10.13 exports all imports, so dev/peer and manifest floors remain unchanged. Preserve depends_on as a blocker alias and external source provenance. Divergence classification has no lifecycle predicate, while delta transitions and duplicate remediation now receive the workspace registry. Focused native non-git regressions pass 4/4; pm-linked run passed 3/3 before the external-provenance case was added."
@@ -73,4 +78,5 @@ docs[3]:
     note: Readiness semantics and regression matrix
   - path: README.md
     scope: project
+close_reason: "https://github.com/unbraind/pm-brief/pull/173, merged 2026-10-23T23:07:11Z, merge 094629558dd38cfea756357c06fb0d3c69c9e378: Honors reverse blockers and unresolved prerequisites, custom lifecycle roles and UTF-8 output budgets with targeted regressions and full release gates."
 body: ""

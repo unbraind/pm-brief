@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Render stakeholder briefs through explicit disclosure profiles ([pm-brief-nsks](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nsks.toon))
+
+### Fixed
+
+- Honor SDK blockers, lifecycle roles and UTF-8 brief budgets ([pm-brief-agze](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-agze.toon))
+
+### Other
+
+- Reconcile stale in-progress tracker records (2026-10-23) ([pm-brief-reconcile-1023](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-reconcile-1023.toon))
+
 ## 2026.10.24 - 2026-10-24
 
 ### Added

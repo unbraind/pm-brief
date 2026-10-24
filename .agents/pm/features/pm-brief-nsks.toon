@@ -2,12 +2,17 @@ id: pm-brief-nsks
 title: Render stakeholder briefs through explicit disclosure profiles
 description: "Acceptance: render one brief for internal agents, external reviewers or public sharing with a field-level exclusion manifest. Synthetic secrets and disallowed custom fields never enter public output. Unknown policy fields fail closed. Dry run explains exclusions without echoing forbidden text. Provide typed SDK and native CLI, bounded TOON/JSON, typed refusals with remedies, README and example, non-git public tracker replay, and npm plus Bun CI release gates."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags[2]: added,disclosure
 created_at: "2026-10-23T15:28:21.049Z"
-updated_at: "2026-10-23T17:01:28.959Z"
+updated_at: "2026-10-24T23:09:37.859Z"
+closed_at: "2026-10-24T21:43:41.531Z"
+completed_at: "2026-10-23T17:16:46.000Z"
 author: codex-agent
+resolution: "Adds explicit stakeholder disclosure profiles, selector-safe field projection and real non-git privacy regressions."
+expected_result: "Acceptance: render one brief for internal agents, external reviewers or public sharing with a field-level exclusion manifest. Synthetic secrets and disallowed custom fields never enter public output. Unknown policy fields fail closed. Dry run explains exclusions without echoing forbidden text. Provide typed SDK and native CLI, bounded TOON/JSON, typed refusals with remedies, README and example, non-git public tracker replay, and npm plus Bun CI release gates."
+actual_result: "https://github.com/unbraind/pm-brief/pull/172, merged 2026-10-23T17:16:46Z, merge cdcd1e3f5e59db8b53cdfa5397e6d1ec18ef080d: Adds explicit stakeholder disclosure profiles, selector-safe field projection and real non-git privacy regressions."
 comments[14]{created_at,author,text}:
   "2026-10-23T15:29:08.533Z",codex-agent,"Overlap rechecked against the pinned SDK and sibling package sources: core sdk/context-intent-contracts bounds read projections; pm-github README public import gate owns staged publication; pm-memory README input privacy gate owns mutations/import. This item owns only brief-specific disclosure/rendering. Reuse native PmClient.listAllComplete plus certifyCompleteListResult, existing buildBrief ranking, scanMutationSecrets, estimatePmOutputTokens, native JSON/TOON formatting and expected-error contracts. Policy is a closed audience allowlist with deny-only selectors; unknown policy keys/selectors refuse before reads. Exclusion paths use array indices and opaque ordinals for unknown keys; no source values in dry runs or refusals. Local targeted tests and static gates only; full release checks use the npm/Bun CI matrix at unchanged thresholds."
   "2026-10-23T15:40:28.236Z",codex-agent,"Implementation: typed SDK renderDisclosureBrief/buildDisclosureBrief/parseDisclosurePolicy plus brief disclose --audience or --policy. Profiles can only narrow. Guard native source fields before compaction, then permitted rendered values; value-free manifests aggregate profile denials and retain ordinal secret paths. Default complete output ceiling 8000 estimated tokens; dry runs contain no brief. Source compaction remains visible. Five behavioural reversions each produced the expected regression failure: credential guard, closed policy keys, dry-run suppression, unknown-field exclusion, and pre-compaction source guard. Each mutant changed only its guard branch, ran the matching node --test --test-name-pattern regression, and was restored byte-for-byte. No SDK mocks. Initial nine targeted tests passed; expanded ten-test suite now adds source-secret and native error coverage."
@@ -38,4 +43,5 @@ tests[4]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
 docs[2]{path,scope}:
   docs/examples/disclosure.md,project
   README.md,project
+close_reason: "https://github.com/unbraind/pm-brief/pull/172, merged 2026-10-23T17:16:46Z, merge cdcd1e3f5e59db8b53cdfa5397e6d1ec18ef080d: Adds explicit stakeholder disclosure profiles, selector-safe field projection and real non-git privacy regressions."
 body: ""
