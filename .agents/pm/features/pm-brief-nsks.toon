@@ -6,9 +6,9 @@ status: closed
 priority: 2
 tags[2]: added,disclosure
 created_at: "2026-10-23T15:28:21.049Z"
-updated_at: "2026-10-24T21:43:41.538Z"
+updated_at: "2026-10-24T23:09:37.859Z"
 closed_at: "2026-10-24T21:43:41.531Z"
-completed_at: "2026-10-24T21:43:41.531Z"
+completed_at: "2026-10-23T17:16:46.000Z"
 author: codex-agent
 resolution: "Adds explicit stakeholder disclosure profiles, selector-safe field projection and real non-git privacy regressions."
 expected_result: "Acceptance: render one brief for internal agents, external reviewers or public sharing with a field-level exclusion manifest. Synthetic secrets and disallowed custom fields never enter public output. Unknown policy fields fail closed. Dry run explains exclusions without echoing forbidden text. Provide typed SDK and native CLI, bounded TOON/JSON, typed refusals with remedies, README and example, non-git public tracker replay, and npm plus Bun CI release gates."
