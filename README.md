@@ -485,7 +485,7 @@ immutable protocol artifacts. Receipts are append-only native comments protected
 by the host's comment lock and author/text idempotency. Native lock contention
 is retried up to three times for reads and idempotent appends; creates are never
 automatically retried. Persistent contention refuses with a retry remedy. Do not edit contract bodies
-or receipt comments. Create a fresh packet after a revision changes. A receipt
+or receipt comments. Use repair/renew after source revisions change; create a fresh packet when the contract obligations change. A receipt
 racing a source edit is reassessed on return and every subsequent read. All source
 metadata, bodies and linked evidence contribute to content revisions, so even an
 unrelated source comment conservatively invalidates old understanding. Reads are
@@ -505,9 +505,63 @@ context delivery/usage receipts and the [since-delta candidate](https://github.c
 (`feat/since-delta-pack`)
 (`pm context-pack since --from <timestamp>` or `--cursor <cursor>`). That candidate
 owns cursor progress, changed-context selection and omission receipts. Use its delta to
-refresh changed context, then create a new handoff here. No history delta engine
+refresh changed context, then repair existing receiver understanding here. No history delta engine
 is duplicated. pm-memory continues to own standing knowledge; `brief prompt`
 continues to generate prose. See the [contract example](docs/examples/handoff.json).
+
+## Handoff repair deltas
+
+`brief handoff repair <packet-id> --receiver <agent>` returns only groups whose
+sources changed since that receiver's last acknowledgment. `--receiver` defaults
+to the active author. Each focus item is one obligation group, scoped to its
+transitive declared blockers. Evidence requirements belong to each focus closure
+that contains their item; evidence outside every focus closure gets its own group.
+The existing contract has no per-question scope, so questions and assumptions
+conservatively apply to every focus group. A shared blocker can affect several
+groups. A 50-row packet with 25 independent focus/dependency pairs returns one
+group when one dependency changes, preserving the other 24 acknowledgments.
+
+```sh
+PM_AUTHOR=receiver-a pm brief handoff repair <packet-id> --json
+PM_AUTHOR=receiver-a pm brief handoff renew <packet-id> --input renewal.json --json
+```
+
+The delta includes changed source coordinates, current obligation text, affected
+native evidence references, missing-link disclosure and exact group targets.
+Unchanged obligations are represented by `validAcknowledgments` and `totalGroups`.
+An empty `groups` array means that receiver has no pending repairs. Evidence link
+presence and receiver understanding retain their separate meanings from `show`.
+Legacy `show` continues to assess the original whole-packet acknowledgment;
+`repair` assesses the receiver's current understanding at group granularity.
+
+Renewal JSON supplies the immutable contract `digest` and a nonempty `groups`
+array: each row has `id`, `target`, `questions`, `assumptions` and `evidence` maps.
+Answer exactly that group's obligation keys. Partial group selection is supported.
+Targets bind the contract and SDK-read source revisions, including native update
+coordinates, so replaying older content does not renew a newer revision. Unchanged
+groups need no response. Matching retries and a peer's completed renewal return
+current validity without adding a duplicate receipt. Renewals append native comments
+to the existing contract; no contract copies, sources, claims or separate stores
+are written. Foreign or malformed receipt-shaped comments are skipped with an
+indexed reason by repair/renew and never edited or deleted.
+
+The SDK exports `inspectHandoffRepair`, `renewHandoff`, `parseHandoffRenewal` and
+`HandoffRepair`, `HandoffRepairGroup`, `HandoffRepairChange`, `HandoffRenewal`,
+`HandoffRenewalGroup`. Use the existing `HandoffOptions` with `pmRoot`, `author`,
+optional native `client` and `tokenBudget`. Output uses native TOON/JSON and the
+same 4,000-token default ceiling (maximum 64,000). Oversized deltas refuse rather
+than discard obligations. An unacknowledged receiver gets `handoff_unacknowledged`
+and must first acknowledge a fresh contract. Other typed refusals retain the
+existing `HandoffError` codes and actionable remedies; stale renewal exits 3.
+
+Renewal holds an SDK token-owned lease from its initial read through append and
+verification, and uses native `comments({ ifAbsent: true })` for atomic append.
+The SDK releases only its owned lease, last. Arbitrary source writers do not join
+this lease: sources are rechecked after append, and a raced renewal refuses stale;
+its historical comment cannot validate the newer revision. A later edit after the
+final verified read appears on the next repair read. See the
+[complete example](docs/examples/handoff-repair.md) and
+[validation evidence](docs/handoff-repair-validation.md).
 
 ## Decision alternatives digest
 

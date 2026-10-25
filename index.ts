@@ -5,8 +5,8 @@ export type { DisclosureProfile, DisclosureField, DisclosurePolicy, DisclosureVa
 export { buildDecisionAlternatives, DecisionAlternativesError } from "./alternatives.ts";
 export type { DecisionExcerpt, DecisionAlternative, DecisionAlternativesDigest, DecisionAlternativesOptions, DecisionAlternativesRefusalCode } from "./alternatives.ts";
 import { registerHandoffCommands } from "./handoff.ts";
-export { previewHandoff, createHandoff, acknowledgeHandoff, inspectHandoff, parseHandoffContract, parseHandoffResponse, HandoffError } from "./handoff.ts";
-export type { HandoffContract, HandoffDocument, HandoffEvidence, HandoffOptions, HandoffPacket, HandoffPrompt, HandoffReceipt, HandoffRefusalCode, HandoffResponse, HandoffRevision, HandoffStatus } from "./handoff.ts";
+export { inspectHandoffRepair, renewHandoff, parseHandoffRenewal, previewHandoff, createHandoff, acknowledgeHandoff, inspectHandoff, parseHandoffContract, parseHandoffResponse, HandoffError } from "./handoff.ts";
+export type { HandoffRepair, HandoffRepairGroup, HandoffRepairChange, HandoffRenewal, HandoffRenewalGroup, HandoffContract, HandoffDocument, HandoffEvidence, HandoffOptions, HandoffPacket, HandoffPrompt, HandoffReceipt, HandoffRefusalCode, HandoffResponse, HandoffRevision, HandoffStatus } from "./handoff.ts";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

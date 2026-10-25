@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
-import { PmClient, certifyCompleteListResult, createPmCliExpectedError, estimatePmOutputTokens, isPmCliExpectedError } from "@unbrained/pm-cli/sdk";
+import { PmClient, acquireLock, certifyCompleteListResult, createPmCliExpectedError, estimatePmOutputTokens, isPmCliExpectedError } from "@unbrained/pm-cli/sdk";
 import type { ListedItem } from "@unbrained/pm-cli/sdk";
 import type { CommandHandlerContext, ExtensionApi, FlagDefinition } from "@unbrained/pm-cli/sdk/authoring";
 
@@ -54,8 +54,41 @@ export interface HandoffReceipt {
 }
 /** Complete contract and selected receiver receipts, with no silent row omission. */
 export interface HandoffStatus { packet: HandoffPacket; staleItems: string[]; receipts: HandoffReceipt[]; estimatedTokenCeiling: number }
+/** Receiver answers to one group, bound to its exact target source revision. */
+export interface HandoffRenewalGroup {
+  id: string;
+  target: string;
+  questions: Record<string, string>;
+  assumptions: Record<string, string>;
+  evidence: Record<string, string>;
+}
+/** Partial renewal input; only groups shown by repair need responses. */
+export interface HandoffRenewal { digest: string; groups: HandoffRenewalGroup[] }
+/** Changed source coordinate relative to the receiver's last acknowledgment. */
+export interface HandoffRepairChange { id: string; from: string | null; to: string | null }
+/** One focused obligation group requiring renewed receiver understanding. */
+export interface HandoffRepairGroup extends HandoffContract {
+  id: string;
+  target: string;
+  changes: HandoffRepairChange[];
+  missingEvidence: string[];
+}
+/** Compact receiver-specific delta; unchanged obligations are counted, never repeated. */
+export interface HandoffRepair {
+  protocol: "pm-brief.repair/v1";
+  id: string;
+  digest: string;
+  receiver: string;
+  groups: HandoffRepairGroup[];
+  validAcknowledgments: number;
+  totalGroups: number;
+  skippedReceipts: { index: number; reason: string }[];
+  estimatedTokenCeiling: number;
+}
+/** Stored group receipt stays on the existing native contract comment stream. */
+interface RenewalRecord { receiver: string; digest: string; groups: (HandoffRenewalGroup & { items: HandoffRevision[] })[] }
 /** Stable refusal categories callers can branch on without parsing prose. */
-export type HandoffRefusalCode = "invalid" | "missing" | "identity" | "stale" | "responses" | "integrity" | "budget" | "tracker";
+export type HandoffRefusalCode = "invalid" | "missing" | "identity" | "stale" | "responses" | "integrity" | "budget" | "tracker" | "unacknowledged";
 /** Expected failure with a concrete recovery action; tracker writes never precede validation. */
 export class HandoffError extends Error {
   /** Machine-readable reason for refusing an operation. */
@@ -70,6 +103,7 @@ export class HandoffError extends Error {
 
 const PROTOCOL = "pm-brief.handoff/v1";
 const ACK_PREFIX = "pm-brief.ack/v1 ";
+const RENEW_PREFIX = "pm-brief.renew/v1 ";
 const TAG = "pm-brief-handoff";
 const KEY = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
@@ -277,6 +311,137 @@ export async function acknowledgeHandoff(id: string, input: HandoffResponse, opt
   // A source edit racing the append is reported stale, never upgraded into a valid receipt.
   return inspectHandoff(id, options, receiver);
 }
+/** Parse revision-bound partial responses without accepting duplicate group keys. */
+export function parseHandoffRenewal(value: unknown): HandoffRenewal {
+  const input = record(value);
+  const digest = parseHandoffResponse({ digest: input.digest, questions: {}, assumptions: {}, evidence: {} }).digest;
+  if (!Array.isArray(input.groups) || input.groups.length < 1 || input.groups.length > 64) return invalid();
+  const groups = input.groups.map(value => {
+    const row = record(value);
+    const response = parseHandoffResponse({ digest: row.target, questions: row.questions, assumptions: row.assumptions, evidence: row.evidence });
+    return { id: key(row.id, Infinity), target: response.digest, questions: response.questions, assumptions: response.assumptions, evidence: response.evidence };
+  });
+  unique(groups.map(group => group.id));
+  return { digest, groups };
+}
+/** Traverse a saved or current blocker graph without introducing another dependency model. */
+function groupItems(root: string, items: HandoffRevision[]): HandoffRevision[] {
+  const pending = [root]; const found = new Map<string, HandoffRevision>();
+  for (const id of pending) {
+    const item = items.find(item => item.id === id);
+    if (!item || found.has(id)) continue;
+    found.set(id, item); pending.push(...item.blockers);
+  }
+  return [...found.values()].sort((a, b) => a.id.localeCompare(b.id, "en"));
+}
+/** Bind a group to the immutable contract and full current SDK-read source coordinates. */
+function groupTarget(digestValue: string, id: string, items: HandoffRevision[]): string { return digest({ digest: digestValue, id, items }); }
+/** Partition the existing contract by focus closure; evidence outside every focus gets its own root. */
+function obligationGroups(packet: HandoffPacket): (HandoffContract & { id: string })[] {
+  const contract = packet.contract;
+  const roots = [...contract.focus];
+  const covered = new Set(roots.flatMap(id => groupItems(id, contract.items).map(row => row.id)));
+  for (const evidence of contract.requiredEvidence) if (!covered.has(evidence.item) && !roots.includes(evidence.item)) roots.push(evidence.item);
+  return roots.map(id => {
+    const ids = new Set(groupItems(id, contract.items).map(row => row.id));
+    const focused = contract.focus.includes(id);
+    return { id, focus: [id], questions: focused ? contract.questions : [], assumptions: focused ? contract.assumptions : [], requiredEvidence: contract.requiredEvidence.filter(row => ids.has(row.item)) };
+  });
+}
+/** Decode only attributable complete protocol records; foreign comments remain untouched and disclosed. */
+function repairReceipts(source: ListedItem, packet: HandoffPacket, groups: (HandoffContract & { id: string })[], receiver: string): { acknowledged: boolean; records: RenewalRecord[]; skipped: HandoffRepair["skippedReceipts"] } {
+  let acknowledged = false;
+  const records: RenewalRecord[] = []; const skipped: HandoffRepair["skippedReceipts"] = [];
+  for (const [index, comment] of (source.comments ?? []).entries()) {
+    if (!comment.text.startsWith(ACK_PREFIX) && !comment.text.startsWith(RENEW_PREFIX)) continue;
+    try {
+      const renewal = comment.text.startsWith(RENEW_PREFIX);
+      const raw = record(JSON.parse(comment.text.slice(renewal ? RENEW_PREFIX.length : ACK_PREFIX.length)));
+      const who = key(raw.receiver);
+      if (who !== comment.author) throw new Error();
+      if (!renewal) {
+        const response = parseHandoffResponse(raw.response); requireResponses(response, packet.contract);
+        if (response.digest !== packet.digest) throw new Error();
+        if (who === receiver) acknowledged = true;
+        continue;
+      }
+      const parsed = parseHandoffRenewal(raw);
+      if (parsed.digest !== packet.digest) throw new Error();
+      const persisted = (raw.groups as unknown[]).map((value, i) => {
+        const row = record(value); const group = parsed.groups[i];
+        const obligation = groups.find(candidate => candidate.id === group.id);
+        if (!obligation || !Array.isArray(row.items) || row.items.length > 64) throw new Error();
+        requireResponses({ digest: packet.digest, ...group }, obligation);
+        // Reuse the immutable packet decoder for structural and canonical revision validation.
+        const document = { ...packet.contract, items: row.items };
+        const body = JSON.stringify({ document, digest: digest(document) });
+        const items = readPacket(packet.id, [{ ...source, body }]).packet.contract.items;
+        if (group.target !== groupTarget(packet.digest, group.id, items)) throw new Error();
+        return { ...group, items };
+      });
+      if (who === receiver) records.push({ receiver: who, digest: parsed.digest, groups: persisted });
+    } catch { skipped.push({ index: index + 1, reason: "Foreign or malformed receipt: protocol, attribution, contract or group binding does not match" }); }
+  }
+  return { acknowledged, records, skipped };
+}
+/** Compute only pending groups from one certified SDK snapshot, preserving unrelated understanding. */
+function repairSnapshot(id: string, items: ListedItem[], options: HandoffOptions, receiver: string): { repair: HandoffRepair; current: HandoffRevision[] } {
+  const { packet, source } = readPacket(id, items); const groups = obligationGroups(packet);
+  const receipts = repairReceipts(source, packet, groups, receiver);
+  if (!receipts.acknowledged) throw new HandoffError("unacknowledged", "Receiver has not acknowledged this contract", "Use handoff ack against a fresh contract first; repair only renews an existing receiver acknowledgment");
+  const current = revisions(packet.contract, items);
+  const pending: HandoffRepairGroup[] = [];
+  for (const group of groups) {
+    const targetItems = groupItems(group.id, current);
+    const target = groupTarget(packet.digest, group.id, targetItems);
+    const previous = receipts.records.flatMap(row => row.groups).filter(row => row.id === group.id).at(-1)?.items ?? groupItems(group.id, packet.contract.items);
+    if (target === groupTarget(packet.digest, group.id, previous)) continue;
+    const ids = [...new Set([...previous, ...targetItems].map(row => row.id))].sort();
+    const changes = ids.filter(id => previous.find(row => row.id === id)?.revision !== targetItems.find(row => row.id === id)?.revision).map(id => ({ id, from: previous.find(row => row.id === id)?.revision ?? null, to: targetItems.find(row => row.id === id)?.revision ?? null }));
+    pending.push({ ...group, target, changes, missingEvidence: missingEvidence(group, items) });
+  }
+  const repair: HandoffRepair = { protocol: "pm-brief.repair/v1", id, digest: packet.digest, receiver, groups: pending, validAcknowledgments: groups.length - pending.length, totalGroups: groups.length, skippedReceipts: receipts.skipped, estimatedTokenCeiling: 0 };
+  return { repair: bounded(repair, options), current };
+}
+/** Read a receiver-specific repair delta without writing or repeating unaffected obligations. */
+export async function inspectHandoffRepair(id: string, options: HandoffOptions, receiver = author(options)): Promise<HandoffRepair> {
+  return repairSnapshot(key(id, Infinity), await corpus(options), options, key(receiver)).repair;
+}
+/** Serialize renewal planning through verification and let native ifAbsent perform the atomic append. */
+export async function renewHandoff(id: string, input: HandoffRenewal, options: HandoffOptions): Promise<HandoffRepair> {
+  key(id, Infinity); const receiver = author(options); const renewal = parseHandoffRenewal(input);
+  let release: () => Promise<void>;
+  try { release = await acquireLock(options.pmRoot, `brief-renew-${digest(id)}`, 300, receiver, false, true, 1000); }
+  catch { throw new HandoffError("tracker", "Another receiver renewal holds the tracker lease", "Retry after the current writer finishes; inspect pm health if lease contention persists"); }
+  try {
+    const items = await corpus(options); const { repair, current } = repairSnapshot(id, items, options, receiver);
+    const { packet, source } = readPacket(id, items); const obligations = obligationGroups(packet);
+    const records = repairReceipts(source, packet, obligations, receiver).records;
+    if (renewal.digest !== repair.digest) throw new HandoffError("stale", "Renewal belongs to an old contract", "Read handoff repair again and answer against its digest and group targets");
+    const storedGroups = renewal.groups.map(group => {
+      const obligation = obligations.find(row => row.id === group.id);
+      const snapshots = groupItems(group.id, current);
+      if (!obligation || group.target !== groupTarget(repair.digest, group.id, snapshots)) throw new HandoffError("stale", "Renewal targets an old source revision or unknown group", "Read handoff repair again and use its current target for each affected group");
+      requireResponses({ digest: repair.digest, ...group }, obligation);
+      const pending = repair.groups.some(row => row.id === group.id);
+      const peerSuccess = records.some(record => record.groups.some(row => row.id === group.id && row.target === group.target));
+      if (!pending && !peerSuccess) throw new HandoffError("responses", "Renewal includes an unaffected group", "Answer only groups returned by handoff repair; unchanged acknowledgments remain valid");
+      return { ...group, items: snapshots };
+    });
+    const raw: RenewalRecord = { receiver, digest: repair.digest, groups: storedGroups };
+    const text = RENEW_PREFIX + canonical(raw);
+    // Check the output with the added receipt before any durable write, including foreign disclosures.
+    repairSnapshot(id, items.map(row => row.id === id ? { ...row, comments: [...(row.comments ?? []), { author: receiver, text, created_at: new Date().toISOString() }] } : row), options, receiver);
+    if (storedGroups.some(group => repair.groups.some(row => row.id === group.id))) {
+      try { await retryLocked(() => client(options).comments(id, { add: text, author: receiver, ifAbsent: true })); }
+      catch { throw new HandoffError("tracker", "Renewal could not be appended", "Retry the same renewal after the current writer finishes; inspect handoff repair and pm health if contention persists"); }
+    }
+    const latest = repairSnapshot(id, await corpus(options), options, receiver);
+    const after = latest.repair;
+    if (renewal.groups.some(group => group.target !== groupTarget(after.digest, group.id, groupItems(group.id, latest.current)))) throw new HandoffError("stale", "Sources changed while renewal was being recorded", "Read handoff repair again; the raced receipt remains historical and cannot validate the new revision");
+    return after;
+  } finally { await release(); }
+}
 /** Read a bounded JSON input file; parsing failures give agents a typed remedy. */
 async function inputFile(value: unknown): Promise<unknown> {
   try {
@@ -301,15 +466,17 @@ function commandOptions(ctx: CommandHandlerContext): HandoffOptions {
 /** Register native structured TOON/JSON commands; expected refusals carry code and remedy at nonzero exit. */
 export function registerHandoffCommands(api: ExtensionApi): void {
   const budget: FlagDefinition = { long: "--token-budget", type: "string", value_name: "n", description: "Conservative output token ceiling (default 4000, maximum 64000); refuses instead of dropping obligations" };
-  for (const action of ["create", "show", "ack", "preview"] as const) {
+  for (const action of ["create", "show", "ack", "preview", "repair", "renew"] as const) {
     api.registerCommand({
       name: `brief handoff ${action}`,
-      description: action === "preview" ? "Preview a revision-bound handoff without writing" : action === "create" ? "Create a revision-bound handoff contract" : action === "ack" ? "Record explicit receiver understanding against a handoff digest" : "Inspect current handoff revisions, evidence gaps and receiver receipts",
-      read_output: action === "show" ? { row_keys: ["receipts"] } : action === "preview" ? { row_keys: ["contract.items"] } : undefined,
-      flags: [budget, ...(action === "show" ? [{ long: "--receiver", type: "string" as const, value_name: "id", description: "Show one receiver without omitting that receiver's receipts" }] : [{ long: "--input", type: "string" as const, value_name: "json-file", description: "Contract JSON for create; explicit response JSON for ack" }])],
+      description: action === "repair" ? "Read only affected obligations for one acknowledged receiver" : action === "renew" ? "Renew affected obligations against exact current source revisions" : action === "preview" ? "Preview a revision-bound handoff without writing" : action === "create" ? "Create a revision-bound handoff contract" : action === "ack" ? "Record explicit receiver understanding against a handoff digest" : "Inspect current handoff revisions, evidence gaps and receiver receipts",
+      read_output: action === "repair" ? { row_keys: ["groups"] } : action === "show" ? { row_keys: ["receipts"] } : action === "preview" ? { row_keys: ["contract.items"] } : undefined,
+      flags: [budget, ...((action === "show" || action === "repair") ? [{ long: "--receiver", type: "string" as const, value_name: "id", description: "Show one receiver without omitting that receiver's receipts" }] : [{ long: "--input", type: "string" as const, value_name: "json-file", description: "Contract JSON for create/preview; response JSON for ack; group renewal JSON for renew" }])],
       async run(ctx) {
         try {
           const options = commandOptions(ctx);
+          if (action === "repair") return await inspectHandoffRepair(key(ctx.args[0], Infinity), options, ctx.options.receiver === undefined ? author(options) : key(ctx.options.receiver));
+          if (action === "renew") return await renewHandoff(key(ctx.args[0], Infinity), parseHandoffRenewal(await inputFile(ctx.options.input)), options);
           if (action === "preview") return await previewHandoff(parseHandoffContract(await inputFile(ctx.options.input)), options);
           if (action === "create") return await createHandoff(parseHandoffContract(await inputFile(ctx.options.input)), options);
           if (action === "ack") return await acknowledgeHandoff(key(ctx.args[0], Infinity), parseHandoffResponse(await inputFile(ctx.options.input)), options);
