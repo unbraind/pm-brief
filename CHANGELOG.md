@@ -5,6 +5,7 @@
 ### Added
 
 - Render stakeholder briefs through explicit disclosure profiles ([pm-brief-nsks](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nsks.toon))
+- Renew only affected handoff obligations after source revisions change ([pm-brief-03r3](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-03r3.toon))
 
 ### Fixed
 
