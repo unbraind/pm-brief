@@ -1,0 +1,25 @@
+id: pm-brief-github-7e06b2eb1b44-170
+title: Daily Release workflow is failing
+description: "GH issue #170: https://github.com/unbraind/pm-brief/issues/170 · author @github-actions[bot] · state reason completed · created 2026-10-23T09:39:52Z · updated 2026-10-23T14:39:28Z"
+type: Issue
+status: closed
+priority: 2
+tags[3]: "gh:unbraind/pm-brief#170","github_author:github-actions[bot]",release-failure
+created_at: "2026-10-23T09:39:52Z"
+updated_at: "2026-10-25T08:32:25.698Z"
+closed_at: "2026-10-23T14:39:28Z"
+completed_at: "2026-10-23T14:39:28Z"
+author: pm-github
+release: v2026.10.24
+close_reason: "Closed on GitHub as completed on 2026-10-23T14:39:28Z"
+github_close_reason: "Closed on GitHub as completed on 2026-10-23T14:39:28Z"
+github_closed_at: "2026-10-23T14:39:28Z"
+github_created_at: "2026-10-23T09:39:52Z"
+github_link_only: false
+github_number: 170
+github_release: v2026.10.24
+github_state: closed
+github_state_reason: completed
+github_updated_at: "2026-10-23T14:39:28Z"
+github_url: "https://github.com/unbraind/pm-brief/issues/170"
+body: "The `release` job of the Daily Release workflow failed.\n\n- Failing job: `release`\n- Run URL: https://github.com/unbraind/pm-brief/actions/runs/39926346539\n- Commit: 83af01b253d5c53f8a31f78c0fbd06847ae0db52\n- Date (UTC): 2026-10-23T09:39:49Z\n\n\n---\n\n### GitHub comments (1)\n\n> **@unbraind** (2026-10-23T14:39:26Z)\n>\n> Resolved: the resumed Daily Release at 09:52Z published v2026.10.23 (npm and GitHub)."

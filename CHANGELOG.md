@@ -21,6 +21,10 @@
 - Record acknowledged handoff contracts against item revisions ([pm-brief-cjxn](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-cjxn.toon))
 - Compare recorded decision alternatives with cited evidence ([pm-brief-ktjl](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-ktjl.toon))
 
+### Fixed
+
+- Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-170](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-170.toon))
+
 ### Other
 
 - Verify evidence for tracker reconciliation review ([pm-brief-review165](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-review165.toon))
@@ -42,13 +46,6 @@
 
 - Enable GitHub CodeQL code scanning ([pm-brief-1p5o](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-1p5o.toon))
 
-## 2026.10.21 - 2026-10-21
-
-### Fixed
-
-- Enforce the requested brief budget after the final compaction step ([pm-brief-github-7e06b2eb1b44-135](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-135.toon))
-- Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-84](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-84.toon))
-
 ## 2026.10.14 - 2026-10-14
 
 ### Added
@@ -66,6 +63,10 @@
 ### Added
 
 - Enforce the chosen rendered brief token ceiling ([pm-brief-k8no](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-k8no.toon))
+
+### Fixed
+
+- Enforce the requested brief budget after the final compaction step ([pm-brief-github-7e06b2eb1b44-135](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-135.toon))
 
 ## 2026.10.5 - 2026-10-05
 
@@ -117,6 +118,7 @@
 
 ### Fixed
 
+- Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-84](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-84.toon))
 - Adopt pm CLI 2026.8.30 and stop pinning which way the SDK handles an incomplete merge receipt ([pm-brief-00tc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-00tc.toon))
 
 ### Other
