@@ -545,9 +545,37 @@ to the existing contract; no contract copies, sources, claims or separate stores
 are written. Foreign or malformed receipt-shaped comments are skipped with an
 indexed reason by repair/renew and never edited or deleted.
 
+Each new acknowledgment stores `dependencies`, an array of per-group snapshots:
+`{ id, items, edges, evidenceLinks }`. Renewals store `items`, `edges` and
+`evidenceLinks` alongside that group's responses and revision target. `items`
+records every covered item id, full SDK-row revision (or null for a missing item),
+status, title and blocker edges. Native edge coordinates (`from`, `to`, `kind`)
+and native evidence-link coordinates (`item`, `kind`, optional `ref`) each carry
+SHA-256 revisions of their complete SDK-read metadata. These inventories come
+from the same certified source read that validates the acknowledgment or renewal.
+
+Repair compares the recorded dependency set plus newly reachable dependencies;
+it never drops an already covered item because today's blocker edge disappeared.
+Coverage identities persist across renewals, including transitive dependencies,
+missing items and evidence outside the current focus closure. For example,
+acknowledge A blocked by B with required evidence on B, remove A's blocker edge,
+and renew A: later edits, link removal or deletion of B still invalidate A's
+understanding. A new blocker can add further evidence obligations to a group.
+Known missing evidence remains distinct from readiness, as in the original
+handoff contract. The 64-item coverage limit and token refusal still apply;
+create a new focused contract when retained coverage outgrows that limit.
+
+Older acknowledgments without explicit inventories remain readable using the
+immutable contract's item snapshots. Older renewal snapshots are conservatively
+combined with prior coverage so they cannot erase previously covered identities.
+New acknowledgments and renewals append the full inventory; stored history is
+never rewritten to manufacture historical metadata. See the recorded-coverage
+regression and independent graph model in `test/handoff-coverage.test.ts`.
+
 The SDK exports `inspectHandoffRepair`, `renewHandoff`, `parseHandoffRenewal` and
 `HandoffRepair`, `HandoffRepairGroup`, `HandoffRepairChange`, `HandoffRenewal`,
-`HandoffRenewalGroup`. Use the existing `HandoffOptions` with `pmRoot`, `author`,
+`HandoffRenewalGroup`, `HandoffDependencySet`, `HandoffAcknowledgedGroup`,
+`HandoffCoveredEdge` and `HandoffCoveredEvidence`. Use the existing `HandoffOptions` with `pmRoot`, `author`,
 optional native `client` and `tokenBudget`. Output uses native TOON/JSON and the
 same 4,000-token default ceiling (maximum 64,000). Oversized deltas refuse rather
 than discard obligations. An unacknowledged receiver gets `handoff_unacknowledged`

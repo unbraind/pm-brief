@@ -31,6 +31,41 @@ Behavioral revert proof: restoring whole-packet invalidation in `repairSnapshot`
 returns 25 groups instead of one, and the 50-row acceptance test fails. The
 implementation is restored before verification and commit.
 
+## Recorded dependency regression and model
+
+Read-only review of PR 179 found that recomputing today's blocker closure could
+forget required evidence. The fixed regression acknowledges A blocked by B,
+with a required link on B, removes the edge, renews A, then removes B's link.
+Repair must return A as invalid with B changed and the missing requirement.
+The fixed case runs for docs, files and tests, then verifies edits and deletion of
+B. A separate transitive case covers dependencies with no declared evidence.
+
+Acknowledgments now persist per-group `items`, `edges` and `evidenceLinks` from
+one certified SDK read; native edges and links include complete-metadata hashes.
+Renewal preserves all recorded identities while refreshing their revisions and
+adding newly reachable dependencies. The reference model stores actual SDK rows
+per acknowledged group. It judges validity by structural equality of every
+recorded element plus the current reachable set and newly missing requirements;
+it does not use package digests or a handwritten field normalizer.
+
+The graph/evidence model passed 500 independent random sequences using seeds
+`0xdecafbad` and `0x1052026`. Operations are acknowledgment, partial renewal,
+blocker-edge addition/removal, evidence-link addition/removal, evidence-item edits,
+focus-item edits and item deletion. Its generated operation counts (including
+no-op attempts against absent targets) were 960 acknowledgments, 887 renewals,
+473 blocker additions, 223 blocker removals, 455 evidence additions, 348 evidence
+removals, 468 evidence-item edits, 479 focus-item edits and 472 deletions.
+Every operation checks repair groups, changed
+item ids, missing references and valid/invalid counts. Receipt inventories are
+read back through the SDK and checked against the model's exact covered items,
+native edges and evidence-link coordinates. All sequences use one plain tracker
+outside git; live episode data is bounded to prevent large logs obscuring the model.
+
+Behavioral revert proof: restoring current-focus-only projection inside
+`dependencySet` makes the fixed regression fail because renewal drops B from the
+SDK-read recorded set. The comparison was restored immediately after the failing
+run; the pm item records the command and result.
+
 ## Public data measurement
 
 Public `pm-brief` main snapshot `6f93af2`: 95 source items. The source snapshot
@@ -49,7 +84,7 @@ snapshot receive zero writes.
 | Valid acknowledgments after renewal | 3 |
 | Compact JSON packet / delta bytes | 1,040 / 694 |
 | Delta conservative token ceiling | 530 |
-| Delta generation time on the shared host | 99 ms |
+| Delta generation time on the shared host (post-fix recheck) | 30 ms |
 | Measurement writes | 0 |
 
 Reproduce with `node scripts/validate-handoff-repairs.ts <public-snapshot-root>`.

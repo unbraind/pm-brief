@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { acquireLock, PmClient } from "@unbrained/pm-cli/sdk";
-import type { CommentsCommandOptions, PmReadOutputOptions, PmCompleteListOptions } from "@unbrained/pm-cli/sdk";
+import type { CommentsCommandOptions, PmReadOutputOptions, PmCompleteListOptions, ListedItem } from "@unbrained/pm-cli/sdk";
 import { acknowledgeHandoff, createHandoff, HandoffError, inspectHandoffRepair, parseHandoffContract, parseHandoffRenewal, parseHandoffResponse, renewHandoff, previewHandoff } from "../index.ts";
 import type { HandoffContract, HandoffOptions, HandoffPacket, HandoffRepair, HandoffRenewal } from "../index.ts";
 
@@ -50,6 +50,19 @@ async function fixture(native = client, settings = options) {
 /** Canonical protocol JSON for deliberately authored native peer receipts, without source normalization. */
 function canonicalJson(value: unknown): string {
   return JSON.stringify(value, (_key, row: unknown) => row !== null && typeof row === "object" && !Array.isArray(row) ? Object.fromEntries(Object.entries(row).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : row);
+}
+
+/** Construct an identical peer protocol append from actual SDK-read native fields, without changing storage. */
+function peerInventory(items: ListedItem[], ids: string[]) {
+  const rows = items.filter(row => ids.includes(row.id));
+  const hash = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");
+  const edges = rows.flatMap(row => [
+    ...(row.dependencies ?? []).map(edge => ({ from: row.id, to: edge.id, kind: edge.kind, revision: hash(edge) })),
+    ...(row.blocked_by ? [{ from: row.id, to: row.blocked_by, kind: "blocked_by", revision: hash({ blocked_by: row.blocked_by }) }] : []),
+  ]);
+  const evidenceLinks = rows.flatMap(row => (["docs", "files", "tests"] as const).flatMap(kind => (row[kind] ?? []).map(link => ({ item: row.id, kind, ref: "command" in link && typeof link.command === "string" ? link.command : link.path, revision: hash(link) }))));
+  const order = (a: unknown, b: unknown) => canonicalJson(a).localeCompare(canonicalJson(b), "en");
+  return { edges: edges.sort(order), evidenceLinks: evidenceLinks.sort(order) };
 }
 
 before(async () => {
@@ -187,7 +200,8 @@ test("same non-git tracker interleavings inject source edits and peer appends at
     await client.update(dep, { body: "First changed revision" });
     const input = renewal(await inspectHandoffRepair(packet.id, options));
     const live = await previewHandoff(contract, options);
-    const raw = { receiver: "receiver", digest: input.digest, groups: input.groups.map(group => ({ ...group, items: live.contract.items.filter(row => row.id === dep || row.id === first) })) };
+    const nativeRows = (await client.listAllComplete({ includeBody: true })).items;
+    const raw = { receiver: "receiver", digest: input.digest, groups: input.groups.map(group => ({ ...group, items: live.contract.items.filter(row => row.id === dep || row.id === first), ...peerInventory(nativeRows, [dep, first]) })) };
     const peerText = "pm-brief.renew/v1 " + canonicalJson(raw);
     const interleaved = new InterleavedClient({ pmRoot, noExtensions: true }); interleaved.injectAt = boundary;
     const leaseId = `brief-renew-${createHash("sha256").update(JSON.stringify(packet.id)).digest("hex")}`;
@@ -269,7 +283,7 @@ test("partial renewals, evidence-only roots, new and removed blockers, and forei
   const partial = await renewHandoff(standalone.id, { ...input, groups: input.groups.slice(0, 1) }, options); assert.equal(partial.groups.length, 1);
   await renewHandoff(standalone.id, { ...input, groups: input.groups.slice(1) }, options);
   await client.update(first, { depRemove: [`id=${extra},kind=blocked_by`] });
-  const removed = await inspectHandoffRepair(standalone.id, options); assert.ok(removed.groups[0].changes.some(row => row.id === extra && row.to === null));
+  const removed = await inspectHandoffRepair(standalone.id, options); assert.ok(removed.groups.some(row => row.changes.some(change => change.id === first))); assert.ok(removed.groups.every(row => !row.changes.some(change => change.id === extra && change.to === null)));
   await renewHandoff(standalone.id, renewal(removed), options);
   // An unaffected original group cannot be gratuitously renewed.
   const snapshots = packet.contract.items.filter(row => row.id === dep || row.id === first);

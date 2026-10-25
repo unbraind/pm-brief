@@ -46,6 +46,7 @@ export interface HandoffReceipt {
   id: string;
   receiver: string;
   response: HandoffResponse;
+  dependencies?: HandoffAcknowledgedGroup[];
   acknowledgedAt: string;
   valid: boolean;
   ready: boolean;
@@ -85,8 +86,20 @@ export interface HandoffRepair {
   skippedReceipts: { index: number; reason: string }[];
   estimatedTokenCeiling: number;
 }
+/** Exact native edge coordinate covered by one acknowledgment, including its metadata revision. */
+export interface HandoffCoveredEdge { from: string; to: string; kind: string; revision: string }
+/** Exact native evidence-link coordinate; revision includes every SDK-read link field. */
+export interface HandoffCoveredEvidence { item: string; kind: "docs" | "files" | "tests"; ref?: string; revision: string }
+/** Recorded coverage is retained across graph edits; missing items keep a null revision. */
+export interface HandoffDependencySet {
+  items: HandoffRevision[];
+  edges: HandoffCoveredEdge[];
+  evidenceLinks: HandoffCoveredEvidence[];
+}
+/** One initial acknowledgment's exact per-group dependency set. */
+export interface HandoffAcknowledgedGroup extends HandoffDependencySet { id: string }
 /** Stored group receipt stays on the existing native contract comment stream. */
-interface RenewalRecord { receiver: string; digest: string; groups: (HandoffRenewalGroup & { items: HandoffRevision[] })[] }
+interface RenewalRecord { receiver: string; digest: string; groups: (HandoffRenewalGroup & { items: HandoffRevision[]; edges?: HandoffCoveredEdge[]; evidenceLinks?: HandoffCoveredEvidence[] })[] }
 /** Stable refusal categories callers can branch on without parsing prose. */
 export type HandoffRefusalCode = "invalid" | "missing" | "identity" | "stale" | "responses" | "integrity" | "budget" | "tracker" | "unacknowledged";
 /** Expected failure with a concrete recovery action; tracker writes never precede validation. */
@@ -280,8 +293,12 @@ function requireResponses(response: HandoffResponse, contract: HandoffContract):
 }
 /** Read all receipts and recompute validity; receiver filters affect output only, never stored data. */
 export async function inspectHandoff(id: string, options: HandoffOptions, receiver?: string): Promise<HandoffStatus> {
+  return handoffStatus(id, await corpus(options), options, receiver);
+}
+/** Assess receipts using the same certified source snapshot used for recording coverage. */
+function handoffStatus(id: string, items: ListedItem[], options: HandoffOptions, receiver?: string): HandoffStatus {
   if (receiver !== undefined) key(receiver);
-  const items = await corpus(options); const { packet, source } = readPacket(id, items);
+  const { packet, source } = readPacket(id, items);
   const stale = staleItems(packet, items); packet.missingEvidence = missingEvidence(packet.contract, items); bounded(packet, options);
   const receipts: HandoffReceipt[] = [];
   for (const comment of source.comments ?? []) {
@@ -291,7 +308,8 @@ export async function inspectHandoff(id: string, options: HandoffOptions, receiv
       const who = key(raw.receiver); requireResponses(response, packet.contract);
       if (who !== comment.author || response.digest !== packet.digest) throw new Error();
       if (receiver !== undefined && who !== receiver) continue;
-      receipts.push({ id: digest(raw), receiver: who, response, acknowledgedAt: comment.created_at, valid: stale.length === 0, ready: stale.length === 0 && packet.missingEvidence.length === 0, staleItems: stale, missingEvidence: packet.missingEvidence });
+      const dependencies = readAcknowledgedGroups(raw.dependencies, packet, source);
+      receipts.push({ id: digest(raw), receiver: who, response, ...(dependencies === undefined ? {} : { dependencies }), acknowledgedAt: comment.created_at, valid: stale.length === 0, ready: stale.length === 0 && packet.missingEvidence.length === 0, staleItems: stale, missingEvidence: packet.missingEvidence });
     } catch { throw new HandoffError("integrity", "A handoff receipt is malformed or belongs to another contract", "Inspect the native packet comments; preserve history and create a fresh packet"); }
   }
   return bounded({ packet, staleItems: stale, receipts, estimatedTokenCeiling: 0 }, options);
@@ -299,13 +317,15 @@ export async function inspectHandoff(id: string, options: HandoffOptions, receiv
 /** Append an idempotent receiver receipt under the native comment lock; concurrent receivers never overwrite. */
 export async function acknowledgeHandoff(id: string, input: HandoffResponse, options: HandoffOptions): Promise<HandoffStatus> {
   const receiver = author(options); const response = parseHandoffResponse(input);
-  const before = await inspectHandoff(id, options, receiver);
+  const items = await corpus(options);
+  const before = handoffStatus(id, items, options, receiver);
   if (response.digest !== before.packet.digest || before.staleItems.length > 0) throw new HandoffError("stale", "The handoff no longer matches the receiver's snapshot", "Create and read a fresh packet, then respond against its digest and current blocker revisions");
   requireResponses(response, before.packet.contract);
   // Reserve the full receipt before mutation so a small budget never leaves an unseen write.
-  const raw = { receiver, response }; const text = ACK_PREFIX + canonical(raw);
+  const dependencies = obligationGroups(before.packet).map(group => ({ id: group.id, ...dependencySet(group, groupItems(group.id, before.packet.contract.items), items) }));
+  const raw = { receiver, response, dependencies }; const text = ACK_PREFIX + canonical(raw);
   if (before.receipts.some(receipt => receipt.id === digest(raw))) return before;
-  bounded({ ...before, receipts: [...before.receipts, { id: digest(raw), receiver, response, acknowledgedAt: new Date().toISOString(), valid: true, ready: before.packet.missingEvidence.length === 0, staleItems: [], missingEvidence: before.packet.missingEvidence }] }, options);
+  bounded({ ...before, receipts: [...before.receipts, { id: digest(raw), receiver, response, dependencies, acknowledgedAt: new Date().toISOString(), valid: true, ready: before.packet.missingEvidence.length === 0, staleItems: [], missingEvidence: before.packet.missingEvidence }] }, options);
   try { await retryLocked(() => client(options).comments(id, { add: text, author: receiver, ifAbsent: true })); }
   catch { throw new HandoffError("tracker", "Handoff receipt could not be appended", "Retry the same acknowledgment after the current tracker writer finishes; check pm health and permissions if contention persists"); }
   // A source edit racing the append is reported stale, never upgraded into a valid receipt.
@@ -348,9 +368,70 @@ function obligationGroups(packet: HandoffPacket): (HandoffContract & { id: strin
     return { id, focus: [id], questions: focused ? contract.questions : [], assumptions: focused ? contract.assumptions : [], requiredEvidence: contract.requiredEvidence.filter(row => ids.has(row.item)) };
   });
 }
+/** Read every previously covered identity plus its live blockers and required evidence; never prune on edge removal. */
+function dependencySet(group: HandoffContract, recorded: HandoffRevision[], items: ListedItem[]): HandoffDependencySet {
+  const snapshots = revisions({ ...group, focus: [...new Set([...group.focus, ...recorded.map(row => row.id)])] }, items);
+  const ids = new Set(snapshots.map(row => row.id));
+  const edges: HandoffCoveredEdge[] = []; const evidenceLinks: HandoffCoveredEvidence[] = [];
+  for (const item of items) {
+    if (!ids.has(item.id)) continue;
+    for (const edge of item.dependencies ?? []) edges.push({ from: item.id, to: edge.id, kind: edge.kind, revision: digest(edge) });
+    if (item.blocked_by) edges.push({ from: item.id, to: item.blocked_by, kind: "blocked_by", revision: digest({ blocked_by: item.blocked_by }) });
+    for (const kind of ["docs", "files", "tests"] as const) for (const link of item[kind] ?? []) evidenceLinks.push({ item: item.id, kind, ref: "command" in link && typeof link.command === "string" ? link.command : link.path, revision: digest(link) });
+  }
+  const order = (a: unknown, b: unknown) => canonical(a).localeCompare(canonical(b), "en");
+  return { items: snapshots, edges: edges.sort(order), evidenceLinks: evidenceLinks.sort(order) };
+}
+/** Decode recorded revisions with the existing immutable artifact validator; old receipts remain readable. */
+function recordedItems(value: unknown, packet: HandoffPacket, source: ListedItem): HandoffRevision[] {
+  const document = { ...packet.contract, items: value };
+  const body = JSON.stringify({ document, digest: digest(document) });
+  return readPacket(packet.id, [{ ...source, body }]).packet.contract.items;
+}
+/** Validate explicit edge/link inventories without manufacturing historical data for legacy receipts. */
+function readInventory(raw: Record<string, unknown>, snapshots: HandoffRevision[]): Pick<HandoffDependencySet, "edges" | "evidenceLinks"> | undefined {
+  if (raw.edges === undefined && raw.evidenceLinks === undefined) return undefined;
+  if (!Array.isArray(raw.edges) || !Array.isArray(raw.evidenceLinks)) return invalid();
+  const ids = new Set(snapshots.map(row => row.id));
+  const hash = (value: unknown) => parseHandoffResponse({ digest: value, questions: {}, assumptions: {}, evidence: {} }).digest;
+  const edges = raw.edges.map(value => {
+    const edge = record(value); const from = key(edge.from, Infinity);
+    if (!ids.has(from)) return invalid();
+    return { from, to: string(edge.to, Infinity), kind: string(edge.kind, Infinity), revision: hash(edge.revision) };
+  });
+  const evidenceLinks = raw.evidenceLinks.map((value): HandoffCoveredEvidence => {
+    const link = record(value); const item = key(link.item, Infinity);
+    if (!ids.has(item) || (link.kind !== "docs" && link.kind !== "files" && link.kind !== "tests")) return invalid();
+    return { item, kind: link.kind, ref: link.ref === undefined ? undefined : string(link.ref, Infinity), revision: hash(link.revision) };
+  });
+  return { edges, evidenceLinks };
+}
+/** Validate an initial acknowledgment's complete group coverage, allowing older records without inventories. */
+function readAcknowledgedGroups(value: unknown, packet: HandoffPacket, source: ListedItem): HandoffAcknowledgedGroup[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return invalid();
+  const groups = obligationGroups(packet);
+  const dependencies = value.map(value => {
+    const row = record(value); const id = key(row.id, Infinity);
+    const items = recordedItems(row.items, packet, source); const inventory = readInventory(row, items);
+    if (!inventory || !groups.some(group => group.id === id)) return invalid();
+    return { id, items, ...inventory };
+  });
+  unique(dependencies.map(row => row.id));
+  if (dependencies.length !== groups.length) return invalid();
+  return dependencies;
+}
+/** Preserve all coverage identities while advancing their last recorded revisions after renewal. */
+function previousCoverage(packet: HandoffPacket, group: HandoffContract & { id: string }, initial: HandoffAcknowledgedGroup[], records: RenewalRecord[]): HandoffRevision[] {
+  const baseline = groupItems(group.id, packet.contract.items);
+  const saved = [baseline, ...initial.filter(row => row.id === group.id).map(row => row.items), ...records.flatMap(row => row.groups).filter(row => row.id === group.id).map(row => row.items)];
+  const byId = new Map<string, HandoffRevision>();
+  for (const items of saved) for (const item of items) byId.set(item.id, item);
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id, "en"));
+}
 /** Decode only attributable complete protocol records; foreign comments remain untouched and disclosed. */
-function repairReceipts(source: ListedItem, packet: HandoffPacket, groups: (HandoffContract & { id: string })[], receiver: string): { acknowledged: boolean; records: RenewalRecord[]; skipped: HandoffRepair["skippedReceipts"] } {
-  let acknowledged = false;
+function repairReceipts(source: ListedItem, packet: HandoffPacket, groups: (HandoffContract & { id: string })[], receiver: string): { acknowledged: boolean; initial: HandoffAcknowledgedGroup[]; records: RenewalRecord[]; skipped: HandoffRepair["skippedReceipts"] } {
+  let acknowledged = false; const initial: HandoffAcknowledgedGroup[] = [];
   const records: RenewalRecord[] = []; const skipped: HandoffRepair["skippedReceipts"] = [];
   for (const [index, comment] of (source.comments ?? []).entries()) {
     if (!comment.text.startsWith(ACK_PREFIX) && !comment.text.startsWith(RENEW_PREFIX)) continue;
@@ -362,7 +443,8 @@ function repairReceipts(source: ListedItem, packet: HandoffPacket, groups: (Hand
       if (!renewal) {
         const response = parseHandoffResponse(raw.response); requireResponses(response, packet.contract);
         if (response.digest !== packet.digest) throw new Error();
-        if (who === receiver) acknowledged = true;
+        const dependencies = readAcknowledgedGroups(raw.dependencies, packet, source);
+        if (who === receiver && !acknowledged) { initial.push(...(dependencies ?? [])); acknowledged = true; }
         continue;
       }
       const parsed = parseHandoffRenewal(raw);
@@ -371,34 +453,39 @@ function repairReceipts(source: ListedItem, packet: HandoffPacket, groups: (Hand
         const row = record(value); const group = parsed.groups[i];
         const obligation = groups.find(candidate => candidate.id === group.id);
         if (!obligation || !Array.isArray(row.items) || row.items.length > 64) throw new Error();
-        requireResponses({ digest: packet.digest, ...group }, obligation);
+
         // Reuse the immutable packet decoder for structural and canonical revision validation.
-        const document = { ...packet.contract, items: row.items };
-        const body = JSON.stringify({ document, digest: digest(document) });
-        const items = readPacket(packet.id, [{ ...source, body }]).packet.contract.items;
+        const items = recordedItems(row.items, packet, source);
+        const inventory = readInventory(row, items);
+        const covered = new Set(items.map(row => row.id));
+        requireResponses({ digest: packet.digest, ...group }, { ...obligation, requiredEvidence: packet.contract.requiredEvidence.filter(row => covered.has(row.item)) });
         if (group.target !== groupTarget(packet.digest, group.id, items)) throw new Error();
-        return { ...group, items };
+        return { ...group, items, ...inventory };
       });
       if (who === receiver) records.push({ receiver: who, digest: parsed.digest, groups: persisted });
     } catch { skipped.push({ index: index + 1, reason: "Foreign or malformed receipt: protocol, attribution, contract or group binding does not match" }); }
   }
-  return { acknowledged, records, skipped };
+  return { acknowledged, initial, records, skipped };
 }
 /** Compute only pending groups from one certified SDK snapshot, preserving unrelated understanding. */
-function repairSnapshot(id: string, items: ListedItem[], options: HandoffOptions, receiver: string): { repair: HandoffRepair; current: HandoffRevision[] } {
+function repairSnapshot(id: string, items: ListedItem[], options: HandoffOptions, receiver: string): { repair: HandoffRepair; current: Map<string, HandoffDependencySet> } {
   const { packet, source } = readPacket(id, items); const groups = obligationGroups(packet);
   const receipts = repairReceipts(source, packet, groups, receiver);
   if (!receipts.acknowledged) throw new HandoffError("unacknowledged", "Receiver has not acknowledged this contract", "Use handoff ack against a fresh contract first; repair only renews an existing receiver acknowledgment");
-  const current = revisions(packet.contract, items);
+  const current = new Map<string, HandoffDependencySet>();
   const pending: HandoffRepairGroup[] = [];
   for (const group of groups) {
-    const targetItems = groupItems(group.id, current);
+    const previous = previousCoverage(packet, group, receipts.initial, receipts.records);
+    const coverage = dependencySet(group, previous, items); current.set(group.id, coverage);
+    const targetItems = coverage.items;
+    // Newly reachable evidence requirements become part of this group's existing contract obligations.
+    const covered = new Set(targetItems.map(row => row.id));
+    const requiredEvidence = packet.contract.requiredEvidence.filter(row => covered.has(row.item));
     const target = groupTarget(packet.digest, group.id, targetItems);
-    const previous = receipts.records.flatMap(row => row.groups).filter(row => row.id === group.id).at(-1)?.items ?? groupItems(group.id, packet.contract.items);
     if (target === groupTarget(packet.digest, group.id, previous)) continue;
     const ids = [...new Set([...previous, ...targetItems].map(row => row.id))].sort();
     const changes = ids.filter(id => previous.find(row => row.id === id)?.revision !== targetItems.find(row => row.id === id)?.revision).map(id => ({ id, from: previous.find(row => row.id === id)?.revision ?? null, to: targetItems.find(row => row.id === id)?.revision ?? null }));
-    pending.push({ ...group, target, changes, missingEvidence: missingEvidence(group, items) });
+    pending.push({ ...group, requiredEvidence, target, changes, missingEvidence: missingEvidence({ ...group, requiredEvidence }, items) });
   }
   const repair: HandoffRepair = { protocol: "pm-brief.repair/v1", id, digest: packet.digest, receiver, groups: pending, validAcknowledgments: groups.length - pending.length, totalGroups: groups.length, skippedReceipts: receipts.skipped, estimatedTokenCeiling: 0 };
   return { repair: bounded(repair, options), current };
@@ -420,13 +507,14 @@ export async function renewHandoff(id: string, input: HandoffRenewal, options: H
     if (renewal.digest !== repair.digest) throw new HandoffError("stale", "Renewal belongs to an old contract", "Read handoff repair again and answer against its digest and group targets");
     const storedGroups = renewal.groups.map(group => {
       const obligation = obligations.find(row => row.id === group.id);
-      const snapshots = groupItems(group.id, current);
-      if (!obligation || group.target !== groupTarget(repair.digest, group.id, snapshots)) throw new HandoffError("stale", "Renewal targets an old source revision or unknown group", "Read handoff repair again and use its current target for each affected group");
-      requireResponses({ digest: repair.digest, ...group }, obligation);
+      const snapshot = current.get(group.id);
+      if (!obligation || !snapshot || group.target !== groupTarget(repair.digest, group.id, snapshot.items)) throw new HandoffError("stale", "Renewal targets an old source revision or unknown group", "Read handoff repair again and use its current target for each affected group");
+      const covered = new Set(snapshot.items.map(row => row.id));
+      requireResponses({ digest: repair.digest, ...group }, { ...obligation, requiredEvidence: packet.contract.requiredEvidence.filter(row => covered.has(row.item)) });
       const pending = repair.groups.some(row => row.id === group.id);
       const peerSuccess = records.some(record => record.groups.some(row => row.id === group.id && row.target === group.target));
       if (!pending && !peerSuccess) throw new HandoffError("responses", "Renewal includes an unaffected group", "Answer only groups returned by handoff repair; unchanged acknowledgments remain valid");
-      return { ...group, items: snapshots };
+      return { ...group, ...snapshot };
     });
     const raw: RenewalRecord = { receiver, digest: repair.digest, groups: storedGroups };
     const text = RENEW_PREFIX + canonical(raw);
@@ -438,7 +526,7 @@ export async function renewHandoff(id: string, input: HandoffRenewal, options: H
     }
     const latest = repairSnapshot(id, await corpus(options), options, receiver);
     const after = latest.repair;
-    if (renewal.groups.some(group => group.target !== groupTarget(after.digest, group.id, groupItems(group.id, latest.current)))) throw new HandoffError("stale", "Sources changed while renewal was being recorded", "Read handoff repair again; the raced receipt remains historical and cannot validate the new revision");
+    if (renewal.groups.some(group => group.target !== groupTarget(after.digest, group.id, latest.current.get(group.id)!.items))) throw new HandoffError("stale", "Sources changed while renewal was being recorded", "Read handoff repair again; the raced receipt remains historical and cannot validate the new revision");
     return after;
   } finally { await release(); }
 }
