@@ -9,19 +9,19 @@ test("output service preserves owned documents and declines foreign or structure
   try {
     const owned = { pmBriefRendered: true, output: "# brief\n" };
     const commands = ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates", "brief governance"];
-    assert.deepEqual(harness.activation.registrations.commands.map((entry) => entry.command).sort(), [...commands, "brief disclose", "brief alternatives", "brief handoff create", "brief handoff show", "brief handoff ack", "brief handoff preview"].sort());
+    assert.deepEqual(harness.activation.registrations.commands.map((entry) => entry.command).sort(), [...commands, "brief disclose", "brief alternatives", "brief handoff create", "brief handoff show", "brief handoff ack", "brief handoff preview", "brief handoff repair", "brief handoff renew"].sort());
     for (const command of commands) {
       const result = await harness.runServiceOverride({ service: "output_format", command, payload: { result: owned } });
       assert.equal(result.handled, true);
       assert.equal(result.result, owned.output);
     }
-    for (const command of [undefined, "context-pack", "brief", "brief disclose"]) {
+    for (const command of [undefined, "context-pack", "brief", "brief disclose", "brief handoff repair", "brief handoff renew"]) {
       for (const result of [undefined, null, "text", {}, { output: "x" }, { pmBriefRendered: false, output: "x" }, { pmBriefRendered: true, output: 1 }, { items: [] }]) {
         const decision = await harness.runServiceOverride({ service: "output_format", command, payload: { result } });
         assert.equal(decision.handled, false);
       }
     }
-    assert.equal((await harness.runServiceOverride({ service: "output_format", command: "context-pack", payload: { result: owned } })).handled, false);
+    for (const command of ["context-pack", "brief handoff repair", "brief handoff renew"]) assert.equal((await harness.runServiceOverride({ service: "output_format", command, payload: { result: owned } })).handled, false);
     assert.equal((await harness.runServiceOverride({ service: "output_format", command: "brief", payload: undefined })).handled, false);
   } finally { await harness.deactivate(); }
 });

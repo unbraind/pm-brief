@@ -6,21 +6,25 @@ status: in_progress
 priority: 2
 tags[2]: handoff,repair-deltas
 created_at: "2026-10-25T05:19:04.353Z"
-updated_at: "2026-10-25T05:33:55.264Z"
+updated_at: "2026-10-25T05:40:39.276Z"
 author: codex-agent
 acceptance_criteria: One changed dependency in a 50-item packet yields one affected-obligation group; unchanged acknowledgments remain valid; renewal against an old target revision is refused; typed SDK and CLI expose compact bounded TOON/JSON and remedies; seeded state model covers at least 500 sequences and competing transitions at every step; non-git public tracker validation and npm/Bun CI release gates pass.
-comments[5]{created_at,author,text}:
+comments[7]{created_at,author,text}:
   "2026-10-25T05:19:15.879Z",codex-agent,"Overlap rechecked against the pinned CLI SDK, pm-context freshness and handoff generation, pm-review and pm-ops, and existing handoff.ts. Native comments own durable receipts and atomic ifAbsent append; listAllComplete plus certifyCompleteListResult own source completeness. Existing show marks the entire packet stale, and context-freshness validates source manifests; neither computes receiver-specific obligation repair. Implement repair/renew on the existing immutable Decision contract, grouping each focus and uncovered evidence root by its transitive blocker closure; shared questions/assumptions apply conservatively to each focus group. No new handoff store or import/sync engine."
   "2026-10-25T05:25:03.667Z",codex-agent,"Implemented typed inspectHandoffRepair/renewHandoff and repair/renew CLI commands. Group targets bind the immutable contract to complete native source rows, including update coordinates. Native token-owned lease spans planning through verification; native ifAbsent append owns durable receipt idempotency; foreign receipt-shaped comments are skipped with indexed reasons. The 50-row acceptance scenario passes: one changed dependency yields one group and 24 unchanged acknowledgments. Seeded 500-sequence SDK readback test and every-boundary interleaving tests are running; local typecheck, test typecheck and docstring lint pass."
   "2026-10-25T05:29:00.698Z",codex-agent,"Behavioral revert proof: replacing group-level preservation in repairSnapshot with legacy whole-packet invalidation makes the 50-row acceptance test fail (25 groups instead of 1). Restored the implementation afterward. Public main snapshot 6f93af2 measured 95 source items with zero source writes; a separate disposable derived tracker seeds 3 groups and one edit, then read-only measurement yields 1 affected group, 2 preserved acknowledgments, 694 delta JSON bytes versus 1040 packet bytes, 530 conservative tokens and 99 ms; renewal yields 3 valid acknowledgments. Seeded model exposed native no-op operations; the reference now explicitly permits unchanged SDK state rather than requiring a write for every input."
   "2026-10-25T05:32:38.195Z",codex-agent,"Local validation passed: 500 seeded sequences (seed 0x5eed2025), 499 older-input replays, 452 changed-revision round trips, 48 native no-op sequences. SDK readback preserves contracts, whitespace/CRLF responses, relationships and native source fields. pm test --run --only-last --progress passed 24 targeted tests; 2 final race regressions passed after strengthening exact-target verification. The 18 interleavings verify all six source-read/append/verification boundaries for source edits, identical native peer appends and foreign comments, including lease ownership through verification. Typecheck, test typecheck, docstring lint and diff whitespace checks pass. Full npm/Bun release checks are delegated to unchanged CI release-gate jobs; no local full gate on the saturated host."
   "2026-10-25T05:33:55.264Z",codex-agent,"Final targeted pm test run passes 25 tests with zero failures/skips, including the newer-peer revision race and native field/whitespace readback assertions. CI-identity isolated-home pm health --strict-exit --require-merge-drivers passes. The ordinary host health read encounters an existing global pm-github host-version skew (pinned SDK 2026.10.20 versus global extension host 2026.10.24); no dependency or global configuration changed. Repo-pinned SDK stays unchanged as required. The item is released, remains in_progress for orchestrator verification, and the PR will carry exact-head npm/Bun gate evidence."
-files[4]{path,scope}:
+  "2026-10-25T05:40:14.015Z",codex-agent,"Initial CI run 40166023258 exercised all 599 tests and the 500-sequence model. It exposed two missed integration expectations: command registration and renderer-ownership tests still listed only the previous command set, so the renderer test exited before its coverage assertions. Updated both expected command lists, asserted repair/renew flags and explicitly checked that native structured repair/renew output is not intercepted by the document renderer. Thresholds remain unchanged; rerunning targeted integration checks, then CI on the correction."
+  "2026-10-25T05:40:38.158Z",codex-agent,"Integration correction verified: the two command-registration/renderer tests now pass through pm test --run --only-last --progress. Typecheck, test typecheck and docstring lint pass. Production code and coverage thresholds are unchanged; this restores the renderer coverage that the outdated command list prevented. Releasing for the next exact-head CI run."
+files[6]{path,scope}:
   handoff.ts,project
   index.ts,project
   scripts/validate-handoff-repairs.ts,project
+  test/brief.test.ts,project
   test/handoff-repair.test.ts,project
-tests[5]:
+  test/renderer-ownership.test.ts,project
+tests[6]:
   - command: node --test test/handoff.test.ts test/handoff-repair.test.ts
     scope: project
     provenance:
@@ -55,6 +59,13 @@ tests[5]:
     provenance:
       author: codex-agent
       created_at: "2026-10-25T05:32:41.864Z"
+      source_kind: local_mutation
+      source_ref: feat/handoff-repair-deltas
+  - command: "node --test --test-name-pattern=\"extension registers brief commands|output service preserves owned\" test/brief.test.ts test/renderer-ownership.test.ts"
+    scope: project
+    provenance:
+      author: codex-agent
+      created_at: "2026-10-25T05:40:15.956Z"
       source_kind: local_mutation
       source_ref: feat/handoff-repair-deltas
 docs[3]{path,scope}:
