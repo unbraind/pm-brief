@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Renew only affected handoff obligations after source revisions change ([pm-brief-03r3](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-03r3.toon))
+
 ## 2026.10.25 - 2026-10-25
 
 ### Added
