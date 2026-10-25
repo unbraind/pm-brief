@@ -5,10 +5,21 @@ type: Issue
 status: closed
 priority: 2
 tags[3]: "gh:unbraind/pm-brief#84","github_author:github-actions[bot]",release-failure
-created_at: "2026-10-19T09:02:38.293Z"
-updated_at: "2026-10-19T09:02:38.412Z"
-closed_at: "2026-10-19T09:02:38.407Z"
-completed_at: "2026-09-01T04:51:37.000Z"
+created_at: "2026-08-25T04:12:33Z"
+updated_at: "2026-10-25T08:32:25.712Z"
+closed_at: "2026-09-01T04:51:37Z"
+completed_at: "2026-09-01T04:51:37Z"
 author: pm-github
-close_reason: GitHub issue #84 closed
+release: v2026.09.01
+close_reason: "Closed on GitHub as completed on 2026-09-01T04:51:37Z"
+github_close_reason: "Closed on GitHub as completed on 2026-09-01T04:51:37Z"
+github_closed_at: "2026-09-01T04:51:37Z"
+github_created_at: "2026-08-25T04:12:33Z"
+github_link_only: false
+github_number: 84
+github_release: v2026.09.01
+github_state: closed
+github_state_reason: completed
+github_updated_at: "2026-09-01T04:51:37Z"
+github_url: "https://github.com/unbraind/pm-brief/issues/84"
 body: "The `release` job of the Daily Release workflow failed.\n\n- Failing job: `release`\n- Run URL: https://github.com/unbraind/pm-brief/actions/runs/32807549729\n- Commit: cfc8b13f090a2466276f7fe90094357113deb8ee\n- Date (UTC): 2026-08-25T04:12:32Z\n\n\n---\n\n### GitHub comments (3)\n\n> **@github-actions[bot]** (2026-08-26T04:15:57Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-brief/actions/runs/32928959321\n> - Commit: eabbdec09b25fab977f0172659ce43f70c305344\n> - Date (UTC): 2026-08-26T04:15:56Z\n> \n\n> **@github-actions[bot]** (2026-08-27T14:28:47Z)\n>\n> The `release` job of the Daily Release workflow failed.\n> \n> - Failing job: `release`\n> - Run URL: https://github.com/unbraind/pm-brief/actions/runs/33081681149\n> - Commit: 08199c58284e400d11425e569064a1d6d867fcee\n> - Date (UTC): 2026-08-27T14:28:45Z\n> \n\n> **@unbraind** (2026-09-01T04:51:36Z)\n>\n> Closing as resolved and stale.\n> \n> This issue was filed automatically while npm publishing was broken fleet-wide between\n> 2026-08-23 and 2026-08-27. That outage is over. Measured today (2026-09-01), this repository's\n> last three scheduled release runs all succeeded, and the published version on npm matches the\n> current release:\n> \n> - release workflow: 2026-08-29 success, 2026-08-30 success, 2026-08-31 success\n> - npm `latest`: 2026.8.31\n> \n> Nothing here needs a fix; the failing condition no longer exists. The auto-filed issue simply\n> has no counterpart step that closes it once the workflow recovers, so it stayed open for five\n> days after the cause was gone.\n>"
