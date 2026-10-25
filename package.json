@@ -13,7 +13,8 @@
     "CHANGELOG.md",
     "docs/examples/handoff.json",
     "docs/examples/alternatives.md",
-    "docs/examples/disclosure.md"
+    "docs/examples/disclosure.md",
+    "docs/examples/handoff-repair.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -98,7 +99,8 @@
       "README.md",
       "docs/examples/handoff.json",
       "docs/examples/alternatives.md",
-      "docs/examples/disclosure.md"
+      "docs/examples/disclosure.md",
+      "docs/examples/handoff-repair.md"
     ],
     "capabilities": [
       "commands",

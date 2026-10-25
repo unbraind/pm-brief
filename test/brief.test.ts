@@ -192,7 +192,9 @@ const items: PmItem[] = [
 ];
 
 test("extension registers brief commands", async () => {
-  assert.deepEqual(await registeredCommandPaths(), ["brief handoff create", "brief handoff show", "brief handoff ack", "brief handoff preview", "brief alternatives", "brief disclose", "brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates", "brief governance"]);
+  assert.deepEqual(await registeredCommandPaths(), ["brief handoff create", "brief handoff show", "brief handoff ack", "brief handoff preview", "brief handoff repair", "brief handoff renew", "brief alternatives", "brief disclose", "brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief diverge", "brief duplicates", "brief governance"]);
+  assert.ok((await registeredFlagLongs("brief handoff repair")).includes("--receiver"));
+  assert.ok((await registeredFlagLongs("brief handoff renew")).includes("--input"));
   const nextFlags = await registeredFlagLongs("brief next");
   assert.ok(nextFlags.includes("--explain"));
   assert.ok(nextFlags.includes("--confidence"));
