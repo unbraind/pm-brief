@@ -47,13 +47,16 @@
     "pm-package",
     "project-management"
   ],
-  "author": "@unbraind",
+  "author": {
+    "name": "unbrained",
+    "url": "https://unbrained.dev/about"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/unbraind/pm-brief.git"
   },
-  "homepage": "https://github.com/unbraind/pm-brief#readme",
+  "homepage": "https://pm-cli.unbrained.dev/packages/pm-brief",
   "bugs": {
     "url": "https://github.com/unbraind/pm-brief/issues"
   },
