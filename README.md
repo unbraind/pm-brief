@@ -726,10 +726,61 @@ source), or `budget` (increase the ceiling or supply a smaller brief). CLI
 refusals exit 2 with `disclosure_<code>` and a remedy, without source text or
 nested error details. See the [worked example and public-tracker replay](docs/examples/disclosure.md).
 
+## Action prerequisite briefs
+
+Ask for one intended native action and one exact item before attempting it:
+
+```sh
+pm brief action close project-123
+pm --json brief action close project-123 --request '{"input":{"reason":"Verified delivery"},"requiredEvidence":[{"kind":"docs","ref":"docs/results.md"}]}'
+pm brief action start-task project-123 --request '{"actor":"delivery-agent"}'
+```
+
+One call combines native command availability, SDK readiness and blocker
+resolution, close evidence fields (`resolution`, `expected_result`,
+`actual_result`), reason governance, workflow rules and explicitly declared
+native evidence links. Satisfied fields are JSON Pointer references; their
+bodies are never repeated. Link presence records linkage, not successful tests
+or artifact verification. This composes core admission facts; pm-lint remains
+the item quality diagnostic, and this command never chooses work.
+
+The typed SDK entry point is `buildActionPrerequisiteBrief(request, { pmRoot,
+client })`. Pass the host's injected client when embedding. A standalone caller
+can omit it to construct a tracker-bound public SDK client lazily after request
+validation. No executable-path or symlink discovery is involved.
+
+`parseActionPrerequisiteRequest` applies `ACTION_PREREQUISITE_SCHEMA` to both
+SDK and CLI requests. Unknown keys, sparse arrays, nonfinite/fractional budgets,
+duplicate evidence declarations and oversized input refuse before tracker IO.
+`requiredEvidence` accepts at most 64 exact `{kind, ref}` pairs for `docs`,
+`files` and `tests`; strings are bounded (reference 1024, input field 16000,
+actor 128 characters). The complete TOON/JSON estimate defaults to 4000 tokens
+and accepts integer ceilings 1..64000. Requirements are never silently truncated.
+
+The result has `preview: true`, `ready`, `checklist` and typed `refusals`.
+Close and start-task previews are supported; other commands and approval-history
+certification return `unsupported` with a remedy, alongside known facts.
+Operational failures throw `ActionPrerequisiteError` with `code` and `remedy`:
+`invalid`, `missing`, `tracker`, `changed` or `budget`. CLI usage failures exit 2
+with `action_<code>` (missing positionals use the native argument refusal); a successfully produced preview exits 0 even when its
+checklist is incomplete. Inspect `ready` and `refusals` before continuing.
+
+No native mutation is invoked: items, histories, claims, policies and session
+focus are preserved. Native reads can initialize rebuildable runtime metadata
+caches on a writable cold tracker. On a physically read-only tracker, the same
+preview works without changing any bytes. Two certified SDK reads reject
+observed concurrent changes; this is an observation, never a lease or a plan
+to replay. Native actions must revalidate current state, actor permissions and
+execution-time hooks themselves. There is no new import, export, sync, journal,
+checkpoint, idempotency-key or shared writer path.
+
+See the [worked example](docs/examples/action.md) and
+[validation evidence](docs/action-validation.md).
+
 ## Without git
 
 Briefs, prompts, ranking, history deltas, governance, duplicate checks and all
-handoff, decision alternatives and stakeholder disclosure commands work in plain initialized trackers without a git executable.
+handoff, decision alternatives, stakeholder disclosure and action prerequisite commands work in plain initialized trackers without a git executable.
 Handoff storage uses the native SDK dispatcher and can reuse a host client.
 `brief diverge` needs a git repository and git refs. Handoff receipts have no
 branch, commit or repository dependency.

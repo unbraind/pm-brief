@@ -1,0 +1,30 @@
+id: pm-brief-action-prerequisites
+title: Compose a compact prerequisite brief for one intended native action
+description: "Combine SDK command contracts, item readiness and declared evidence for an explicitly selected native command and item. Compose authoritative core facts without duplicating validators or selecting work."
+type: Feature
+status: in_progress
+priority: 2
+tags: []
+created_at: "2026-10-27T04:25:34.000Z"
+updated_at: "2026-10-27T04:43:25.131Z"
+author: codex-agent
+acceptance_criteria: "One call identifies missing close fields and unresolved prerequisites; Satisfied fields are references without repeated bodies; Read-only previews perform zero mutations and carry typed unsupported-capability refusals with remedies; Typed SDK and CLI emit bounded TOON/JSON; docs, non-git public-data validation and npm/Bun release evidence are recorded"
+comments[4]{created_at,author,text}:
+  "2026-10-27T04:25:48.456Z",codex-agent,"Overlap rechecked against pinned SDK public contracts/actionability/lifecycle/schema declarations, core command discovery, pm-lint quality rules and pm-evidence selectors, plus existing tracker items and upstream issue search. Core owns native command availability, lifecycle admission and configured status semantics; pm-lint owns quality diagnosis; pm-evidence owns evidence collection. This feature composes those facts for one explicit action and item, without selecting work, applying actions or creating a second validator. No existing action prerequisite item or GitHub issue found. Plan: typed bounded preview, native command registration, strict shared request schema, reference-only satisfied evidence, non-git and no-write regressions, public-copy measurement, packed install matrix and CI npm/Bun gates. Import/export/sync and journal mutation paths are outside this read-only feature; existing paths remain unchanged."
+  "2026-10-27T04:31:37.604Z",codex-agent,"Implementation now composes getContracts availability, certified complete-list reads, resolveItemBlockers (including reverse/external/missing edges), runtime status roles, computeActionabilityReport, native transition evaluation, workflow policy evaluation and SDK lifecycle completeness presets. Satisfied evidence is item/input JSON Pointer references, never copied bodies. Validation found that cold native certified reads initialize derived runtime metadata caches; item/schema/history bytes remain unchanged. Warm repeated previews also preserve all runtime bytes. This distinction will be explicit in measured evidence rather than claiming the SDK performs no derived cache IO."
+  "2026-10-27T04:41:28.338Z",codex-agent,"Behavioral revert proof: replacing only buildActionPrerequisiteBrief with a no-op empty ready preview makes the combined prerequisite regression fail with exit 1; restoring the implementation passes that exact regression with exit 0. Focused suite passed 9/9 including 500 seeded random sequences on a native non-git tracker; parser/output numeric checks, native status roles, old-request replays, SDK read-back state and native competing writes are exercised. Public origin/main snapshot 04b258644a746d289455d1287dd84b5bafe6aa1a: 98 certified items/previews, 115 missing inputs, 277 satisfied references, 0 unresolved references in this corpus, 1486 maximum JSON bytes, 808 maximum conservative tokens, 97601ms elapsed, 0 tracker byte changes under physical read-only permissions. Details and source fingerprint are in docs/action-validation.md. Rechecked SDK staged mutation preview APIs as well: they execute disposable mutations and do not expose a read-only aggregate of missing action inputs; this composition uses public fact/policy readers instead."
+  "2026-10-27T04:43:21.456Z",codex-agent,"Local TypeScript source/tests and docstring lint pass (15 files, 183 documented declarations); diff whitespace is clean. Native command argument metadata and singleton read-output declaration are registered. The mandatory linked combined regression is kept targeted for the saturated host; a broader linked attempt reached its default 120-second timeout, while the independent 500-sequence focused suite passed with a longer explicit allowance. Full release and packed matrix evidence will come from CI, with unchanged coverage thresholds. Bun global isolation was smoke-verified using disposable global directory/bin environment coordinates; no executable or SDK is located via argv/which/symlink heuristics."
+files[6]{path,scope}:
+  action.ts,project
+  index.ts,project
+  scripts/accept-packed.ts,project
+  scripts/coverage-gate.ts,project
+  scripts/validate-actions.ts,project
+  test/action.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 --test-name-pattern=one.preview.combines test/action.test.ts,project,codex-agent,"2026-10-27T04:42:51.359Z",local_mutation,feat/action-prerequisite-briefs
+docs[3]{path,scope}:
+  docs/action-validation.md,project
+  docs/examples/action.md,project
+  README.md,project
+body: ""
