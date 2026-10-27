@@ -726,10 +726,95 @@ source), or `budget` (increase the ceiling or supply a smaller brief). CLI
 refusals exit 2 with `disclosure_<code>` and a remedy, without source text or
 nested error details. See the [worked example and public-tracker replay](docs/examples/disclosure.md).
 
+## Action prerequisite briefs
+
+Ask for one intended native action and one exact item before attempting it:
+
+```sh
+pm brief action close project-123
+pm --json brief action close project-123 --request '{"input":{"reason":"Verified delivery"},"requiredEvidence":[{"kind":"docs","ref":"docs/results.md"}]}'
+pm brief action start-task project-123 --request '{"actor":"delivery-agent"}'
+```
+
+One call combines native command availability, SDK readiness and blocker
+resolution, close evidence fields (`resolution`, `expected_result`,
+`actual_result`), reason governance, workflow rules and explicitly declared
+native evidence links. Satisfied fields are JSON Pointer references; their
+bodies are never repeated. Link presence records linkage, not successful tests
+or artifact verification. This composes core admission facts; pm-lint remains
+the item quality diagnostic, and this command never chooses work.
+
+Readiness is scoped to the action: explicit starting composes native claim and
+update admission, including SDK-resolved type `command_option_policies`.
+Dispatch roles, unfinished children and nonterminal status classifications do
+not veto an explicit start. Closing uses native terminal-state and direct-child
+facts. A decision, outcome gate, draft or blocked status alone does not prevent
+an evidenced close. A claim principal without an assignee is historical metadata,
+not live ownership; both actions check current assignee state.
+
+Policy entries expose the SDK's effective `effect`. Advisory and warning findings
+have `blocking: false`: their `missing`/`unresolved` states stay visible while
+`ready` remains true if all mandatory prerequisites are satisfied. An omitted
+`blocking` means the entry is mandatory. Workspace refusal requires both a
+refusing rule and workspace enforcement; warning-only type transitions never
+become required inputs. Type workflows govern the native start update, not a
+direct close. Close evidence fields and unfinished children follow the native
+`close_validation_default`: strict gates them, while warn/off retain non-blocking
+diagnostics. Explicitly requested evidence and mandatory close reasons still gate.
+
+Required update options are invocation inputs, even when the corresponding item
+field already has a value. Start supplies its native status automatically;
+`actor` supplies the author option. Other required start flags appear as missing
+`option:<key>` entries with typed `unsupported` refusals and native remedies,
+because this request does not accept arbitrary mutation options. Disabled
+generated options and inconsistent policies also prevent readiness. Satisfied
+generated status references use `native:start-task#/update/status`.
+
+The typed SDK entry point is `buildActionPrerequisiteBrief(request, { pmRoot,
+client })`. Pass the host's injected client when embedding. A standalone caller
+can omit it to construct a tracker-bound public SDK client lazily after request
+validation. No executable-path or symlink discovery is involved.
+
+`parseActionPrerequisiteRequest` applies `ACTION_PREREQUISITE_SCHEMA` to both
+SDK and CLI requests. Unknown keys, sparse arrays, nonfinite/fractional budgets,
+duplicate evidence declarations and oversized input refuse before tracker IO.
+Records must be plain JSON data: proxies, accessors and inherited/sparse array
+entries are rejected without executing caller-provided callbacks.
+`requiredEvidence` accepts at most 64 exact `{kind, ref}` pairs for `docs`,
+`files` and `tests`; strings are bounded (reference 1024, input field 16000,
+actor 128 characters). The complete TOON/JSON estimate defaults to 4000 tokens
+and accepts integer ceilings 1..64000. Requirements are never silently truncated.
+
+The result has `preview: true`, `ready`, `checklist` and typed `refusals`.
+Close and start-task previews are supported. Other commands, approval-history
+certification, matching workspace field/writer policies and composed claim-stage
+policies return `unsupported` when their effective response can refuse the action,
+with a remedy alongside known facts. Advisory certification gaps remain
+non-blocking checklist entries. Policy
+field references describe current/proposed input availability; native actions
+can generate or clear other metadata, so those references never certify the
+complete post-action record. Use native semantic validation for those policies.
+Operational failures throw `ActionPrerequisiteError` with `code` and `remedy`:
+`invalid`, `missing`, `tracker`, `changed` or `budget`. CLI usage failures exit 2
+with `action_<code>` (missing positionals use the native argument refusal); a successfully produced preview exits 0 even when its
+checklist is incomplete. Inspect `ready` and `refusals` before continuing.
+
+No native mutation is invoked: items, histories, claims, policies and session
+focus are preserved. Native reads can initialize rebuildable runtime metadata
+caches on a writable cold tracker. On a physically read-only tracker, the same
+preview works without changing any bytes. Two certified SDK reads reject
+observed concurrent changes; this is an observation, never a lease or a plan
+to replay. Native actions must revalidate current state, actor permissions and
+execution-time hooks themselves. There is no new import, export, sync, journal,
+checkpoint, idempotency-key or shared writer path.
+
+See the [worked example](docs/examples/action.md) and
+[validation evidence](docs/action-validation.md).
+
 ## Without git
 
 Briefs, prompts, ranking, history deltas, governance, duplicate checks and all
-handoff, decision alternatives and stakeholder disclosure commands work in plain initialized trackers without a git executable.
+handoff, decision alternatives, stakeholder disclosure and action prerequisite commands work in plain initialized trackers without a git executable.
 Handoff storage uses the native SDK dispatcher and can reuse a host client.
 `brief diverge` needs a git repository and git refs. Handoff receipts have no
 branch, commit or repository dependency.

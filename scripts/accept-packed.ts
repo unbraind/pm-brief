@@ -5,6 +5,8 @@ import { join, resolve } from "node:path";
 import type { HandoffPacket, HandoffStatus } from "../handoff.ts";
 import type { DecisionAlternativesDigest } from "../alternatives.ts";
 import type { DisclosureResult } from "../disclosure.ts";
+import type { ActionPrerequisiteBrief } from "../action.ts";
+import { PmClient, readSettings, readWorkflowPolicies, writeSettings, resolveItemTypeRegistry, resolveItemTypesFilePath, writeWorkspaceJsonWithHistory } from "@unbrained/pm-cli/sdk";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -20,6 +22,10 @@ interface AcceptanceScenario {
   readonly name: string;
   readonly manager: "npm" | "bun";
   readonly hostVersion: string;
+  /** Exercise the actual global host bin symlink inside a disposable prefix. */
+  readonly global?: boolean;
+  /** Launch a freshly acquired host from the runner cache without a project-local host. */
+  readonly ephemeral?: boolean;
 }
 
 /** Concise receipt emitted for each successfully loaded packed extension. */
@@ -39,6 +45,16 @@ interface AcceptanceReceipt {
   readonly decision_alternatives: 2;
   /** All audiences and a value-free dry run execute from the installed tarball. */
   readonly disclosure_profiles: 3;
+  /** One call retains missing close fields and native prerequisites without applying an action. */
+  readonly action_prerequisites: true;
+  /** Missing native update flags are visible before a composed action claims work. */
+  readonly action_option_policy: true;
+  /** Previously persisted residual principals do not create phantom ownership. */
+  readonly action_live_ownership: true;
+  /** Explicit human/gate starts agree with the installed host's native action. */
+  readonly action_explicit_start: true;
+  /** Advisory policies and warning transitions remain non-blocking on both actions. */
+  readonly action_severity: true;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -72,14 +88,14 @@ for (const key of Object.keys(cleanEnvironment)) {
  * @param cwd - Fresh scenario directory or the package root.
  * @returns Captured UTF-8 stdout and stderr for contract assertions.
  */
-function run(command: string, args: string[], cwd: string): SpawnSyncReturns<string> {
+function run(command: string, args: string[], cwd: string, allowFailure = false, environment = cleanEnvironment): SpawnSyncReturns<string> {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
-    env: cleanEnvironment,
+    env: environment,
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.status !== 0) {
+  if (result.status !== 0 && !allowFailure) {
     throw new Error(
       `${command} ${args.join(" ")} failed with status ${String(result.status)}: ${(result.stderr || result.error?.message || result.stdout).trim()}`,
     );
@@ -95,16 +111,20 @@ function run(command: string, args: string[], cwd: string): SpawnSyncReturns<str
  * @param args - pm arguments after the executable name.
  * @returns Captured pm process result.
  */
-function runPm(scenario: AcceptanceScenario, cwd: string, args: string[]): SpawnSyncReturns<string> {
+function runPm(scenario: AcceptanceScenario, cwd: string, args: string[], allowFailure = false): SpawnSyncReturns<string> {
   // --silent keeps npm's own runner off stderr. From npm 11 the runner writes a
   // progress notice there, which says nothing about the package; silencing the
   // runner is better than filtering its output afterwards, because any filter
   // wide enough to catch the notice is also wide enough to discard a diagnostic
   // the installed host or extension printed -- exactly what this gate exists to
   // catch.
+  if (scenario.global) return run(join(cwd, "global", "bin", "pm"), ["--pm-path", ".agents/pm", ...args], cwd, allowFailure);
+  if (scenario.ephemeral) return scenario.manager === "npm"
+    ? run(npxCommand, ["--yes", "--silent", `--package=${cliPackage}@${scenario.hostVersion}`, "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure)
+    : run(bunxCommand, ["--package", `${cliPackage}@${scenario.hostVersion}`, "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure);
   return scenario.manager === "npm"
-    ? run(npxCommand, ["--no-install", "--silent", "pm", "--pm-path", ".agents/pm", ...args], cwd)
-    : run(bunxCommand, ["--no-install", "pm", "--pm-path", ".agents/pm", ...args], cwd);
+    ? run(npxCommand, ["--no-install", "--silent", "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure)
+    : run(bunxCommand, ["--no-install", "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure);
 }
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), "pm-brief-packed-acceptance-"));
@@ -113,17 +133,33 @@ try {
   mkdirSync(packRoot);
   run(npmCommand, ["pack", "--silent", "--pack-destination", packRoot], repoRoot);
   const tarball = join(packRoot, `${packageJson.name}-${packageJson.version}.tgz`);
+  const publishedHostVersion = run(npmCommand, ["view", cliPackage, "version"], repoRoot).stdout.trim();
+  if (!/^\d+\.\d+\.\d+$/.test(publishedHostVersion)) throw new Error("The public registry did not return an exact stable host version");
   const scenarios: AcceptanceScenario[] = [
     { name: "npm-current", manager: "npm", hostVersion: developmentVersion },
     { name: "bun-current", manager: "bun", hostVersion: developmentVersion },
     { name: "npm-minimum", manager: "npm", hostVersion: minimumVersion },
+    { name: "npm-global", manager: "npm", hostVersion: publishedHostVersion, global: true },
+    { name: "bun-global", manager: "bun", hostVersion: publishedHostVersion, global: true },
+    { name: "npx-ephemeral", manager: "npm", hostVersion: publishedHostVersion, ephemeral: true },
+    { name: "bunx-ephemeral", manager: "bun", hostVersion: publishedHostVersion, ephemeral: true },
   ];
   const receipts: AcceptanceReceipt[] = [];
 
   for (const scenario of scenarios) {
     const scenarioRoot = join(temporaryRoot, scenario.name);
     mkdirSync(scenarioRoot);
-    if (scenario.manager === "npm") {
+    if (scenario.global) {
+      const prefix = join(scenarioRoot, "global");
+      if (scenario.manager === "npm") run(npmCommand, ["install", "--global", "--prefix", prefix, "--ignore-scripts", `${cliPackage}@${scenario.hostVersion}`, tarball], scenarioRoot);
+      else {
+        const config = join(scenarioRoot, "bunfig.toml");
+        writeFileSync(config, `[install]\nglobalDir = ${JSON.stringify(join(prefix, "lib"))}\nglobalBinDir = ${JSON.stringify(join(prefix, "bin"))}\n`);
+        run(bunCommand, ["add", "--global", `--config=${config}`, "--ignore-scripts", `${cliPackage}@${scenario.hostVersion}`, tarball], scenarioRoot, false, { ...cleanEnvironment, BUN_INSTALL_GLOBAL_DIR: join(prefix, "lib"), BUN_INSTALL_BIN: join(prefix, "bin") });
+      }
+    } else if (scenario.ephemeral) {
+      writeFileSync(join(scenarioRoot, "package.json"), JSON.stringify({ name: `pm-brief-${scenario.name}`, version: "0.0.0", private: true, type: "module" }));
+    } else if (scenario.manager === "npm") {
       run(npmCommand, ["init", "-y"], scenarioRoot);
       run(npmCommand, ["install", "--ignore-scripts", `${cliPackage}@${scenario.hostVersion}`, tarball], scenarioRoot);
     } else {
@@ -166,18 +202,81 @@ try {
     const bounded = runPm(scenario, scenarioRoot, ["brief", "--no-governance", "--format", "markdown", "--max-tokens", "1000"]);
     const boundedEstimate = Math.ceil(bounded.stdout.length / 4);
     if (boundedEstimate > 1000) throw new Error(`${scenario.name} rendered brief exceeds 1000: ${boundedEstimate}`);
-    const refusedArgs = ["--pm-path", ".agents/pm", "brief", "--no-governance", "--max-tokens", "1"];
-    const refused = spawnSync(
-      scenario.manager === "npm" ? npxCommand : bunxCommand,
-      scenario.manager === "npm" ? ["--no-install", "--silent", "pm", ...refusedArgs] : ["--no-install", "pm", ...refusedArgs],
-      { cwd: scenarioRoot, encoding: "utf8", env: cleanEnvironment, maxBuffer: 64 * 1024 * 1024 },
-    );
+    const refused = runPm(scenario, scenarioRoot, ["brief", "--no-governance", "--max-tokens", "1"], true);
     if (refused.status !== 2 || !/minimum budget \d+ required; run pm brief/.test(refused.stdout + refused.stderr)) {
       throw new Error(`${scenario.name} cannot-fit must preserve usage exit 2 and recovery: ${String(refused.status)} ${(refused.stderr || refused.stdout).trim()}`);
     }
     const createdReceipt = JSON.parse(created.stdout) as { id?: string; item?: { id?: string } };
     const fixtureId = createdReceipt.id ?? createdReceipt.item?.id;
     if (!fixtureId) throw new Error(`${scenario.name} create did not return a fixture id`);
+    const nativeBefore = runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout;
+    for (const format of ["json", "toon"]) {
+      const preview = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", "close", fixtureId]);
+      if (!preview.stdout.includes("actual_result") || Buffer.byteLength(preview.stdout) > 16000 || preview.stderr !== "") throw new Error(`${scenario.name} prerequisite preview lost close fields or exceeded budget`);
+      if (format === "json") {
+        const output = JSON.parse(preview.stdout) as ActionPrerequisiteBrief;
+        if (!output.preview || output.ready || output.refusals.length || output.estimatedTokenCeiling > 4000) throw new Error(`${scenario.name} prerequisite preview contract failed`);
+      }
+    }
+    if (runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout !== nativeBefore) throw new Error(`${scenario.name} prerequisite preview mutated its target`);
+    // Seed through the pinned public SDK, so newer consumers must also accept
+    // records and residual metadata written by the previously released host.
+    const actionRoot = join(scenarioRoot, ".agents/pm");
+    const actionClient = new PmClient({ pmRoot: actionRoot, author: "packed-prior", noExtensions: true });
+    for (const type of ["Decision", "Milestone", "Task"]) {
+      const id = (await actionClient.create({ title: `Explicit native ${type}`, type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", parent: "none", sprint: "none", release: "none", clearDeps: true })).item.id;
+      if (type === "Task") {
+        await actionClient.claim(id);
+        await actionClient.close(id, "Previously completed");
+        await actionClient.reopen(id, "Recurred work");
+        const legacy = (await actionClient.get(id, { full: true })).item;
+        if (legacy.assignee || legacy.claim_principal !== "packed-prior") throw new Error(`${scenario.name} legacy ownership fixture was not retained`);
+        await actionClient.config("project", "set", "governance_ownership_enforcement", "strict");
+      }
+      const before = runPm(scenario, scenarioRoot, ["--json", "get", id, "--full"]).stdout;
+      for (const command of (type === "Task" ? ["start-task", "close"] : ["start-task"])) for (const format of ["json", "toon"]) {
+        const request = { actor: "packed-next", ...(command === "close" ? { input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } } : {}) };
+        const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", command, id, "--request", JSON.stringify(request)]);
+        if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} explicit start preview disagreed with native admission`);
+      }
+      if (runPm(scenario, scenarioRoot, ["--json", "get", id, "--full"]).stdout !== before) throw new Error(`${scenario.name} explicit start preview mutated state`);
+      runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "start-task", id]);
+      if (type === "Task") await actionClient.config("project", "set", "governance_ownership_enforcement", "none");
+    }
+    const actionSettings = await readSettings(actionRoot);
+    const actionTypes = Object.values(resolveItemTypeRegistry(actionSettings).by_type);
+    const typeFile = resolveItemTypesFilePath(actionRoot, actionSettings.schema);
+    const writeTypes = async (required: boolean): Promise<void> => {
+      const definitions = actionTypes.map(type => type.name === "Task" ? { ...type, command_option_policies: required ? [{ command: "update", option: "description", required: true }] : type.command_option_policies } : type);
+      await writeWorkspaceJsonWithHistory({ pmRoot: actionRoot, filePath: typeFile, raw: JSON.stringify({ definitions }), op: "schema_update", author: "packed-setup", lockTtlSeconds: actionSettings.locks.ttl_seconds, lockWaitMs: actionSettings.locks.wait_ms });
+    };
+    await writeTypes(true);
+    const policyBefore = runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout;
+    for (const format of ["json", "toon"]) {
+      const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", "start-task", fixtureId, "--request", '{"actor":"packed-next"}']);
+      if (result.stderr || !result.stdout.includes("option:description") || (format === "json" ? (JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: false/.test(result.stdout))) throw new Error(`${scenario.name} composed start lost its required native option`);
+    }
+    if (runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout !== policyBefore) throw new Error(`${scenario.name} required-option preview acquired a claim`);
+    await writeTypes(false);
+    const severitySettings = await readSettings(actionRoot);
+    const severityPolicies = await readWorkflowPolicies(actionRoot);
+    await actionClient.workflowPolicy("policy-mode", "refuse");
+    await actionClient.workflowPolicy("policy-put", "packed-advisory", { definition: { id: "packed-advisory", effect: "advise", subject: { operations: ["claim", "update", "close"] }, rule: { kind: "authors", authors: ["reviewer"] } } });
+    await writeSettings(actionRoot, { ...severitySettings, schema: { ...severitySettings.schema, type_workflows: [{ type: "Task", allowed_transitions: [] }] } });
+    await actionClient.config("project", "set", "governance_workflow_enforcement", "warn");
+    const severityBefore = runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout;
+    for (const command of ["start-task", "close"]) for (const format of ["json", "toon"]) {
+      const request = { actor: "packed-next", ...(command === "close" ? { input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } } : {}) };
+      const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", command, fixtureId, "--request", JSON.stringify(request)]);
+      if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} advisory findings became mandatory prerequisites`);
+      if (format === "json" && !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).checklist.some(row => row.blocking === false && row.effect === "advise")) throw new Error(`${scenario.name} advisory severity was lost`);
+    }
+    if (runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout !== severityBefore) throw new Error(`${scenario.name} advisory preview mutated state`);
+    runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "start-task", fixtureId]);
+    await actionClient.config("project", "set", "governance_workflow_enforcement", severitySettings.governance.workflow_enforcement ?? "off");
+    await writeSettings(actionRoot, { ...await readSettings(actionRoot), schema: severitySettings.schema });
+    await actionClient.workflowPolicy("policy-remove", "packed-advisory");
+    await actionClient.workflowPolicy("policy-mode", severityPolicies.enforcement);
     const contractFile = join(scenarioRoot, "handoff-contract.json");
     writeFileSync(contractFile, JSON.stringify({ focus: [fixtureId], questions: [{ id: "scope", text: "Which fixture will you use?" }], assumptions: [{ id: "review", text: "Review is unresolved" }], requiredEvidence: [{ id: "report", item: fixtureId, kind: "docs", ref: "docs/report.md" }] }));
     const packet = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "--author", "packed-sender", "brief", "handoff", "create", "--input", contractFile]).stdout) as HandoffPacket;
@@ -207,6 +306,11 @@ try {
       handoff_missing_evidence: true,
       decision_alternatives: 2,
       disclosure_profiles: 3,
+      action_prerequisites: true,
+      action_option_policy: true,
+      action_live_ownership: true,
+      action_explicit_start: true,
+      action_severity: true,
     });
   }
 

@@ -1,5 +1,8 @@
 import { registerDecisionAlternativesCommand } from "./alternatives.ts";
 import { registerDisclosureCommand } from "./disclosure.ts";
+import { registerActionPrerequisiteCommand } from "./action.ts";
+export { buildActionPrerequisiteBrief, parseActionPrerequisiteRequest, ActionPrerequisiteError, ACTION_PREREQUISITE_SCHEMA } from "./action.ts";
+export type { ActionEvidence, ActionPrerequisiteRequest, ActionPrerequisiteOptions, ActionRefusalCode, ActionPrerequisiteEntry, ActionPrerequisiteBrief } from "./action.ts";
 export { buildDisclosureBrief, renderDisclosureBrief, parseDisclosurePolicy, DisclosureError } from "./disclosure.ts";
 export type { DisclosureProfile, DisclosureField, DisclosurePolicy, DisclosureValue, DisclosureExclusionReason, DisclosureExclusion, DisclosureResult, DisclosureRenderOptions, DisclosureOptions, DisclosureRefusalCode } from "./disclosure.ts";
 export { buildDecisionAlternatives, DecisionAlternativesError } from "./alternatives.ts";
@@ -4747,6 +4750,7 @@ function registerCommands(api: ExtensionApi): void {
   registerHandoffCommands(api);
   registerDecisionAlternativesCommand(api);
   registerDisclosureCommand(api);
+  registerActionPrerequisiteCommand(api);
   const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },
