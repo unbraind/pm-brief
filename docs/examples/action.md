@@ -44,3 +44,13 @@ can generate or clear metadata beyond the supplied scalar inputs. None of these
 capability refusals can become `ready: true`.
 JSON and TOON contain the same obligations; an insufficient ceiling refuses
 the entire preview rather than dropping missing fields.
+
+For an explicit `start-task`, human/gate dispatch roles and unfinished children
+do not substitute for native claim/update admission. A type policy requiring
+`update --description` produces a missing `option:description`, even when the
+item already contains a description. The request does not accept arbitrary
+start mutation flags, so it also returns `start-option:description` with a native
+preview remedy. This catches the requirement before native start would claim
+the item and then fail its update. `actor` supplies an author option; native
+start supplies status automatically. Residual claim-principal metadata without
+an assignee does not establish live ownership after close/reopen.

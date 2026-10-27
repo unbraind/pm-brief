@@ -3,7 +3,8 @@ import { types as utilTypes } from "node:util";
 import {
   PmClient, certifyCompleteListResult, createPmCliExpectedError, estimatePmOutputTokens,
   getContracts, readSettings, readWorkflowPolicies, resolveRuntimeStatusRegistry,
-  resolveItemBlockers, computeActionabilityReport, resolveItemTypeRegistry, buildItemChildrenRollup,
+  resolveItemBlockers, resolveItemTypeRegistry, resolveTypeDefinition, buildItemChildrenRollup,
+  resolveCommandOptionPolicyState, commandOptionFlagLabel,
   evaluateTransition, resolveTypeWorkflows, evaluateWorkflowPolicies,
   createLifecycleCompletenessPolicies, resolveTerminalReason, workflowPolicyApplies,
   resolveStartTaskInProgressStatus, resolveAuthor, resolveClaimPrincipal,
@@ -161,16 +162,12 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
     for (const blocker of resolveItemBlockers(item, rows, registry)) {
       add({ kind: "prerequisite", key: blocker.id, state: blocker.resolved ? "satisfied" : "unresolved", ref: `${blocker.id}#/status`, ...(blocker.resolved ? {} : { remedy: blocker.external ? "Resolve this external prerequisite through its owning integration" : "Resolve the prerequisite or correct its native relationship before acting" }) });
     }
-    const report = computeActionabilityReport([item], items, registry, resolveItemTypeRegistry(settings));
     if (closing) {
       const children = buildItemChildrenRollup(item.id, items, registry, items.length);
       if (children.truncated) throw new ActionPrerequisiteError("budget", "Native child prerequisites are incomplete", "Inspect the complete native child projection before retrying; no unfinished child is silently omitted");
       for (const child of children.sample) if (!registry.terminal_statuses.has(child.status)) add({ kind: "prerequisite", key: child.id, state: "unresolved", ref: `${child.id}#/status`, remedy: "Resolve this unfinished direct child before closing its parent" });
     }
-    for (const [key, unresolved] of [["blocked-status", starting && registry.blocked_statuses.has(item.status)], ["active-children", starting && report.containers.some(row => row.item.id === item.id)], ["human-decision", starting && report.decisions.some(row => row.item.id === item.id)], ["outcome-gate", starting && report.gates.some(row => row.item.id === item.id)]] as const) {
-      if (unresolved) add({ kind: "readiness", key, state: "unresolved", ref: `${item.id}#/status`, remedy: "Resolve the SDK readiness classification before attempting the selected action" });
-    }
-    if ((starting && !registry.active_statuses.has(item.status)) || (closing && registry.terminal_statuses.has(item.status))) add({ kind: "readiness", key: "inactive", state: "unresolved", ref: `${item.id}#/status`, remedy: "Review the configured lifecycle role; use native reopen/update where appropriate" });
+    if ((starting || closing) && registry.terminal_statuses.has(item.status)) add({ kind: "readiness", key: "inactive", state: "unresolved", ref: `${item.id}#/status`, remedy: "Review the configured lifecycle role; use native reopen/update where appropriate" });
     for (const [index, evidence] of (request.requiredEvidence ?? []).entries()) {
       const links = item[evidence.kind] ?? [];
       const found = links.findIndex(link => ("command" in link && link.command === evidence.ref) || link.path === evidence.ref);
@@ -178,6 +175,22 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
     }
     if (supported) {
       const after: ListedItem = { ...item, status: closing ? registry.close_status : resolveStartTaskInProgressStatus(registry) };
+      if (starting) {
+        const type = resolveTypeDefinition(item.type, resolveItemTypeRegistry(settings));
+        if (!type) refuse("type-options", "Inspect the native type registry; this item has no declared command-option contract");
+        else {
+          const optionPolicy = resolveCommandOptionPolicyState(type, "update", []);
+          if (optionPolicy.errors.length) refuse("type-options", "Correct the native type command_option_policies before claiming this item");
+          const provided = new Set(["status", ...(actor === undefined ? [] : ["author"])]);
+          for (const option of optionPolicy.required) {
+            const present = provided.has(option);
+            add({ kind: "input", key: `option:${option}`, state: present ? "satisfied" : "missing", ...(present ? { ref: option === "author" ? "request#/actor" : "native:start-task#/update/status" } : { remedy: option === "author" ? "Supply the intended actor in request.actor" : `Supply ${commandOptionFlagLabel("update", option)} to the native start-task command; recorded fields do not supply invocation options` }) });
+            if (!present && option !== "author") refuse(`start-option:${option}`, "This brief does not accept arbitrary start mutation options; supply the required native flag and certify it with the SDK semantic mutation preview before claiming");
+          }
+          for (const option of optionPolicy.disabled) if (provided.has(option)) add({ kind: "policy", key: `option:${option}`, state: "unresolved", ref: `type:${item.type}#/command_option_policies`, remedy: `Native start-task supplies ${commandOptionFlagLabel("update", option)}; reconcile the disabled option with the intended action before claiming` });
+          if (actor === undefined && optionPolicy.disabled.includes("author")) refuse("start-option:author", "Declare the intended actor and inspect native author-option admission; ambient actor injection cannot be certified from this request");
+        }
+      }
       const inputFields = { resolution: "resolution", expectedResult: "expected_result", actualResult: "actual_result" } as const;
       for (const [option, field] of Object.entries(inputFields)) {
         const proposed = request.input?.[option as keyof typeof inputFields];
@@ -218,7 +231,9 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
         const transition = evaluateTransition({ typeName: item.type, fromStatus: item.status, toStatus: after.status, typeWorkflows: resolveTypeWorkflows(settings.schema), statusRegistry: registry });
         if (!transition.allowed) add({ kind: "policy", key: "transition", state: "unresolved", ref: "settings.json#/schema/type_workflows", remedy: "Follow an allowed transition from the configured type workflow" });
       }
-      if ((starting || settings.governance.ownership_enforcement === "strict") && (item.assignee || item.claim_principal) && (item.claim_principal ?? item.assignee) !== principal) {
+      const assignee = item.assignee?.trim();
+      const owner = assignee ? item.claim_principal?.trim() || (starting ? item.assignee : assignee) : undefined;
+      if ((starting || settings.governance.ownership_enforcement === "strict") && owner && owner !== principal) {
         add({ kind: "readiness", key: "ownership", state: "unresolved", ref: `${item.id}#/${item.claim_principal ? "claim_principal" : "assignee"}`, remedy: "Supply the intended actor or resolve the current claim through native claim/release before acting" });
         if (actor === undefined) add({ kind: "input", key: "actor", state: "missing", remedy: "Supply the intended mutation actor to check this existing claim" });
       }

@@ -6,6 +6,7 @@ import type { HandoffPacket, HandoffStatus } from "../handoff.ts";
 import type { DecisionAlternativesDigest } from "../alternatives.ts";
 import type { DisclosureResult } from "../disclosure.ts";
 import type { ActionPrerequisiteBrief } from "../action.ts";
+import { PmClient, readSettings, resolveItemTypeRegistry, resolveItemTypesFilePath, writeWorkspaceJsonWithHistory } from "@unbrained/pm-cli/sdk";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -46,6 +47,12 @@ interface AcceptanceReceipt {
   readonly disclosure_profiles: 3;
   /** One call retains missing close fields and native prerequisites without applying an action. */
   readonly action_prerequisites: true;
+  /** Missing native update flags are visible before a composed action claims work. */
+  readonly action_option_policy: true;
+  /** Previously persisted residual principals do not create phantom ownership. */
+  readonly action_live_ownership: true;
+  /** Explicit human/gate starts agree with the installed host's native action. */
+  readonly action_explicit_start: true;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -210,6 +217,45 @@ try {
       }
     }
     if (runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout !== nativeBefore) throw new Error(`${scenario.name} prerequisite preview mutated its target`);
+    // Seed through the pinned public SDK, so newer consumers must also accept
+    // records and residual metadata written by the previously released host.
+    const actionRoot = join(scenarioRoot, ".agents/pm");
+    const actionClient = new PmClient({ pmRoot: actionRoot, author: "packed-prior", noExtensions: true });
+    for (const type of ["Decision", "Milestone", "Task"]) {
+      const id = (await actionClient.create({ title: `Explicit native ${type}`, type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", parent: "none", sprint: "none", release: "none", clearDeps: true })).item.id;
+      if (type === "Task") {
+        await actionClient.claim(id);
+        await actionClient.close(id, "Previously completed");
+        await actionClient.reopen(id, "Recurred work");
+        const legacy = (await actionClient.get(id, { full: true })).item;
+        if (legacy.assignee || legacy.claim_principal !== "packed-prior") throw new Error(`${scenario.name} legacy ownership fixture was not retained`);
+        await actionClient.config("project", "set", "governance_ownership_enforcement", "strict");
+      }
+      const before = runPm(scenario, scenarioRoot, ["--json", "get", id, "--full"]).stdout;
+      for (const command of (type === "Task" ? ["start-task", "close"] : ["start-task"])) for (const format of ["json", "toon"]) {
+        const request = { actor: "packed-next", ...(command === "close" ? { input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } } : {}) };
+        const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", command, id, "--request", JSON.stringify(request)]);
+        if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} explicit start preview disagreed with native admission`);
+      }
+      if (runPm(scenario, scenarioRoot, ["--json", "get", id, "--full"]).stdout !== before) throw new Error(`${scenario.name} explicit start preview mutated state`);
+      runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "start-task", id]);
+      if (type === "Task") await actionClient.config("project", "set", "governance_ownership_enforcement", "none");
+    }
+    const actionSettings = await readSettings(actionRoot);
+    const actionTypes = Object.values(resolveItemTypeRegistry(actionSettings).by_type);
+    const typeFile = resolveItemTypesFilePath(actionRoot, actionSettings.schema);
+    const writeTypes = async (required: boolean): Promise<void> => {
+      const definitions = actionTypes.map(type => type.name === "Task" ? { ...type, command_option_policies: required ? [{ command: "update", option: "description", required: true }] : type.command_option_policies } : type);
+      await writeWorkspaceJsonWithHistory({ pmRoot: actionRoot, filePath: typeFile, raw: JSON.stringify({ definitions }), op: "schema_update", author: "packed-setup", lockTtlSeconds: actionSettings.locks.ttl_seconds, lockWaitMs: actionSettings.locks.wait_ms });
+    };
+    await writeTypes(true);
+    const policyBefore = runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout;
+    for (const format of ["json", "toon"]) {
+      const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", "start-task", fixtureId, "--request", '{"actor":"packed-next"}']);
+      if (result.stderr || !result.stdout.includes("option:description") || (format === "json" ? (JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: false/.test(result.stdout))) throw new Error(`${scenario.name} composed start lost its required native option`);
+    }
+    if (runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout !== policyBefore) throw new Error(`${scenario.name} required-option preview acquired a claim`);
+    await writeTypes(false);
     const contractFile = join(scenarioRoot, "handoff-contract.json");
     writeFileSync(contractFile, JSON.stringify({ focus: [fixtureId], questions: [{ id: "scope", text: "Which fixture will you use?" }], assumptions: [{ id: "review", text: "Review is unresolved" }], requiredEvidence: [{ id: "report", item: fixtureId, kind: "docs", ref: "docs/report.md" }] }));
     const packet = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "--author", "packed-sender", "brief", "handoff", "create", "--input", contractFile]).stdout) as HandoffPacket;
@@ -240,6 +286,9 @@ try {
       decision_alternatives: 2,
       disclosure_profiles: 3,
       action_prerequisites: true,
+      action_option_policy: true,
+      action_live_ownership: true,
+      action_explicit_start: true,
     });
   }
 

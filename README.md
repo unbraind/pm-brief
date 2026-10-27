@@ -744,9 +744,21 @@ bodies are never repeated. Link presence records linkage, not successful tests
 or artifact verification. This composes core admission facts; pm-lint remains
 the item quality diagnostic, and this command never chooses work.
 
-Readiness is scoped to the action: starting work uses native dispatch roles;
-closing uses native terminal-state and direct-child facts. A decision, outcome
-gate, draft or blocked status alone does not prevent an evidenced close.
+Readiness is scoped to the action: explicit starting composes native claim and
+update admission, including SDK-resolved type `command_option_policies`.
+Dispatch roles, unfinished children and nonterminal status classifications do
+not veto an explicit start. Closing uses native terminal-state and direct-child
+facts. A decision, outcome gate, draft or blocked status alone does not prevent
+an evidenced close. A claim principal without an assignee is historical metadata,
+not live ownership; both actions check current assignee state.
+
+Required update options are invocation inputs, even when the corresponding item
+field already has a value. Start supplies its native status automatically;
+`actor` supplies the author option. Other required start flags appear as missing
+`option:<key>` entries with typed `unsupported` refusals and native remedies,
+because this request does not accept arbitrary mutation options. Disabled
+generated options and inconsistent policies also prevent readiness. Satisfied
+generated status references use `native:start-task#/update/status`.
 
 The typed SDK entry point is `buildActionPrerequisiteBrief(request, { pmRoot,
 client })`. Pass the host's injected client when embedding. A standalone caller

@@ -14,11 +14,13 @@ outside this change. Two real native SDK read boundaries are instrumented with
 competing native writes; each rejects a stale preview with `changed`, and a
 fresh request reports the current SDK revision. No SDK result is mocked.
 
-An action-specific regression prevents work-dispatch classifications from
-blocking closure: evidenced Decision, Milestone, blocked and draft items can
-produce a ready close preview, while their unfinished direct children remain
-visible through the SDK child rollup. That regression fails against the earlier
-unconditional dispatch checks and passes after scoping them to start-task.
+Action-specific regressions prevent work-dispatch classifications from blocking
+explicit native actions. Selected starts use native claim/update admission,
+without dispatch-only human/gate/container or nonterminal-status vetoes.
+Evidenced Decision, Milestone, blocked and draft items can also produce a ready
+close preview, while unfinished direct children remain visible for close through
+the SDK child rollup. Existing dispatch classification assertions remain and are
+paired with successful native execution checks.
 
 Another native reproduction verifies the policy boundary: close clears an
 assignment, so core refuses a field-writer or required-assignee policy that a
@@ -28,10 +30,23 @@ preview remedy. Start-task also exposes matching claim-stage policy constraints,
 rather than silently evaluating only its update stage. The regression checks
 real native refusals and fails against the earlier projection. Native start
 status and actor normalization use the SDK resolvers.
-Strict close ownership also compares the SDK-resolved intended principal with
-the recorded claim: another principal is unresolved, a missing actor is an input,
-and the matching normalized actor is accepted. The same native regression
-checks strict close refusal for the other actor.
+Ownership checks compare the SDK-resolved intended principal only when a current
+nonblank assignee establishes live ownership. Residual principals after native
+close/reopen do not deny either action. Legacy assignee-only ownership still
+denies another actor; missing actors remain inputs and matching actors pass.
+
+The round-1 re-review class audit covers all runtime admission and ownership
+sites, SDK/CLI paths, both renderings and the seven packed install consumers.
+Its native regressions cover 48 SDK-recognized update-option keys and required,
+disabled, hidden, contradictory and create-only policy states. Persisted values
+do not satisfy invocation-option requirements. SDK-resolved policies are checked
+before any claim; arbitrary required flags outside this request surface produce
+missing entries and explicit unsupported-capability remedies. Native generated
+status and declared author options remain references. Separate properties cover
+six close/reopen ownership cycles across all three ownership modes and two new
+actors, legacy live assignments, and 15 type/status combinations with unfinished
+children. Native non-git JSON/TOON and packed consumers check the same classes;
+packed fixtures include records written by the pinned previously released SDK.
 
 The focused suite includes 500 seeded operation sequences (seed `0x5eed2026`)
 on one non-git tracker: random prospective field inputs, old-input replays,
@@ -84,7 +99,7 @@ the physically read-only public copy with zero byte changes.
 Local checks are targeted tests, TypeScript checks and the repository docstring
 lint gate. Full npm and Bun release gates, unchanged coverage thresholds and the
 seven packed installation scenarios run in CI. Their exact-head run and counts
-are recorded on the work item and PR after CI completes.
+are recorded on the PR linked from the work item after CI completes.
 
 The project-local npm/Bun cases use the unchanged development pin; the minimum
 host case retains the declared peer floor. Both disposable global installs

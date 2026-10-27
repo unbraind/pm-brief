@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
-import { PmClient, locateItem, readSettings, writeSettings, resolveRuntimeStatusRegistry, evaluateWorkflowPolicies, createLifecycleCompletenessPolicies, estimatePmOutputTokens } from "@unbrained/pm-cli/sdk";
+import { PmClient, locateItem, readSettings, writeSettings, resolveRuntimeStatusRegistry, evaluateWorkflowPolicies, createLifecycleCompletenessPolicies, estimatePmOutputTokens, resolveItemTypeRegistry, resolveTypeDefinition, resolveCommandOptionPolicyState, canonicalizeCommandOptionKey, COMMON_MUTATION_COMMAND_OPTION_KEYS, computeActionabilityReport, writeWorkspaceJsonWithHistory, resolveItemTypesFilePath } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { buildActionPrerequisiteBrief, parseActionPrerequisiteRequest, ActionPrerequisiteError } from "../index.ts";
 import type { ActionPrerequisiteBrief, ActionPrerequisiteRequest } from "../index.ts";
@@ -36,6 +36,107 @@ async function snapshot(path: string, prefix = "", includeRuntime = false): Prom
 function refusal(code: string) {
   return (error: unknown): boolean => { assert.ok(error instanceof ActionPrerequisiteError); assert.equal(error.code, code); assert.ok(error.remedy.length > 10); return true; };
 }
+
+/** Configure native type policies through the SDK while preserving other type definitions. */
+async function updatePolicies(pmRoot: string, policies: NonNullable<ReturnType<typeof resolveTypeDefinition>>["command_option_policies"]) {
+  const settings = await readSettings(pmRoot);
+  const types = Object.values(resolveItemTypeRegistry(settings).by_type).map(type => type.name === "Task" ? { ...type, command_option_policies: policies } : type);
+  await writeWorkspaceJsonWithHistory({ pmRoot, filePath: resolveItemTypesFilePath(pmRoot, settings.schema), raw: JSON.stringify({ definitions: types }), op: "schema_update", author: "fixture", lockTtlSeconds: settings.locks.ttl_seconds, lockWaitMs: settings.locks.wait_ms });
+}
+
+test("composed start admission checks every SDK type command option policy before claiming", { timeout: 180000 }, async t => {
+  const f = await fixture(t);
+  const options = [...new Set(["description", ...COMMON_MUTATION_COMMAND_OPTION_KEYS, "title", "body", "status", "priority", "type", "tags", "author", "message", "closeReason", "dep", "comment", "note", "file", "doc", "test"].map(key => canonicalizeCommandOptionKey("update", key)).filter((key): key is string => key !== undefined))];
+  for (const option of options) {
+    await updatePolicies(f.pmRoot, []);
+    const id = await f.create(`Required native option ${option}`, { description: "Already recorded, not a supplied option", body: "Already recorded", actualResult: "Observed" });
+    await updatePolicies(f.pmRoot, [{ command: "update", option, required: true }]);
+    const settings = await readSettings(f.pmRoot);
+    const policy = resolveCommandOptionPolicyState(resolveTypeDefinition("Task", resolveItemTypeRegistry(settings))!, "update", []);
+    assert.deepEqual(policy.required, [option]);
+    const before = await snapshot(f.pmRoot);
+    const preview = await buildActionPrerequisiteBrief({ command: "start-task", item: id, actor: "fixture" }, f.options);
+    const provided = option === "status" || option === "author";
+    assert.equal(preview.ready, provided, option);
+    assert.ok(preview.checklist.some(row => row.key === `option:${option}` && row.state === (provided ? "satisfied" : "missing")), option);
+    assert.deepEqual(await snapshot(f.pmRoot), before);
+    if (provided) await f.client.startTask(id, { author: "fixture" });
+    else {
+      await assert.rejects(f.client.startTask(id, { author: "fixture" }), /required option/i);
+      assert.equal((await f.client.get(id, { full: true })).item.assignee, "fixture", "native composed failure occurs after its claim");
+    }
+    // Close is not an update composition and must not inherit this option policy.
+    assert.equal((await buildActionPrerequisiteBrief({ command: "close", item: id, actor: "fixture", input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } }, f.options)).ready, true, option);
+  }
+  for (const [option, extra, expected] of [["status", { enabled: false }, false], ["description", { enabled: false }, true], ["status", { visible: false }, true], ["status", { required: true, enabled: false }, false]] as const) {
+    await updatePolicies(f.pmRoot, [{ command: "update", option, ...extra }]);
+    assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item, actor: "fixture" }, f.options)).ready, expected);
+  }
+  await updatePolicies(f.pmRoot, [{ command: "update", option: "author", required: true }]);
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).ready, false);
+  await updatePolicies(f.pmRoot, [{ command: "update", option: "author", enabled: false }]);
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).ready, false);
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item, actor: "fixture" }, f.options)).ready, false);
+  await updatePolicies(f.pmRoot, [{ command: "create", option: "description", required: true }]);
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).ready, true);
+  t.diagnostic(JSON.stringify({ nativeUpdateOptionKeys: options.length, policyStates: "required,disabled,hidden,contradictory,create-only" }));
+});
+
+test("retained ownership metadata never denies either action without a live assignee", async t => {
+  const f = await fixture(t);
+  for (const mode of ["none", "warn", "strict"]) for (const actor of ["new-agent-a", "new-agent-b"]) {
+    await f.client.config("project", "set", "governance_ownership_enforcement", mode);
+    const id = await f.create(`Recurred work ${mode} ${actor}`, { resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
+    await f.client.claim(id, { author: "prior-agent" });
+    await f.client.close(id, "Previously completed", { author: "prior-agent" });
+    await f.client.reopen(id, "Newly recurring work", { author: actor });
+    const item = (await f.client.get(id, { full: true })).item;
+    assert.equal(item.assignee, undefined); assert.equal(item.claim_principal, "prior-agent");
+    const before = await snapshot(f.pmRoot);
+    for (const command of ["start-task", "close"]) {
+      const result = await buildActionPrerequisiteBrief({ command, item: id, actor, ...(command === "close" ? { input: { reason: "Reverified", resolution: "Resolved again", expectedResult: "Expected", actualResult: "Observed" } } : {}) }, f.options);
+      assert.equal(result.ready, true, JSON.stringify(result));
+      assert.ok(!result.checklist.some(row => row.key === "ownership"));
+    }
+    assert.deepEqual(await snapshot(f.pmRoot), before);
+    await f.client.startTask(id, { author: actor });
+    assert.equal((await f.client.get(id, { full: true })).item.assignee, actor);
+    await f.client.close(id, "Reverified", { author: actor, resolution: "Resolved again", expectedResult: "Expected", actualResult: "Observed" });
+  }
+  const legacy = await f.create("Previously persisted assignee without principal", { assignee: "prior-agent", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
+  assert.equal((await f.client.get(legacy, { full: true })).item.claim_principal, undefined);
+  for (const command of ["start-task", "close"]) {
+    const input = command === "close" ? { input: { reason: "Reviewed" } } : {};
+    const denied = await buildActionPrerequisiteBrief({ command, item: legacy, actor: "different-agent", ...input }, f.options);
+    assert.ok(denied.checklist.some(row => row.key === "ownership" && row.ref === `${legacy}#/assignee`));
+    const undeclared = await buildActionPrerequisiteBrief({ command, item: legacy, ...input }, f.options);
+    assert.ok(undeclared.checklist.some(row => row.key === "actor" && row.state === "missing"));
+    assert.equal((await buildActionPrerequisiteBrief({ command, item: legacy, actor: "prior-agent", ...input }, f.options)).ready, true);
+  }
+  await assert.rejects(f.client.startTask(legacy, { author: "different-agent" }), /assign|claim|owner/i);
+  await assert.rejects(f.client.close(legacy, "Reviewed", { author: "different-agent" }), /assign|claim|owner/i);
+});
+
+test("explicit start admission matches native execution across dispatch types and status roles", async t => {
+  const f = await fixture(t);
+  let seed = 0x1892026;
+  const random = (n: number): number => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 8) % n; };
+  const statuses = ["open", "blocked"];
+  for (const role of ["active", "draft", "blocked"] as const) {
+    const status = `custom-${random(100000)}-${role}`;
+    await f.client.schemaAddStatus(status, { role: [role] }); statuses.push(status);
+  }
+  for (const type of ["Decision", "Milestone", "Task"]) for (const status of statuses) {
+    const id = await f.create(`Explicit ${type} ${status}`, { type, status });
+    await f.create("Unfinished direct child", { parent: id });
+    const before = await snapshot(f.pmRoot);
+    const preview = await buildActionPrerequisiteBrief({ command: "start-task", item: id, actor: "fixture" }, f.options);
+    assert.equal(preview.ready, true, JSON.stringify(preview));
+    assert.deepEqual(await snapshot(f.pmRoot), before);
+    const native = await f.client.startTask(id, { author: "fixture" });
+    assert.equal(native.update.item.status, "in_progress");
+  }
+});
 
 test("one preview combines missing close inputs, reverse/missing/external prerequisites and reference-only evidence without mutations", async t => {
   const f = await fixture(t);
@@ -89,16 +190,25 @@ test("SDK lifecycle roles and workflow rules govern custom active, blocked, term
   assert.equal(result.ready, true, JSON.stringify(result)); assert.ok(result.item.roles.includes("active"));
   assert.equal(result.checklist.find(row => row.key === terminal)?.state, "satisfied");
   const child = await f.create("Open child", { parent: f.item });
-  assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).checklist.some(row => row.key === "active-children"));
+  const classify = async (id: string) => {
+    const items = (await f.client.listAllComplete({ includeBody: true })).items;
+    return computeActionabilityReport(items.filter(row => row.id === id), items, resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema), resolveItemTypeRegistry(await readSettings(f.pmRoot)));
+  };
+  assert.ok((await classify(f.item)).containers.some(row => row.item.id === f.item));
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).ready, true);
   result = await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options);
   assert.ok(result.checklist.some(row => row.kind === "prerequisite" && row.key === child));
   await f.client.update(child, { status: "custom-canceled", closeReason: "Canceled", parent: f.item, sprint: "none", release: "none" });
   assert.ok(!(await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options)).checklist.some(row => row.key === child));
   await f.client.update(f.item, { status: "blocked", blockedReason: "Pending review", parent: "none", sprint: "none", release: "none" });
-  assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).checklist.some(row => row.key === "blocked-status"));
+  assert.ok(resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema).blocked_statuses.has((await f.client.get(f.item, { full: true })).item.status!));
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).ready, true);
   for (const type of ["Decision", "Milestone"]) {
     const id = await f.create(`Review ${type}`, { type });
-    assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: id }, f.options)).checklist.some(row => row.key === (type === "Decision" ? "human-decision" : "outcome-gate")));
+    const report = await classify(id);
+    assert.ok((type === "Decision" ? report.decisions : report.gates).some(row => row.item.id === id));
+    assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: id, actor: "fixture" }, f.options)).ready, true);
+    assert.equal((await f.client.startTask(id, { author: "fixture" })).update.item.status, "in_progress");
   }
   assert.ok((await buildActionPrerequisiteBrief({ command: "close", item: terminal }, f.options)).checklist.some(row => row.key === "inactive"));
   assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: terminal }, f.options)).checklist.some(row => row.key === "inactive"));
@@ -316,4 +426,36 @@ test("native non-git CLI and injected command emit bounded JSON/TOON and typed u
   assert.ok((requested.result as ActionPrerequisiteBrief).checklist.some(row => row.key === "reason" && row.state === "satisfied"));
   for (const options of [{ request: "[" }, { request: 1 }, { request: "x".repeat(196609) }, { tokenBudget: 4000 }, { tokenBudget: "1" }, { request: '{"command":"close"}' }, { request: '{"item":"action-foreign"}' }, { request: '{"tokenBudget":10}' }]) await assert.rejects(harness.runCommand({ command: "brief action", args: ["close", f.item], pmRoot: f.pmRoot, options }), /action (invalid|budget)/);
   await assert.rejects(harness.runCommand({ command: "brief action", args: ["close"], pmRoot: f.pmRoot }), /action invalid/);
+  for (const type of ["Decision", "Milestone", "Task"]) {
+    const id = await f.create(`Native CLI admission ${type}`, { type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
+    if (type === "Task") {
+      await f.client.claim(id, { author: "prior-agent" });
+      await f.client.close(id, "Previously completed", { author: "prior-agent" });
+      await f.client.reopen(id, "Recurred work", { author: "fixture" });
+    }
+    await f.client.config("project", "set", "governance_ownership_enforcement", "strict");
+    const prior = await snapshot(f.pmRoot);
+    for (const command of (type === "Task" ? ["start-task", "close"] : ["start-task"])) for (const format of ["json", "toon"]) {
+      const request = { actor: "fixture", ...(command === "close" ? { input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } } : {}) };
+      const output = run([...(format === "json" ? ["--json"] : []), "brief", "action", command, id, "--request", JSON.stringify(request)]);
+      assert.equal(output.status, 0, output.stdout + output.stderr);
+      assert.equal(output.stderr, "");
+      if (format === "json") assert.equal((JSON.parse(output.stdout) as ActionPrerequisiteBrief).ready, true, output.stdout);
+      else assert.match(output.stdout, /ready: true/);
+    }
+    assert.deepEqual(await snapshot(f.pmRoot), prior);
+    assert.equal(run(["--author", "fixture", "start-task", id]).status, 0);
+  }
+  await updatePolicies(f.pmRoot, [{ command: "update", option: "description", required: true }]);
+  const prior = await snapshot(f.pmRoot);
+  for (const format of ["json", "toon"]) {
+    const output = run([...(format === "json" ? ["--json"] : []), "brief", "action", "start-task", f.item, "--request", '{"actor":"fixture"}']);
+    assert.equal(output.status, 0, output.stdout + output.stderr); assert.equal(output.stderr, "");
+    assert.match(output.stdout, /option:description/);
+    if (format === "json") assert.equal((JSON.parse(output.stdout) as ActionPrerequisiteBrief).ready, false);
+    else assert.match(output.stdout, /ready: false/);
+  }
+  const injected = await harness.runCommand({ command: "brief action", args: ["start-task", f.item], pmRoot: f.pmRoot, options: { request: '{"actor":"fixture"}' } });
+  assert.equal((injected.result as ActionPrerequisiteBrief).ready, false);
+  assert.deepEqual(await snapshot(f.pmRoot), prior);
 });
