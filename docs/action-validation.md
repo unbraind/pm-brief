@@ -62,3 +62,8 @@ Local checks are targeted tests, TypeScript checks and the repository docstring
 lint gate. Full npm and Bun release gates, unchanged coverage thresholds and the
 five packed installation scenarios run in CI. Their exact-head run and counts
 are recorded on the work item and PR after CI completes.
+
+The project-local npm/Bun cases use the unchanged development pin; the minimum
+host case retains the declared peer floor. Both disposable global installs
+resolve and record the current stable public CLI version, so they also test the
+current global host without changing this repository's dependency pins.

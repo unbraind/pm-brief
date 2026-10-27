@@ -119,12 +119,14 @@ try {
   mkdirSync(packRoot);
   run(npmCommand, ["pack", "--silent", "--pack-destination", packRoot], repoRoot);
   const tarball = join(packRoot, `${packageJson.name}-${packageJson.version}.tgz`);
+  const publishedHostVersion = run(npmCommand, ["view", cliPackage, "version"], repoRoot).stdout.trim();
+  if (!/^\d+\.\d+\.\d+$/.test(publishedHostVersion)) throw new Error("The public registry did not return an exact stable host version");
   const scenarios: AcceptanceScenario[] = [
     { name: "npm-current", manager: "npm", hostVersion: developmentVersion },
     { name: "bun-current", manager: "bun", hostVersion: developmentVersion },
     { name: "npm-minimum", manager: "npm", hostVersion: minimumVersion },
-    { name: "npm-global", manager: "npm", hostVersion: developmentVersion, global: true },
-    { name: "bun-global", manager: "bun", hostVersion: developmentVersion, global: true },
+    { name: "npm-global", manager: "npm", hostVersion: publishedHostVersion, global: true },
+    { name: "bun-global", manager: "bun", hostVersion: publishedHostVersion, global: true },
   ];
   const receipts: AcceptanceReceipt[] = [];
 
