@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { types as utilTypes } from "node:util";
 import {
   PmClient, certifyCompleteListResult, createPmCliExpectedError, estimatePmOutputTokens,
   getContracts, readSettings, readWorkflowPolicies, resolveRuntimeStatusRegistry,
@@ -68,12 +69,20 @@ export const ACTION_PREREQUISITE_SCHEMA = {
 
 /** Reject malformed requests before acquiring a client or reading a tracker. */
 function invalid(): never {
-  throw new ActionPrerequisiteError("invalid", "Invalid action prerequisite request", "Use exact command and item, optional actor, close input strings (at most 16000 characters), up to 64 dense unique evidence links, and integer tokenBudget 1..64000; unknown keys are rejected");
+  throw new ActionPrerequisiteError("invalid", "Invalid action prerequisite request", "Use plain JSON data without accessors or proxies: exact command and item, optional actor, close input strings (at most 16000 characters), up to 64 dense unique evidence links, and integer tokenBudget 1..64000; unknown keys are rejected");
 }
-/** Own JSON objects only; inherited keys and exotic containers cannot provide input. */
+/** Copy bounded own JSON data without invoking accessors, proxies or inherited values. */
 function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return invalid();
-  return value as Record<string, unknown>;
+  if (!value || typeof value !== "object" || utilTypes.isProxy(value) || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return invalid();
+  const result = Object.create(null) as Record<string, unknown>;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length > Math.max(Object.keys(ACTION_PREREQUISITE_SCHEMA).length, ACTION_PREREQUISITE_SCHEMA.input.keys.length)) return invalid();
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (!Object.hasOwn(descriptor, "value")) return invalid();
+    Object.defineProperty(result, key, { value: descriptor.value, enumerable: true });
+  }
+  return result;
 }
 /** Apply one schema rule without coercing sparse values, numbers or whitespace. */
 function text(value: unknown, rule: { max: number; pattern?: RegExp }): string {
@@ -102,10 +111,14 @@ export function parseActionPrerequisiteRequest(value: unknown): ActionPrerequisi
   }
   if (row.requiredEvidence !== undefined) {
     const links = row.requiredEvidence;
-    if (!Array.isArray(links) || links.length > schema.requiredEvidence.max || Object.keys(links).length !== links.length) return invalid();
+    if (!links || typeof links !== "object" || utilTypes.isProxy(links) || !Array.isArray(links)) return invalid();
+    const length = links.length;
+    if (length > schema.requiredEvidence.max || Reflect.ownKeys(links).length !== length + 1) return invalid();
     const seen = new Set<string>(); result.requiredEvidence = [];
-    for (const link of links) {
-      const entry = record(link);
+    for (let index = 0; index < length; index++) {
+      const descriptor = Object.getOwnPropertyDescriptor(links, index);
+      if (!descriptor || !Object.hasOwn(descriptor, "value")) return invalid();
+      const entry = record(descriptor.value);
       if (Reflect.ownKeys(entry).length !== 2 || !Object.hasOwn(entry, "kind") || !Object.hasOwn(entry, "ref") || !schema.requiredEvidence.kinds.some(kind => kind === entry.kind)) return invalid();
       const ref = text(entry.ref, { max: schema.requiredEvidence.refMax }); const identity = `${entry.kind}\0${ref}`;
       if (seen.has(identity)) return invalid(); seen.add(identity);

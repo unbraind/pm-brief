@@ -41,6 +41,10 @@ missing-field decisions come from the native policy evaluator and state is read
 back through the SDK, with no handwritten normalization oracle. Every sequence
 checks authoritative file fingerprints and emitted numeric domains. Separate
 cases reject sparse arrays, nonfinite and extreme budgets and malformed records.
+Adversarial array prototypes, custom iterators, accessors and revoked proxies
+also refuse without executing caller callbacks. That boundary regression fails
+against the earlier key-count-only density check and passes with own indexed
+data descriptors and detached plain records.
 
 The behavior control replaces only `buildActionPrerequisiteBrief` with a no-op
 preview while leaving tests and registration unchanged. The combined missing

@@ -756,6 +756,8 @@ validation. No executable-path or symlink discovery is involved.
 `parseActionPrerequisiteRequest` applies `ACTION_PREREQUISITE_SCHEMA` to both
 SDK and CLI requests. Unknown keys, sparse arrays, nonfinite/fractional budgets,
 duplicate evidence declarations and oversized input refuse before tracker IO.
+Records must be plain JSON data: proxies, accessors and inherited/sparse array
+entries are rejected without executing caller-provided callbacks.
 `requiredEvidence` accepts at most 64 exact `{kind, ref}` pairs for `docs`,
 `files` and `tests`; strings are bounded (reference 1024, input field 16000,
 actor 128 characters). The complete TOON/JSON estimate defaults to 4000 tokens

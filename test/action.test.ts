@@ -208,12 +208,29 @@ test("one strict request schema rejects sparse arrays, nonfinite/extreme numbers
   const invalid: unknown[] = [null, [], 1, new Date(), {}, { ...valid, extra: true }, { ...valid, command: "close;bad" }, { ...valid, command: "x".repeat(81) }, { ...valid, item: "../escape" }, { ...valid, actor: " " }, { ...valid, actor: "x\0y" }, { ...valid, input: [] }, { ...valid, input: { extra: "bad" } }, { ...valid, input: { resolution: 1 } }, { ...valid, input: { reason: "x".repeat(16001) } }, { ...valid, input: { reason: "\0" } }, { ...valid, requiredEvidence: new Array(1) }, { ...valid, requiredEvidence: [null] }, { ...valid, requiredEvidence: [{ kind: "docs", ref: "x", extra: true }] }, { ...valid, requiredEvidence: [{ kind: "wrong", ref: "x" }] }, { ...valid, requiredEvidence: [{ kind: "docs", ref: "" }] }, { ...valid, requiredEvidence: [{ kind: "docs", ref: "x" }, { kind: "docs", ref: "x" }] }, { ...valid, requiredEvidence: Array.from({ length: 65 }, (_, i) => ({ kind: "docs", ref: String(i) })) }];
   for (const tokenBudget of [NaN, Infinity, -Infinity, -1, 0, 1.1, 64001, Number.MAX_VALUE, "4000", null]) invalid.push({ ...valid, tokenBudget });
   const symbolic = { ...valid, [Symbol("unknown")]: true }; invalid.push(symbolic);
+  const inherited = new Array(1);
+  Object.setPrototypeOf(inherited, Object.assign(Object.create(Array.prototype), { 0: { kind: "docs", ref: "docs/inherited.md" } }));
+  Object.assign(inherited, { noise: true });
+  invalid.push({ ...valid, requiredEvidence: inherited });
+  const iterator = [null];
+  Object.defineProperty(iterator, Symbol.iterator, { value: function* () { yield { kind: "docs", ref: "docs/invented.md" }; } });
+  invalid.push({ ...valid, requiredEvidence: iterator });
+  const revoked = Proxy.revocable({}, {}); revoked.revoke(); invalid.push(revoked.proxy);
+  invalid.push({ ...valid, requiredEvidence: new Proxy([], {}) });
+  invalid.push(Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`unknown-${index}`, true])));
   for (const input of invalid) {
     assert.throws(() => parseActionPrerequisiteRequest(input), refusal("invalid"));
     await assert.rejects(buildActionPrerequisiteBrief(input as ActionPrerequisiteRequest, { pmRoot: "unreadable-before-validation" }), refusal("invalid"));
   }
   const parsed = parseActionPrerequisiteRequest({ ...valid, input: { reason: " \r\n " }, requiredEvidence: [] });
   assert.equal(parsed.tokenBudget, 4000); assert.deepEqual(parseActionPrerequisiteRequest(parsed), parsed);
+  let getterRan = false;
+  assert.throws(() => parseActionPrerequisiteRequest({ ...valid, get actor() { getterRan = true; return "fixture"; } }), refusal("invalid"));
+  assert.equal(getterRan, false, "untrusted input accessors never execute during validation");
+  const arrayAccessor = new Array(1);
+  Object.defineProperty(arrayAccessor, 0, { enumerable: true, get() { getterRan = true; return { kind: "docs", ref: "docs/accessor.md" }; } });
+  assert.throws(() => parseActionPrerequisiteRequest({ ...valid, requiredEvidence: arrayAccessor }), refusal("invalid"));
+  assert.equal(getterRan, false);
   await assert.rejects(buildActionPrerequisiteBrief({ ...valid, item: "action-absent" }, f.options), refusal("missing"));
   await assert.rejects(buildActionPrerequisiteBrief({ ...valid, tokenBudget: 1 }, f.options), refusal("budget"));
   const full = await buildActionPrerequisiteBrief(valid, f.options);
