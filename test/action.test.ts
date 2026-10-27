@@ -74,6 +74,7 @@ test("prospective fields satisfy native policies and reason precedence without d
   assert.equal(complete.checklist.find(row => row.key === "reason")?.ref, "request#/input/resolution");
   assert.equal(complete.checklist.find(row => row.key === "close_reason")?.ref, "request#/input/resolution");
   const simple = await f.create("Ready for close", { resolution: "Resolved", actualResult: "Observed", expectedResult: "Expected", body: "Evidence" });
+  await f.client.workflowPolicy("policy-remove", "extra-close");
   assert.equal((await buildActionPrerequisiteBrief({ command: "close", item: simple, input: { reason: "Done" } }, { pmRoot: f.pmRoot })).ready, true);
 });
 
@@ -129,7 +130,7 @@ test("unsupported commands and approval capabilities remain visible beside known
   await f.client.workflowPolicy("policy-put", "create-only", { definition: { id: "create-only", subject: { operations: ["create"] }, rule: { kind: "require_fields", fields: ["body"] } } });
   const result = await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options);
   assert.ok(result.refusals.some(row => row.capability === "policy:review")); assert.ok(result.checklist.some(row => row.key === "actor"));
-  const allowedActor = await buildActionPrerequisiteBrief({ command: "close", item: f.item, actor: "fixture" }, f.options);
+  const allowedActor = await buildActionPrerequisiteBrief({ command: "close", item: f.item, actor: " fixture " }, f.options);
   assert.equal(allowedActor.checklist.find(row => row.kind === "policy" && row.key === "actor")?.state, "satisfied");
 });
 
@@ -145,6 +146,39 @@ test("native workflow transition and optional reason governance remain authorita
   assert.ok(!close.checklist.some(row => row.key === "reason"));
   await writeSettings(f.pmRoot, { ...settings, schema: { ...settings.schema, type_workflows: [{ type: "Task", allowed_transitions: [["open", "in_progress"]] }] } });
   assert.ok(!(await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).checklist.some(row => row.key === "transition"));
+});
+
+test("native automatic metadata and composed claim policies cannot be certified from a partial proposed record", async t => {
+  const f = await fixture(t);
+  await f.client.update(f.item, { actualResult: "Observed", parent: "none", sprint: "none", release: "none" });
+  await f.client.claim(f.item, { author: "fixture" });
+  await f.client.workflowPolicy("policy-mode", "refuse");
+  for (const rule of [{ kind: "field_writers", fields: ["assignee"], authors: ["reviewer"] }, { kind: "require_fields", fields: ["assignee"] }]) {
+    await f.client.workflowPolicy("policy-put", "ownership", { definition: { id: "ownership", effect: "refuse", subject: { operations: ["close"] }, rule } });
+    const preview = await buildActionPrerequisiteBrief({ command: "close", item: f.item, actor: "fixture", input: { reason: "Reviewed" } }, f.options);
+    assert.equal(preview.ready, false);
+    assert.ok(preview.refusals.some(row => row.capability === "policy:ownership"));
+    // Core closes clear assignment: its policy decision must remain authoritative.
+    await assert.rejects(f.client.close(f.item, "Reviewed", { author: "fixture" }), error => error instanceof Error && /policy/i.test(error.message));
+    await f.client.workflowPolicy("policy-remove", "ownership");
+  }
+  await f.client.workflowPolicy("policy-put", "claim-actor", { definition: { id: "claim-actor", effect: "refuse", subject: { operations: ["claim"] }, rule: { kind: "authors", authors: ["reviewer"] } } });
+  const unclaimed = await f.create("Unclaimed work governed by a claim policy");
+  const start = await buildActionPrerequisiteBrief({ command: "start-task", item: unclaimed, actor: "fixture" }, f.options);
+  assert.equal(start.ready, false);
+  assert.ok(start.refusals.some(row => row.capability === "policy:claim:claim-actor"));
+  await assert.rejects(f.client.startTask(unclaimed, { author: "fixture" }), error => error instanceof Error && /policy/i.test(error.message));
+  await f.client.workflowPolicy("policy-remove", "claim-actor");
+  const owned = await f.create("Strictly owned close target", { resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
+  await f.client.claim(owned, { author: "peer" });
+  await f.client.config("project", "set", "governance_ownership_enforcement", "strict");
+  const close = await buildActionPrerequisiteBrief({ command: "close", item: owned, actor: "fixture", input: { reason: "Reviewed" } }, f.options);
+  assert.equal(close.ready, false);
+  assert.ok(close.checklist.some(row => row.key === "ownership"));
+  await assert.rejects(f.client.close(owned, "Reviewed", { author: "fixture" }), error => error instanceof Error && /owner|assignee|claim|assign/i.test(error.message));
+  const unknown = await buildActionPrerequisiteBrief({ command: "close", item: owned, input: { reason: "Reviewed" } }, f.options);
+  assert.ok(unknown.checklist.some(row => row.key === "actor" && row.state === "missing"));
+  assert.equal((await buildActionPrerequisiteBrief({ command: "close", item: owned, actor: " peer ", input: { reason: "Reviewed" } }, f.options)).ready, true);
 });
 
 test("competing native writes at either corpus-read boundary cause a typed retry rather than a stale checklist", async t => {

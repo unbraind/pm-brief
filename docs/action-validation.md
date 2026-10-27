@@ -20,6 +20,19 @@ produce a ready close preview, while their unfinished direct children remain
 visible through the SDK child rollup. That regression fails against the earlier
 unconditional dispatch checks and passes after scoping them to start-task.
 
+Another native reproduction verifies the policy boundary: close clears an
+assignment, so core refuses a field-writer or required-assignee policy that a
+partial proposed record would incorrectly satisfy. Such workspace field/writer
+policies now carry explicit unsupported-capability refusals and a native semantic
+preview remedy. Start-task also exposes matching claim-stage policy constraints,
+rather than silently evaluating only its update stage. The regression checks
+real native refusals and fails against the earlier projection. Native start
+status and actor normalization use the SDK resolvers.
+Strict close ownership also compares the SDK-resolved intended principal with
+the recorded claim: another principal is unresolved, a missing actor is an input,
+and the matching normalized actor is accepted. The same native regression
+checks strict close refusal for the other actor.
+
 The focused suite includes 500 seeded operation sequences (seed `0x5eed2026`)
 on one non-git tracker: random prospective field inputs, old-input replays,
 blank/CRLF/Unicode values, native relationship and lifecycle changes, 12 custom
@@ -66,10 +79,12 @@ the physically read-only public copy with zero byte changes.
 
 Local checks are targeted tests, TypeScript checks and the repository docstring
 lint gate. Full npm and Bun release gates, unchanged coverage thresholds and the
-five packed installation scenarios run in CI. Their exact-head run and counts
+seven packed installation scenarios run in CI. Their exact-head run and counts
 are recorded on the work item and PR after CI completes.
 
 The project-local npm/Bun cases use the unchanged development pin; the minimum
 host case retains the declared peer floor. Both disposable global installs
 resolve and record the current stable public CLI version, so they also test the
 current global host without changing this repository's dependency pins.
+Separate npx and bunx cases acquire the current host from their runner caches
+without installing a project-local host, rather than merely wrapping a local bin.

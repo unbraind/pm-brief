@@ -38,6 +38,9 @@ try {
 
 A request for `delete` returns an `unsupported` command refusal with native
 contract-discovery guidance. A matching approval policy adds an explicit
-approval-history capability refusal. Neither can become `ready: true`.
+approval-history capability refusal. Matching workspace field/writer policies
+and start-task claim-stage policies also refuse certification: native actions
+can generate or clear metadata beyond the supplied scalar inputs. None of these
+capability refusals can become `ready: true`.
 JSON and TOON contain the same obligations; an insufficient ceiling refuses
 the entire preview rather than dropping missing fields.

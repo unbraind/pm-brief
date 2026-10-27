@@ -762,8 +762,12 @@ actor 128 characters). The complete TOON/JSON estimate defaults to 4000 tokens
 and accepts integer ceilings 1..64000. Requirements are never silently truncated.
 
 The result has `preview: true`, `ready`, `checklist` and typed `refusals`.
-Close and start-task previews are supported; other commands and approval-history
-certification return `unsupported` with a remedy, alongside known facts.
+Close and start-task previews are supported. Other commands, approval-history
+certification, matching workspace field/writer policies and composed claim-stage
+policies return `unsupported` with a remedy, alongside known facts. Policy
+field references describe current/proposed input availability; native actions
+can generate or clear other metadata, so those references never certify the
+complete post-action record. Use native semantic validation for those policies.
 Operational failures throw `ActionPrerequisiteError` with `code` and `remedy`:
 `invalid`, `missing`, `tracker`, `changed` or `budget`. CLI usage failures exit 2
 with `action_<code>` (missing positionals use the native argument refusal); a successfully produced preview exits 0 even when its

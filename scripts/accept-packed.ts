@@ -23,6 +23,8 @@ interface AcceptanceScenario {
   readonly hostVersion: string;
   /** Exercise the actual global host bin symlink inside a disposable prefix. */
   readonly global?: boolean;
+  /** Launch a freshly acquired host from the runner cache without a project-local host. */
+  readonly ephemeral?: boolean;
 }
 
 /** Concise receipt emitted for each successfully loaded packed extension. */
@@ -108,6 +110,9 @@ function runPm(scenario: AcceptanceScenario, cwd: string, args: string[], allowF
   // the installed host or extension printed -- exactly what this gate exists to
   // catch.
   if (scenario.global) return run(join(cwd, "global", "bin", "pm"), ["--pm-path", ".agents/pm", ...args], cwd, allowFailure);
+  if (scenario.ephemeral) return scenario.manager === "npm"
+    ? run(npxCommand, ["--yes", "--silent", `--package=${cliPackage}@${scenario.hostVersion}`, "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure)
+    : run(bunxCommand, ["--package", `${cliPackage}@${scenario.hostVersion}`, "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure);
   return scenario.manager === "npm"
     ? run(npxCommand, ["--no-install", "--silent", "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure)
     : run(bunxCommand, ["--no-install", "pm", "--pm-path", ".agents/pm", ...args], cwd, allowFailure);
@@ -127,6 +132,8 @@ try {
     { name: "npm-minimum", manager: "npm", hostVersion: minimumVersion },
     { name: "npm-global", manager: "npm", hostVersion: publishedHostVersion, global: true },
     { name: "bun-global", manager: "bun", hostVersion: publishedHostVersion, global: true },
+    { name: "npx-ephemeral", manager: "npm", hostVersion: publishedHostVersion, ephemeral: true },
+    { name: "bunx-ephemeral", manager: "bun", hostVersion: publishedHostVersion, ephemeral: true },
   ];
   const receipts: AcceptanceReceipt[] = [];
 
@@ -141,6 +148,8 @@ try {
         writeFileSync(config, `[install]\nglobalDir = ${JSON.stringify(join(prefix, "lib"))}\nglobalBinDir = ${JSON.stringify(join(prefix, "bin"))}\n`);
         run(bunCommand, ["add", "--global", `--config=${config}`, "--ignore-scripts", `${cliPackage}@${scenario.hostVersion}`, tarball], scenarioRoot, false, { ...cleanEnvironment, BUN_INSTALL_GLOBAL_DIR: join(prefix, "lib"), BUN_INSTALL_BIN: join(prefix, "bin") });
       }
+    } else if (scenario.ephemeral) {
+      writeFileSync(join(scenarioRoot, "package.json"), JSON.stringify({ name: `pm-brief-${scenario.name}`, version: "0.0.0", private: true, type: "module" }));
     } else if (scenario.manager === "npm") {
       run(npmCommand, ["init", "-y"], scenarioRoot);
       run(npmCommand, ["install", "--ignore-scripts", `${cliPackage}@${scenario.hostVersion}`, tarball], scenarioRoot);

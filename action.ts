@@ -5,6 +5,7 @@ import {
   resolveItemBlockers, computeActionabilityReport, resolveItemTypeRegistry, buildItemChildrenRollup,
   evaluateTransition, resolveTypeWorkflows, evaluateWorkflowPolicies,
   createLifecycleCompletenessPolicies, resolveTerminalReason, workflowPolicyApplies,
+  resolveStartTaskInProgressStatus, resolveAuthor, resolveClaimPrincipal,
 } from "@unbrained/pm-cli/sdk";
 import type { ListedItem, WorkflowPolicy, WorkflowPolicyInput } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
@@ -122,6 +123,8 @@ function pointer(value: string): string { return value.split(".").map(part => pa
 /** Compose native facts for one intended close or start action, without calling any writer. */
 export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequest, options: ActionPrerequisiteOptions): Promise<ActionPrerequisiteBrief> {
   const request = parseActionPrerequisiteRequest(value);
+  const actor = request.actor === undefined ? undefined : resolveAuthor(request.actor, "unknown");
+  const principal = actor === undefined ? undefined : resolveClaimPrincipal(actor);
   const client = options.client ?? new PmClient({ pmRoot: options.pmRoot, noExtensions: true });
   try {
     const settings = await readSettings(options.pmRoot);
@@ -161,7 +164,7 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
       add({ kind: "evidence", key: `${evidence.kind}:${evidence.ref}`, state: found < 0 ? "missing" : "satisfied", ref: found < 0 ? `request#/requiredEvidence/${index}` : `${item.id}#/${evidence.kind}/${found}`, ...(found < 0 ? { remedy: `Record the required native ${evidence.kind} link; linkage alone does not prove validation` } : {}) });
     }
     if (supported) {
-      const after: ListedItem = { ...item, status: closing ? registry.close_status : registry.in_progress_status };
+      const after: ListedItem = { ...item, status: closing ? registry.close_status : resolveStartTaskInProgressStatus(registry) };
       const inputFields = { resolution: "resolution", expectedResult: "expected_result", actualResult: "actual_result" } as const;
       for (const [option, field] of Object.entries(inputFields)) {
         const proposed = request.input?.[option as keyof typeof inputFields];
@@ -169,7 +172,7 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
       }
       const reason = resolveTerminalReason({ explicit: request.input?.reason, resolution: request.input?.resolution });
       if (closing && reason.closeReason !== undefined) after.close_reason = reason.closeReason;
-      const context: WorkflowPolicyInput = { operation: closing ? "close" : "update", author: request.actor ?? "unknown", before: item, after };
+      const context: WorkflowPolicyInput = { operation: closing ? "close" : "update", author: actor ?? "unknown", before: item, after };
       const fieldRef = (field: string): string => {
         if (field === "close_reason" && closing && reason.source !== "none") return `request#/input/${reason.source === "explicit" ? "reason" : "resolution"}`;
         const option = Object.entries(inputFields).find(([, name]) => name === field)?.[0];
@@ -181,6 +184,7 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
         for (const rule of rules) {
           const decision = evaluated.decisions.find(row => row.policy_id === rule.id);
           if (!decision) continue;
+          if (kind === "policy" && ["require_fields", "field_writers"].includes(rule.rule.kind)) refuse(`policy:${rule.id}`, "Use the SDK semantic mutation preview to certify this policy against action-generated metadata; a partial proposed record cannot certify native effects");
           if (rule.rule.kind === "require_fields") {
             for (const field of rule.rule.fields) if (!entries.has(`input:${field}`)) add({ kind, key: field, state: decision.missing_fields.includes(field) ? "missing" : "satisfied", ref: fieldRef(field), ...(decision.missing_fields.includes(field) ? { remedy: decision.remediation } : {}) });
           } else {
@@ -195,12 +199,16 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
         if (settings.governance.require_close_reason) add({ kind: "input", key: "reason", state: reason.source === "none" ? "missing" : "satisfied", ...(reason.source === "none" ? { remedy: "Supply an author-controlled close reason or prospective resolution" } : { ref: `request#/input/${reason.source === "explicit" ? "reason" : "resolution"}` }) });
       }
       fieldRules(policies.policies, "policy");
-      if (policies.policies.some(rule => workflowPolicyApplies(rule, context) && ["authors", "field_writers"].includes(rule.rule.kind)) && !request.actor) add({ kind: "input", key: "actor", state: "missing", remedy: "Supply the intended mutation actor to evaluate author-dependent policies" });
+      if (starting) for (const rule of policies.policies) if (workflowPolicyApplies(rule, { ...context, operation: "claim", after: item })) refuse(`policy:claim:${rule.id}`, "Check native claim and update admission for this start-task operation; this brief does not certify composed claim effects");
+      if (policies.policies.some(rule => workflowPolicyApplies(rule, context) && ["authors", "field_writers"].includes(rule.rule.kind)) && !actor) add({ kind: "input", key: "actor", state: "missing", remedy: "Supply the intended mutation actor to evaluate author-dependent policies" });
       if ((settings.governance.workflow_enforcement ?? "off") !== "off") {
         const transition = evaluateTransition({ typeName: item.type, fromStatus: item.status, toStatus: after.status, typeWorkflows: resolveTypeWorkflows(settings.schema), statusRegistry: registry });
         if (!transition.allowed) add({ kind: "policy", key: "transition", state: "unresolved", ref: "settings.json#/schema/type_workflows", remedy: "Follow an allowed transition from the configured type workflow" });
       }
-      if (!closing && item.assignee && item.assignee !== request.actor) add({ kind: "readiness", key: "ownership", state: "unresolved", ref: `${item.id}#/assignee`, remedy: "Resolve the current claim through native claim/release before starting" });
+      if ((starting || settings.governance.ownership_enforcement === "strict") && (item.assignee || item.claim_principal) && (item.claim_principal ?? item.assignee) !== principal) {
+        add({ kind: "readiness", key: "ownership", state: "unresolved", ref: `${item.id}#/${item.claim_principal ? "claim_principal" : "assignee"}`, remedy: "Supply the intended actor or resolve the current claim through native claim/release before acting" });
+        if (actor === undefined) add({ kind: "input", key: "actor", state: "missing", remedy: "Supply the intended mutation actor to check this existing claim" });
+      }
     }
     // A preview has no lease: refuse if any observed record or policy changed while composing it.
     const fresh = certifyCompleteListResult(await client.listAllComplete({ includeBody: true })).items;
