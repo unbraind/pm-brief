@@ -6,10 +6,10 @@ import {
   resolveItemBlockers, resolveItemTypeRegistry, resolveTypeDefinition, buildItemChildrenRollup,
   resolveCommandOptionPolicyState, commandOptionFlagLabel,
   evaluateTransition, resolveTypeWorkflows, evaluateWorkflowPolicies,
-  createLifecycleCompletenessPolicies, resolveTerminalReason, workflowPolicyApplies,
+  createLifecycleCompletenessPolicies, resolveTerminalReason,
   resolveStartTaskInProgressStatus, resolveAuthor, resolveClaimPrincipal,
 } from "@unbrained/pm-cli/sdk";
-import type { ListedItem, WorkflowPolicy, WorkflowPolicyInput } from "@unbrained/pm-cli/sdk";
+import type { ListedItem, WorkflowPolicy, WorkflowPolicyInput, WorkflowPolicyEffect } from "@unbrained/pm-cli/sdk";
 import type { ExtensionApi } from "@unbrained/pm-cli/sdk/authoring";
 
 /** Exact native linkage requirement; presence never claims the artifact passed validation. */
@@ -45,8 +45,12 @@ export interface ActionPrerequisiteEntry {
   state: "missing" | "satisfied" | "unresolved";
   ref?: string;
   remedy?: string;
+  /** Advisory findings remain visible and never become mandatory input gates. */
+  blocking?: false;
+  /** Effective native response after workspace enforcement has been applied. */
+  effect?: WorkflowPolicyEffect;
 }
-/** Bounded read-only result; ready describes inputs, never authorizes a future mutation. */
+/** Bounded read-only result; ready describes mandatory inputs, never authorizes a future mutation. */
 export interface ActionPrerequisiteBrief {
   protocol: "pm-brief.action/v1";
   preview: true;
@@ -152,7 +156,14 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
     const result: ActionPrerequisiteBrief = { protocol: "pm-brief.action/v1", preview: true, command: request.command, item: { id: item.id, revision: revision(item), status: item.status, roles: [...(registry.by_id.get(item.status)?.roles ?? [])] }, ready: false, checklist: [], refusals: [], estimatedTokenCeiling: 0 };
     const entries = new Map<string, ActionPrerequisiteEntry>();
     const refuse = (capability: string, remedy: string): void => { result.refusals.push({ code: "unsupported", capability, remedy }); };
-    const add = (entry: ActionPrerequisiteEntry): void => { entries.set(`${entry.kind}:${entry.key}`, entry); };
+    /** A later advisory cannot weaken an existing mandatory fact for the same key. */
+    const add = (entry: ActionPrerequisiteEntry): void => {
+      const key = `${entry.kind}:${entry.key}`;
+      if (entries.has(key) && entries.get(key)!.blocking !== false && entry.blocking === false) return;
+      entries.set(key, entry);
+    };
+    /** Preserve the native effective response separately from requirement satisfaction. */
+    const addPolicy = (entry: ActionPrerequisiteEntry, effect: WorkflowPolicyEffect): void => add({ ...entry, effect, ...(effect === "refuse" ? {} : { blocking: false as const }) });
     const supported = native && ["close", "start-task"].includes(native.action);
     const closing = native?.action === "close";
     const starting = native?.action === "start-task";
@@ -165,7 +176,7 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
     if (closing) {
       const children = buildItemChildrenRollup(item.id, items, registry, items.length);
       if (children.truncated) throw new ActionPrerequisiteError("budget", "Native child prerequisites are incomplete", "Inspect the complete native child projection before retrying; no unfinished child is silently omitted");
-      for (const child of children.sample) if (!registry.terminal_statuses.has(child.status)) add({ kind: "prerequisite", key: child.id, state: "unresolved", ref: `${child.id}#/status`, remedy: "Resolve this unfinished direct child before closing its parent" });
+      for (const child of children.sample) if (!registry.terminal_statuses.has(child.status)) addPolicy({ kind: "prerequisite", key: child.id, state: "unresolved", ref: `${child.id}#/status`, remedy: "Resolve this unfinished direct child before closing its parent" }, settings.governance.close_validation_default === "strict" ? "refuse" : "warn");
     }
     if ((starting || closing) && registry.terminal_statuses.has(item.status)) add({ kind: "readiness", key: "inactive", state: "unresolved", ref: `${item.id}#/status`, remedy: "Review the configured lifecycle role; use native reopen/update where appropriate" });
     for (const [index, evidence] of (request.requiredEvidence ?? []).entries()) {
@@ -204,32 +215,42 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
         const option = Object.entries(inputFields).find(([, name]) => name === field)?.[0];
         return option && request.input?.[option as keyof typeof inputFields]?.trim() ? `request#/input/${option}` : `${item.id}#/${pointer(field)}`;
       };
-      const fieldRules = (rules: WorkflowPolicy[], kind: "input" | "policy"): void => {
-        const document = { version: 1 as const, enforcement: policies.enforcement, policies: rules };
+      const fieldRules = (rules: WorkflowPolicy[], kind: "input" | "policy", enforcement = policies.enforcement): void => {
+        const document = { version: 1 as const, enforcement, policies: rules };
         const evaluated = evaluateWorkflowPolicies(document, context);
         for (const rule of rules) {
           const decision = evaluated.decisions.find(row => row.policy_id === rule.id);
           if (!decision) continue;
-          if (kind === "policy" && ["require_fields", "field_writers"].includes(rule.rule.kind)) refuse(`policy:${rule.id}`, "Use the SDK semantic mutation preview to certify this policy against action-generated metadata; a partial proposed record cannot certify native effects");
+          const uncertified = kind === "policy" && ["require_fields", "field_writers", "approval"].includes(rule.rule.kind);
+          if (uncertified) {
+            const remedy = "Use the SDK semantic mutation preview or native policy-check to certify this policy; generated metadata and approval history are not certified by partial input facts";
+            if (decision.effect === "refuse") refuse(`policy:${rule.id}`, remedy);
+            else addPolicy({ kind: "policy", key: `capability:${rule.id}`, state: "unresolved", ref: `schema/policies.json#${rule.id}`, remedy }, decision.effect);
+          }
           if (rule.rule.kind === "require_fields") {
-            for (const field of rule.rule.fields) if (!entries.has(`input:${field}`)) add({ kind, key: field, state: decision.missing_fields.includes(field) ? "missing" : "satisfied", ref: fieldRef(field), ...(decision.missing_fields.includes(field) ? { remedy: decision.remediation } : {}) });
+            for (const field of rule.rule.fields) addPolicy({ kind: entries.has(`input:${field}`) ? "input" : kind, key: field, state: decision.missing_fields.includes(field) ? "missing" : "satisfied", ref: fieldRef(field), ...(decision.missing_fields.includes(field) ? { remedy: decision.remediation } : {}) }, decision.effect);
           } else {
-            if (rule.rule.kind === "approval") refuse(`policy:${rule.id}`, "Verify content-bound approvals through native policy-check before acting; this preview does not certify approval history");
-            add({ kind: "policy", key: rule.id, state: decision.satisfied ? "satisfied" : "unresolved", ref: `schema/policies.json#${rule.id}`, ...(decision.satisfied ? {} : { remedy: decision.remediation }) });
+            addPolicy({ kind: "policy", key: rule.id, state: decision.satisfied ? "satisfied" : "unresolved", ref: `schema/policies.json#${rule.id}`, ...(decision.satisfied ? {} : { remedy: decision.remediation }) }, decision.effect);
           }
         }
       };
       if (closing) {
         const closeEvidence = createLifecycleCompletenessPolicies().policies.find(rule => rule.id === "completeness-resolution")!;
-        fieldRules([{ ...closeEvidence, subject: { operations: ["close"] } }], "input");
+        const mode = settings.governance.close_validation_default;
+        fieldRules([{ ...closeEvidence, effect: mode === "strict" ? "refuse" : mode === "warn" ? "warn" : "advise", subject: { operations: ["close"] } }], "input", mode === "strict" ? "refuse" : "advise");
         if (settings.governance.require_close_reason) add({ kind: "input", key: "reason", state: reason.source === "none" ? "missing" : "satisfied", ...(reason.source === "none" ? { remedy: "Supply an author-controlled close reason or prospective resolution" } : { ref: `request#/input/${reason.source === "explicit" ? "reason" : "resolution"}` }) });
       }
       fieldRules(policies.policies, "policy");
-      if (starting) for (const rule of policies.policies) if (workflowPolicyApplies(rule, { ...context, operation: "claim", after: item })) refuse(`policy:claim:${rule.id}`, "Check native claim and update admission for this start-task operation; this brief does not certify composed claim effects");
-      if (policies.policies.some(rule => workflowPolicyApplies(rule, context) && ["authors", "field_writers"].includes(rule.rule.kind)) && !actor) add({ kind: "input", key: "actor", state: "missing", remedy: "Supply the intended mutation actor to evaluate author-dependent policies" });
-      if ((settings.governance.workflow_enforcement ?? "off") !== "off") {
+      if (starting) for (const decision of evaluateWorkflowPolicies(policies, { ...context, operation: "claim", after: item }).decisions) {
+        const remedy = "Check native claim and update admission for this start-task operation; this brief does not certify composed claim effects";
+        if (decision.effect === "refuse") refuse(`policy:claim:${decision.policy_id}`, remedy);
+        else addPolicy({ kind: "policy", key: `claim:${decision.policy_id}`, state: "unresolved", ref: `schema/policies.json#${decision.policy_id}`, remedy }, decision.effect);
+      }
+      const actorPolicies = evaluateWorkflowPolicies(policies, context).decisions.filter(decision => ["authors", "field_writers"].includes(decision.rule));
+      if (actorPolicies.length && !actor) add({ kind: "input", key: "actor", state: "missing", ...(actorPolicies.some(decision => decision.effect === "refuse") ? {} : { blocking: false as const }), remedy: "Supply the intended mutation actor to evaluate author-dependent policies" });
+      if (starting && (settings.governance.workflow_enforcement ?? "off") !== "off") {
         const transition = evaluateTransition({ typeName: item.type, fromStatus: item.status, toStatus: after.status, typeWorkflows: resolveTypeWorkflows(settings.schema), statusRegistry: registry });
-        if (!transition.allowed) add({ kind: "policy", key: "transition", state: "unresolved", ref: "settings.json#/schema/type_workflows", remedy: "Follow an allowed transition from the configured type workflow" });
+        if (!transition.allowed) addPolicy({ kind: "policy", key: "transition", state: "unresolved", ref: "settings.json#/schema/type_workflows", remedy: "Follow an allowed transition from the configured type workflow" }, settings.governance.workflow_enforcement === "strict" ? "refuse" : "warn");
       }
       const assignee = item.assignee?.trim();
       const owner = assignee ? item.claim_principal?.trim() || (starting ? item.assignee : assignee) : undefined;
@@ -242,7 +263,7 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
     const fresh = certifyCompleteListResult(await client.listAllComplete({ includeBody: true })).items;
     if (revision(items) !== revision(fresh) || revision(settings) !== revision(await readSettings(options.pmRoot)) || revision(policies) !== revision(await readWorkflowPolicies(options.pmRoot))) throw new ActionPrerequisiteError("changed", "Tracker changed during preview", "Retry against current SDK state; never execute a saved checklist as a frozen plan");
     result.checklist = [...entries.values()];
-    result.ready = result.refusals.length === 0 && result.checklist.every(row => row.state === "satisfied");
+    result.ready = result.refusals.length === 0 && result.checklist.every(row => row.blocking === false || row.state === "satisfied");
     result.estimatedTokenCeiling = estimatePmOutputTokens(Buffer.byteLength(JSON.stringify({ ...result, estimatedTokenCeiling: 64000 }, null, 2)) * 2 + 256);
     if (!Number.isSafeInteger(result.estimatedTokenCeiling) || result.estimatedTokenCeiling < 1 || result.estimatedTokenCeiling > request.tokenBudget!) throw new ActionPrerequisiteError("budget", "Complete prerequisite checklist exceeds the token budget", "Increase tokenBudget (maximum 64000) or narrow declared evidence; no missing requirement is silently omitted");
     return result;

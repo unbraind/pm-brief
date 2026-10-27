@@ -6,7 +6,7 @@ import type { HandoffPacket, HandoffStatus } from "../handoff.ts";
 import type { DecisionAlternativesDigest } from "../alternatives.ts";
 import type { DisclosureResult } from "../disclosure.ts";
 import type { ActionPrerequisiteBrief } from "../action.ts";
-import { PmClient, readSettings, resolveItemTypeRegistry, resolveItemTypesFilePath, writeWorkspaceJsonWithHistory } from "@unbrained/pm-cli/sdk";
+import { PmClient, readSettings, readWorkflowPolicies, writeSettings, resolveItemTypeRegistry, resolveItemTypesFilePath, writeWorkspaceJsonWithHistory } from "@unbrained/pm-cli/sdk";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -53,6 +53,8 @@ interface AcceptanceReceipt {
   readonly action_live_ownership: true;
   /** Explicit human/gate starts agree with the installed host's native action. */
   readonly action_explicit_start: true;
+  /** Advisory policies and warning transitions remain non-blocking on both actions. */
+  readonly action_severity: true;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -256,6 +258,25 @@ try {
     }
     if (runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout !== policyBefore) throw new Error(`${scenario.name} required-option preview acquired a claim`);
     await writeTypes(false);
+    const severitySettings = await readSettings(actionRoot);
+    const severityPolicies = await readWorkflowPolicies(actionRoot);
+    await actionClient.workflowPolicy("policy-mode", "refuse");
+    await actionClient.workflowPolicy("policy-put", "packed-advisory", { definition: { id: "packed-advisory", effect: "advise", subject: { operations: ["claim", "update", "close"] }, rule: { kind: "authors", authors: ["reviewer"] } } });
+    await writeSettings(actionRoot, { ...severitySettings, schema: { ...severitySettings.schema, type_workflows: [{ type: "Task", allowed_transitions: [] }] } });
+    await actionClient.config("project", "set", "governance_workflow_enforcement", "warn");
+    const severityBefore = runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout;
+    for (const command of ["start-task", "close"]) for (const format of ["json", "toon"]) {
+      const request = { actor: "packed-next", ...(command === "close" ? { input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } } : {}) };
+      const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", command, fixtureId, "--request", JSON.stringify(request)]);
+      if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} advisory findings became mandatory prerequisites`);
+      if (format === "json" && !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).checklist.some(row => row.blocking === false && row.effect === "advise")) throw new Error(`${scenario.name} advisory severity was lost`);
+    }
+    if (runPm(scenario, scenarioRoot, ["--json", "get", fixtureId, "--full"]).stdout !== severityBefore) throw new Error(`${scenario.name} advisory preview mutated state`);
+    runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "start-task", fixtureId]);
+    await actionClient.config("project", "set", "governance_workflow_enforcement", severitySettings.governance.workflow_enforcement ?? "off");
+    await writeSettings(actionRoot, { ...await readSettings(actionRoot), schema: severitySettings.schema });
+    await actionClient.workflowPolicy("policy-remove", "packed-advisory");
+    await actionClient.workflowPolicy("policy-mode", severityPolicies.enforcement);
     const contractFile = join(scenarioRoot, "handoff-contract.json");
     writeFileSync(contractFile, JSON.stringify({ focus: [fixtureId], questions: [{ id: "scope", text: "Which fixture will you use?" }], assumptions: [{ id: "review", text: "Review is unresolved" }], requiredEvidence: [{ id: "report", item: fixtureId, kind: "docs", ref: "docs/report.md" }] }));
     const packet = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "--author", "packed-sender", "brief", "handoff", "create", "--input", contractFile]).stdout) as HandoffPacket;
@@ -289,6 +310,7 @@ try {
       action_option_policy: true,
       action_live_ownership: true,
       action_explicit_start: true,
+      action_severity: true,
     });
   }
 

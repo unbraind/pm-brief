@@ -5,7 +5,8 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
-import { PmClient, locateItem, readSettings, writeSettings, resolveRuntimeStatusRegistry, evaluateWorkflowPolicies, createLifecycleCompletenessPolicies, estimatePmOutputTokens, resolveItemTypeRegistry, resolveTypeDefinition, resolveCommandOptionPolicyState, canonicalizeCommandOptionKey, COMMON_MUTATION_COMMAND_OPTION_KEYS, computeActionabilityReport, writeWorkspaceJsonWithHistory, resolveItemTypesFilePath } from "@unbrained/pm-cli/sdk";
+import { PmClient, locateItem, readSettings, readWorkflowPolicies, writeSettings, resolveRuntimeStatusRegistry, evaluateWorkflowPolicies, createLifecycleCompletenessPolicies, estimatePmOutputTokens, resolveItemTypeRegistry, resolveTypeDefinition, resolveCommandOptionPolicyState, canonicalizeCommandOptionKey, COMMON_MUTATION_COMMAND_OPTION_KEYS, computeActionabilityReport, writeWorkspaceJsonWithHistory, resolveItemTypesFilePath } from "@unbrained/pm-cli/sdk";
+import type { WorkflowPolicy } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { buildActionPrerequisiteBrief, parseActionPrerequisiteRequest, ActionPrerequisiteError } from "../index.ts";
 import type { ActionPrerequisiteBrief, ActionPrerequisiteRequest } from "../index.ts";
@@ -43,6 +44,119 @@ async function updatePolicies(pmRoot: string, policies: NonNullable<ReturnType<t
   const types = Object.values(resolveItemTypeRegistry(settings).by_type).map(type => type.name === "Task" ? { ...type, command_option_policies: policies } : type);
   await writeWorkspaceJsonWithHistory({ pmRoot, filePath: resolveItemTypesFilePath(pmRoot, settings.schema), raw: JSON.stringify({ definitions: types }), op: "schema_update", author: "fixture", lockTtlSeconds: settings.locks.ttl_seconds, lockWaitMs: settings.locks.wait_ms });
 }
+
+test("effective policy severity agrees with native admission for every rule, mode, effect and stage", { timeout: 600000 }, async t => {
+  const f = await fixture(t);
+  const rules: WorkflowPolicy["rule"][] = [
+    { kind: "authors", authors: ["reviewer"] }, { kind: "require_fields", fields: ["body"] },
+    { kind: "transition", allowed: [] }, { kind: "field_writers", fields: ["status", "assignee"], authors: ["reviewer"] },
+    { kind: "approval", fields: ["resolution"], authors: ["reviewer"] },
+  ];
+  const registry = resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema);
+  /** Reuse native state so the severity matrix does not grow a quadratic tracker corpus. */
+  const reset = async (): Promise<void> => {
+    const current = (await f.client.get(f.item, { full: true })).item;
+    if (registry.terminal_statuses.has(current.status!)) await f.client.reopen(f.item, "Next severity case");
+    await f.client.update(f.item, { status: registry.open_status, assignee: "none", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", parent: "none", sprint: "none", release: "none", clearDeps: true });
+  };
+  let cases = 0;
+  for (const mode of ["refuse", "advise"]) for (const effect of ["refuse", "advise", "warn", undefined] as const) for (const operation of ["claim", "update", "close"]) for (const rule of rules) {
+    await f.client.workflowPolicy("policy-remove", "severity-check");
+    await reset();
+    const id = f.item;
+    await f.client.workflowPolicy("policy-mode", mode);
+    await f.client.workflowPolicy("policy-put", "severity-check", { definition: { id: "severity-check", ...(effect === undefined ? {} : { effect }), subject: { operations: [operation] }, rule } });
+    const nativeBefore = (await f.client.get(id, { full: true })).item;
+    const item = (await f.client.listAllComplete({ includeBody: true })).items.find(row => row.id === id)!;
+    const after = { ...item, ...(operation === "claim" ? { assignee: "fixture", claim_principal: "fixture" } : { status: operation === "close" ? "closed" : "in_progress" }) };
+    const evaluated = evaluateWorkflowPolicies(await readWorkflowPolicies(f.pmRoot), { operation, author: "fixture", before: item, after });
+    const decision = evaluated.decisions[0];
+    const command = operation === "close" ? "close" : "start-task";
+    const request: ActionPrerequisiteRequest = { command, item: id, actor: "fixture", ...(command === "close" ? { input: { reason: "Reviewed" } } : {}) };
+    const before = await snapshot(f.pmRoot);
+    const preview = await buildActionPrerequisiteBrief(request, f.options);
+    assert.equal(preview.ready, decision.effect !== "refuse", `${mode}/${effect}/${operation}/${rule.kind}: ${JSON.stringify(preview)}`);
+    assert.deepEqual(await snapshot(f.pmRoot), before);
+    assert.deepEqual((await f.client.get(id, { full: true })).item, nativeBefore);
+    assert.deepEqual((await f.client.listAllComplete({ includeBody: true })).items.find(row => row.id === id), item);
+    if (!evaluated.allowed) await assert.rejects(command === "close" ? f.client.close(id, "Reviewed", { author: "fixture" }) : f.client.startTask(id, { author: "fixture" }), /policy/i, `${mode}/${effect}/${operation}/${rule.kind}`);
+    else {
+      if (decision.effect !== "refuse") {
+        assert.equal(preview.refusals.length, 0);
+        assert.ok(preview.checklist.some(row => row.effect === decision.effect && row.blocking === false));
+      } else assert.ok(preview.refusals.length, "uncertified refusing policies retain explicit capability refusals");
+      const native = command === "close" ? await f.client.close(id, "Reviewed", { author: "fixture" }) : await f.client.startTask(id, { author: "fixture" });
+      assert.equal((await f.client.get(id, { full: true })).item.status, "claim" in native ? native.update.item.status : native.item.status);
+      if (!decision.satisfied) assert.ok(evaluated.warnings.some(warning => warning.includes("severity-check")));
+      // The claim result exposes takeover warnings, not generic policy diagnostics.
+      if (operation !== "claim" && evaluated.warnings.length) {
+        const warnings = "claim" in native ? native.update.warnings : native.warnings;
+        assert.ok(warnings.some(warning => warning.includes("severity-check")));
+      }
+    }
+    cases++;
+  }
+  await f.client.workflowPolicy("policy-remove", "severity-check");
+  await reset();
+  await f.client.workflowPolicy("policy-mode", "refuse");
+  for (const effect of ["advise", "warn", "refuse"] as const) {
+    await f.client.workflowPolicy("policy-put", "actor-needed", { definition: { id: "actor-needed", effect, subject: { operations: ["update"] }, rule: { kind: "authors", authors: ["reviewer"] } } });
+    const preview = await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options);
+    assert.equal(preview.ready, effect !== "refuse");
+    assert.equal(preview.checklist.find(row => row.key === "actor")?.blocking === false, effect !== "refuse");
+  }
+  await f.client.workflowPolicy("policy-remove", "actor-needed");
+  await f.client.workflowPolicy("policy-put", "mandatory", { definition: { id: "mandatory", effect: "refuse", subject: { operations: ["update"] }, rule: rules[0] } });
+  await f.client.workflowPolicy("policy-put", "zz-advisory", { definition: { id: "zz-advisory", effect: "advise", subject: { operations: ["update"] }, rule: rules[0] } });
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item, actor: "fixture" }, f.options)).ready, false);
+  await f.client.workflowPolicy("policy-remove", "mandatory");
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item, actor: "fixture", requiredEvidence: [{ kind: "docs", ref: "docs/required.md" }] }, f.options)).ready, false);
+  await f.client.docs(f.item, { add: ["path=docs/required.md"] });
+  assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item, actor: "fixture", requiredEvidence: [{ kind: "docs", ref: "docs/required.md" }] }, f.options)).ready, true);
+  t.diagnostic(JSON.stringify({ nativeSeverityCases: cases, modes: 2, effects: 4, stages: 3, ruleKinds: 5 }));
+});
+
+test("warning-only transitions and close diagnostics stay visible without becoming required inputs", async t => {
+  const f = await fixture(t);
+  for (const mode of ["off", "warn", "strict"] as const) for (const command of ["start-task", "close"]) {
+    await f.client.config("project", "set", "governance_workflow_enforcement", "off");
+    const id = await f.create(`Transition ${mode} ${command}`, { resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
+    const settings = await readSettings(f.pmRoot);
+    await writeSettings(f.pmRoot, { ...settings, schema: { ...settings.schema, type_workflows: [{ type: "Task", allowed_transitions: [] }] } });
+    await f.client.config("project", "set", "governance_workflow_enforcement", mode);
+    const request: ActionPrerequisiteRequest = { command, item: id, actor: "fixture", ...(command === "close" ? { input: { reason: "Reviewed" } } : {}) };
+    const preview = await buildActionPrerequisiteBrief(request, f.options);
+    const blocked = command === "start-task" && mode === "strict";
+    assert.equal(preview.ready, !blocked, JSON.stringify(preview));
+    if (mode === "warn" && command === "start-task") assert.ok(preview.checklist.some(row => row.key === "transition" && row.effect === "warn" && row.blocking === false));
+    if (blocked) await assert.rejects(f.client.startTask(id), /transition/i);
+    else if (command === "close") await f.client.close(id, "Reviewed");
+    else await f.client.startTask(id);
+  }
+  await f.client.config("project", "set", "governance_workflow_enforcement", "off");
+  for (const mode of ["off", "warn", "strict"] as const) {
+    await f.client.config("project", "set", "governance_close_validation_default", mode);
+    assert.equal((await readSettings(f.pmRoot)).governance.close_validation_default, mode);
+    const id = await f.create(`Close evidence severity ${mode}`);
+    const child = await f.create("Unfinished direct child", { parent: id });
+    await f.client.workflowPolicy("policy-put", "overlapping-advice", { definition: { id: "overlapping-advice", effect: "advise", subject: { operations: ["close"] }, rule: { kind: "require_fields", fields: ["actual_result"] } } });
+    const preview = await buildActionPrerequisiteBrief({ command: "close", item: id, input: { reason: "Reviewed" } }, f.options);
+    assert.equal(preview.ready, mode !== "strict", JSON.stringify(preview));
+    assert.ok(preview.checklist.some(row => row.key === "actual_result" && row.state === "missing"));
+    assert.equal(preview.checklist.find(row => row.key === child)?.blocking === false, mode !== "strict");
+    assert.equal(preview.checklist.find(row => row.key === "actual_result")?.blocking === false, mode !== "strict");
+    if (mode === "strict") await assert.rejects(f.client.close(id, "Reviewed"), /missing|child/i);
+    else await f.client.close(id, "Reviewed");
+  }
+  await f.client.config("project", "set", "governance_close_validation_default", "off");
+  await f.client.workflowPolicy("policy-mode", "refuse");
+  await f.client.workflowPolicy("policy-put", "overlapping-required", { definition: { id: "overlapping-required", effect: "refuse", subject: { operations: ["close"] }, rule: { kind: "require_fields", fields: ["actual_result"] } } });
+  const id = await f.create("Required workspace evidence upgrades advisory completeness");
+  const required = await buildActionPrerequisiteBrief({ command: "close", item: id, input: { reason: "Reviewed" } }, f.options);
+  assert.equal(required.ready, false);
+  assert.ok(required.checklist.some(row => row.key === "actual_result" && row.blocking !== false && row.effect === "refuse"));
+  await assert.rejects(f.client.close(id, "Reviewed"), /policy/i);
+});
 
 test("composed start admission checks every SDK type command option policy before claiming", { timeout: 180000 }, async t => {
   const f = await fixture(t);
@@ -235,7 +349,8 @@ test("unsupported commands and approval capabilities remain visible beside known
     const result = await buildActionPrerequisiteBrief({ command, item: f.item, input: { reason: "Ignored?" } }, f.options);
     assert.equal(result.ready, false); assert.equal(result.refusals[0].code, "unsupported"); assert.equal(result.refusals[0].capability, "command");
   }
-  await f.client.workflowPolicy("policy-put", "review", { definition: { id: "review", subject: { operations: ["close"] }, rule: { kind: "approval", fields: ["resolution"], authors: ["reviewer"] } } });
+  await f.client.workflowPolicy("policy-mode", "refuse");
+  await f.client.workflowPolicy("policy-put", "review", { definition: { id: "review", effect: "refuse", subject: { operations: ["close"] }, rule: { kind: "approval", fields: ["resolution"], authors: ["reviewer"] } } });
   await f.client.workflowPolicy("policy-put", "actor", { definition: { id: "actor", rule: { kind: "authors", authors: ["fixture"] } } });
   await f.client.workflowPolicy("policy-put", "create-only", { definition: { id: "create-only", subject: { operations: ["create"] }, rule: { kind: "require_fields", fields: ["body"] } } });
   const result = await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options);
@@ -458,4 +573,25 @@ test("native non-git CLI and injected command emit bounded JSON/TOON and typed u
   const injected = await harness.runCommand({ command: "brief action", args: ["start-task", f.item], pmRoot: f.pmRoot, options: { request: '{"actor":"fixture"}' } });
   assert.equal((injected.result as ActionPrerequisiteBrief).ready, false);
   assert.deepEqual(await snapshot(f.pmRoot), prior);
+  await updatePolicies(f.pmRoot, []);
+  await f.client.workflowPolicy("policy-mode", "refuse");
+  await f.client.workflowPolicy("policy-put", "advisory-actor", { definition: { id: "advisory-actor", effect: "advise", subject: { operations: ["claim", "update", "close"] }, rule: { kind: "authors", authors: ["reviewer"] } } });
+  const settings = await readSettings(f.pmRoot);
+  await writeSettings(f.pmRoot, { ...settings, schema: { ...settings.schema, type_workflows: [{ type: "Task", allowed_transitions: [] }] } });
+  await f.client.config("project", "set", "governance_workflow_enforcement", "warn");
+  const advisoryBefore = await snapshot(f.pmRoot);
+  for (const command of ["start-task", "close"]) for (const format of ["json", "toon"]) {
+    const request = { actor: "fixture", ...(command === "close" ? { input: { reason: "Reviewed" } } : {}) };
+    const output = run([...(format === "json" ? ["--json"] : []), "brief", "action", command, f.item, "--request", JSON.stringify(request)]);
+    assert.equal(output.status, 0, output.stdout + output.stderr); assert.equal(output.stderr, "");
+    if (format === "json") {
+      const parsed = JSON.parse(output.stdout) as ActionPrerequisiteBrief;
+      assert.equal(parsed.ready, true, output.stdout);
+      assert.ok(parsed.checklist.some(row => row.blocking === false && row.effect === "advise"));
+    } else assert.match(output.stdout, /ready: true/);
+  }
+  const advisoryInjected = await harness.runCommand({ command: "brief action", args: ["start-task", f.item], pmRoot: f.pmRoot, options: { request: '{"actor":"fixture"}' } });
+  assert.equal((advisoryInjected.result as ActionPrerequisiteBrief).ready, true);
+  assert.deepEqual(await snapshot(f.pmRoot), advisoryBefore);
+  assert.equal(run(["--author", "fixture", "start-task", f.item]).status, 0);
 });

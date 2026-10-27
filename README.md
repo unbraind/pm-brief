@@ -752,6 +752,16 @@ facts. A decision, outcome gate, draft or blocked status alone does not prevent
 an evidenced close. A claim principal without an assignee is historical metadata,
 not live ownership; both actions check current assignee state.
 
+Policy entries expose the SDK's effective `effect`. Advisory and warning findings
+have `blocking: false`: their `missing`/`unresolved` states stay visible while
+`ready` remains true if all mandatory prerequisites are satisfied. An omitted
+`blocking` means the entry is mandatory. Workspace refusal requires both a
+refusing rule and workspace enforcement; warning-only type transitions never
+become required inputs. Type workflows govern the native start update, not a
+direct close. Close evidence fields and unfinished children follow the native
+`close_validation_default`: strict gates them, while warn/off retain non-blocking
+diagnostics. Explicitly requested evidence and mandatory close reasons still gate.
+
 Required update options are invocation inputs, even when the corresponding item
 field already has a value. Start supplies its native status automatically;
 `actor` supplies the author option. Other required start flags appear as missing
@@ -778,7 +788,9 @@ and accepts integer ceilings 1..64000. Requirements are never silently truncated
 The result has `preview: true`, `ready`, `checklist` and typed `refusals`.
 Close and start-task previews are supported. Other commands, approval-history
 certification, matching workspace field/writer policies and composed claim-stage
-policies return `unsupported` with a remedy, alongside known facts. Policy
+policies return `unsupported` when their effective response can refuse the action,
+with a remedy alongside known facts. Advisory certification gaps remain
+non-blocking checklist entries. Policy
 field references describe current/proposed input availability; native actions
 can generate or clear other metadata, so those references never certify the
 complete post-action record. Use native semantic validation for those policies.

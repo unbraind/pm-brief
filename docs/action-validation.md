@@ -25,8 +25,8 @@ paired with successful native execution checks.
 Another native reproduction verifies the policy boundary: close clears an
 assignment, so core refuses a field-writer or required-assignee policy that a
 partial proposed record would incorrectly satisfy. Such workspace field/writer
-policies now carry explicit unsupported-capability refusals and a native semantic
-preview remedy. Start-task also exposes matching claim-stage policy constraints,
+policies with an effective refusal carry explicit unsupported-capability refusals
+and a native semantic preview remedy. Start-task also exposes matching claim-stage policy constraints,
 rather than silently evaluating only its update stage. The regression checks
 real native refusals and fails against the earlier projection. Native start
 status and actor normalization use the SDK resolvers.
@@ -47,6 +47,20 @@ six close/reopen ownership cycles across all three ownership modes and two new
 actors, legacy live assignments, and 15 type/status combinations with unfinished
 children. Native non-git JSON/TOON and packed consumers check the same classes;
 packed fixtures include records written by the pinned previously released SDK.
+
+The round-2 severity audit covers all five workspace policy kinds, two registry
+enforcement modes, four declared effects (including the default), and all three
+claim/update/close stages. Its 120-case native matrix reads full body-bearing
+state through the SDK, uses the SDK evaluator as its severity oracle, and
+compares actual native execution with mandatory refusal controls. Advisory
+findings expose `blocking: false` and their effective response without becoming
+required inputs. Capability uncertainties for effective refusals still block;
+advisory approval/generated-field uncertainties remain visible and non-blocking.
+Additional cases cover unknown actors, mixed advisory/refusing policies,
+explicitly required evidence, every transition and close-validation mode,
+direct close versus update transitions, and overlapping field requirements.
+Native non-git JSON/TOON, injected context and every packed consumer verify the
+same severity behavior. No test is skipped or removed to obtain agreement.
 
 The focused suite includes 500 seeded operation sequences (seed `0x5eed2026`)
 on one non-git tracker: random prospective field inputs, old-input replays,
@@ -75,17 +89,19 @@ and copy are never used for any native mutation.
 | Measurement | Result |
 | --- | ---: |
 | SDK-certified public items / close previews | 98 / 98 |
-| Missing close inputs identified | 115 |
+| Missing close input facts, mandatory and advisory | 115 |
 | Unresolved prerequisite references present in this corpus | 0 |
 | Satisfied field/prerequisite references | 277 |
 | Unsupported capability refusals present in this corpus | 0 |
-| Largest formatted JSON, including newline | 1486 bytes |
-| Largest conservative TOON/JSON token ceiling | 808 |
-| Elapsed on the shared host | 166174 ms |
+| Largest formatted JSON, including newline | 1639 bytes |
+| Largest conservative TOON/JSON token ceiling | 884 |
+| Elapsed on the shared host | 68546 ms |
 | Changed tracker files/bytes | 0 / 0 |
 
 The exact copy fingerprint before and after is
 `835e5ee38de52a797bd5cc804b9a3767660add1446ef2ef90d4cfbc021fff891`.
+All 203 archived source files were independently compared with the public main
+snapshot before the severity-aware measurement; every byte matched.
 These are measured public-data facts, not evidence that this particular corpus
 contains every failure case. Synthetic native trackers establish reverse,
 missing and external blockers, custom blocked/done/canceled roles, ownership,
