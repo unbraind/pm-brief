@@ -27,13 +27,13 @@
 - Record acknowledged handoff contracts against item revisions ([pm-brief-cjxn](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-cjxn.toon))
 - Compare recorded decision alternatives with cited evidence ([pm-brief-ktjl](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-ktjl.toon))
 
-### Fixed
-
-- Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-170](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-170.toon))
-
 ### Other
 
 - Verify evidence for tracker reconciliation review ([pm-brief-review165](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-review165.toon))
+
+### Closed
+
+- Closed: Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-170](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-170.toon))
 
 ## 2026.10.23 - 2026-10-23
 
@@ -70,9 +70,9 @@
 
 - Enforce the chosen rendered brief token ceiling ([pm-brief-k8no](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-k8no.toon))
 
-### Fixed
+### Closed
 
-- Enforce the requested brief budget after the final compaction step ([pm-brief-github-7e06b2eb1b44-135](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-135.toon))
+- Closed: Enforce the requested brief budget after the final compaction step ([pm-brief-github-7e06b2eb1b44-135](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-135.toon))
 
 ## 2026.10.5 - 2026-10-05
 
@@ -122,21 +122,24 @@
 
 ## 2026.9.1 - 2026-09-01
 
-### Fixed
-
-- Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-84](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-84.toon))
-- Adopt pm CLI 2026.8.30 and stop pinning which way the SDK handles an incomplete merge receipt ([pm-brief-00tc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-00tc.toon))
-
 ### Other
 
 - Reconcile the corrupt-receipt fixture comment with what the pinned SDK now does ([pm-brief-vc49](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-vc49.toon))
+
+### Closed
+
+- Closed: Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-84](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-84.toon))
+- Closed: Adopt pm CLI 2026.8.30 and stop pinning which way the SDK handles an incomplete merge receipt ([pm-brief-00tc](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-00tc.toon))
 
 ## 2026.8.31 - 2026-08-31
 
 ### Fixed
 
-- Pin pm-changelog 2026.8.30 before the next release ([pm-brief-m4pi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-m4pi.toon))
 - CodeQL action updates split into mutually blocking pull requests ([pm-brief-eba7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-eba7.toon))
+
+### Closed
+
+- Closed: Pin pm-changelog 2026.8.30 before the next release ([pm-brief-m4pi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-m4pi.toon))
 
 ## 2026.8.29 - 2026-08-29
 
@@ -152,14 +155,14 @@
 - Checkout release alert script from the default branch ([pm-brief-l5lh](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-l5lh.toon))
 - Canonicalize the complete-corpus reader and adopt the current pm host contract ([pm-brief-v2ts](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-v2ts.toon))
 
-### Security
-
-- The identity gate deadlocks the one remediation its own failure message prescribes ([pm-brief-4yx9](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-4yx9.toon))
-
 ### Other
 
 - Resolve PR \#79 review threads: hermetic release-alert evidence and audit timestamp correction ([pm-brief-zrpv](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-zrpv.toon))
 - Alert on daily release failure and require merge drivers in CI ([pm-brief-javk](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-javk.toon))
+
+### Closed
+
+- Closed: The identity gate deadlocks the one remediation its own failure message prescribes ([pm-brief-4yx9](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-4yx9.toon))
 
 ## 2026.8.17 - 2026-08-17
 
@@ -169,9 +172,9 @@
 
 ## 2026.8.16 - 2026-08-16
 
-### Fixed
+### Closed
 
-- pm-brief consumes a truncated `pm list-all` answer as if it were complete ([pm-brief-g6ko](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-g6ko.toon))
+- Closed: pm-brief consumes a truncated `pm list-all` answer as if it were complete ([pm-brief-g6ko](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-g6ko.toon))
 
 ## 2026.8.14 - 2026-08-14
 
@@ -233,12 +236,15 @@
 
 ### Fixed
 
-- Merge-receipt display cap silently drops item warning markers past the tenth receipt ([pm-brief-8up0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-8up0.toon))
 - Merge-receipt read failures hard-fail every brief command ([pm-brief-a007](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-a007.toon))
 
 ### Other
 
 - Adopt pm-cli 2026.7.28 ([pm-brief-owcy](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-owcy.toon))
+
+### Closed
+
+- Closed: Merge-receipt display cap silently drops item warning markers past the tenth receipt ([pm-brief-8up0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-8up0.toon))
 
 ## 2026.7.27 - 2026-07-27
 
@@ -260,13 +266,13 @@
 
 - Add pm brief duplicates post-merge near-duplicate sweep ([pm-brief-58en](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-58en.toon))
 
-### Fixed
-
-- Documented install command fails: pm install github.com/unbraind/pm-brief cannot resolve an entry file ([pm-brief-xd8z](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-xd8z.toon))
-
 ### Other
 
 - Enable governance duplicate-detection advisory mode and restore parent_reference=warn ([pm-brief-k39x](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-k39x.toon))
+
+### Closed
+
+- Closed: Documented install command fails: pm install github.com/unbraind/pm-brief cannot resolve an entry file ([pm-brief-xd8z](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-xd8z.toon))
 
 ## 2026.7.25 - 2026-07-25
 
@@ -274,13 +280,13 @@
 
 - pm brief diverge: pre-merge multi-agent item collision preview ([pm-brief-vj2y](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-vj2y.toon))
 
-### Fixed
-
-- CHANGELOG mislabels shipped 2026.7.23 work as Unreleased, leaving changelog:check red ([pm-brief-edam](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-edam.toon))
-
 ### Other
 
 - Adopt --respect-item-release so release attribution matches the rest of the fleet ([pm-brief-ce55](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-ce55.toon))
+
+### Closed
+
+- Closed: CHANGELOG mislabels shipped 2026.7.23 work as Unreleased, leaving changelog:check red ([pm-brief-edam](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-edam.toon))
 
 ## 2026.7.23 - 2026-07-23
 
@@ -288,13 +294,13 @@
 
 - Add pm brief since delta command for agent re-orientation after parallel/merge work ([pm-brief-da2c](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-da2c.toon))
 
-### Fixed
-
-- Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-brief-lizi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-lizi.toon))
-
 ### Other
 
 - Adopt pm field-aware merge driver for multi-agent branch-merge safety ([pm-brief-m2gp](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-m2gp.toon))
+
+### Closed
+
+- Closed: Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-brief-lizi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-lizi.toon))
 
 ## 2026.7.14-1 - 2026-07-14
 
@@ -304,9 +310,9 @@
 
 ## 2026.7.14 - 2026-07-14
 
-### Fixed
+### Closed
 
-- brief: blocked_by edges doubled in blockers/risks (dependencies + blocked_by both parsed) ([pm-brief-o4s9](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-o4s9.toon))
+- Closed: brief: blocked_by edges doubled in blockers/risks (dependencies + blocked_by both parsed) ([pm-brief-o4s9](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-o4s9.toon))
 
 ## 2026.7.11-2 - 2026-07-11
 
@@ -331,7 +337,6 @@
 
 - Adversarial review pass 2026-07-10 ([pm-brief-kk7m](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-kk7m.toon))
 - Full-cycle hardening wave: pm-brief ([pm-brief-0dru](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-0dru.toon))
-- Align pm-brief with pm CLI 2026.6.12 release readiness ([pm-brief-352i](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-352i.toon))
 - Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-brief-93z7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-93z7.toon))
 
 ## 2026.7.6 - 2026-07-06
