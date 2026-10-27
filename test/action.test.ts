@@ -88,9 +88,11 @@ test("SDK lifecycle roles and workflow rules govern custom active, blocked, term
   assert.equal(result.ready, true, JSON.stringify(result)); assert.ok(result.item.roles.includes("active"));
   assert.equal(result.checklist.find(row => row.key === terminal)?.state, "satisfied");
   const child = await f.create("Open child", { parent: f.item });
+  assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).checklist.some(row => row.key === "active-children"));
   result = await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options);
-  assert.ok(result.checklist.some(row => row.key === "active-children"));
+  assert.ok(result.checklist.some(row => row.kind === "prerequisite" && row.key === child));
   await f.client.update(child, { status: "custom-canceled", closeReason: "Canceled", parent: f.item, sprint: "none", release: "none" });
+  assert.ok(!(await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options)).checklist.some(row => row.key === child));
   await f.client.update(f.item, { status: "blocked", blockedReason: "Pending review", parent: "none", sprint: "none", release: "none" });
   assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).checklist.some(row => row.key === "blocked-status"));
   for (const type of ["Decision", "Milestone"]) {
@@ -98,8 +100,22 @@ test("SDK lifecycle roles and workflow rules govern custom active, blocked, term
     assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: id }, f.options)).checklist.some(row => row.key === (type === "Decision" ? "human-decision" : "outcome-gate")));
   }
   assert.ok((await buildActionPrerequisiteBrief({ command: "close", item: terminal }, f.options)).checklist.some(row => row.key === "inactive"));
+  assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: terminal }, f.options)).checklist.some(row => row.key === "inactive"));
   await f.client.claim(f.item, { author: "peer" });
   assert.ok((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item, actor: "fixture" }, f.options)).checklist.some(row => row.key === "ownership"));
+});
+
+test("selected close admission does not inherit work-dispatch role or active-status restrictions", async t => {
+  const f = await fixture(t);
+  await f.client.schemaAddStatus("custom-draft", { role: ["draft"] });
+  for (const [type, status] of [["Decision", "open"], ["Milestone", "open"], ["Task", "blocked"], ["Task", "custom-draft"]]) {
+    const id = await f.create(`Complete ${type} from ${status}`, { type, status, body: "Reviewed evidence", description: "Reviewed work", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
+    const preview = await buildActionPrerequisiteBrief({ command: "close", item: id, input: { reason: "Reviewed completion" } }, f.options);
+    assert.equal(preview.ready, true, JSON.stringify(preview));
+    assert.ok(!preview.checklist.some(row => ["human-decision", "outcome-gate", "inactive", "blocked-status"].includes(row.key)));
+    const child = await f.create(`Unfinished child of ${type}`, { parent: id });
+    assert.ok((await buildActionPrerequisiteBrief({ command: "close", item: id }, f.options)).checklist.some(row => row.kind === "prerequisite" && row.key === child));
+  }
 });
 
 test("unsupported commands and approval capabilities remain visible beside known prerequisites", async t => {

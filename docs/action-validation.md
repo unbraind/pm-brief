@@ -14,6 +14,12 @@ outside this change. Two real native SDK read boundaries are instrumented with
 competing native writes; each rejects a stale preview with `changed`, and a
 fresh request reports the current SDK revision. No SDK result is mocked.
 
+An action-specific regression prevents work-dispatch classifications from
+blocking closure: evidenced Decision, Milestone, blocked and draft items can
+produce a ready close preview, while their unfinished direct children remain
+visible through the SDK child rollup. That regression fails against the earlier
+unconditional dispatch checks and passes after scoping them to start-task.
+
 The focused suite includes 500 seeded operation sequences (seed `0x5eed2026`)
 on one non-git tracker: random prospective field inputs, old-input replays,
 blank/CRLF/Unicode values, native relationship and lifecycle changes, 12 custom
@@ -43,7 +49,7 @@ and copy are never used for any native mutation.
 | Unsupported capability refusals present in this corpus | 0 |
 | Largest formatted JSON, including newline | 1486 bytes |
 | Largest conservative TOON/JSON token ceiling | 808 |
-| Elapsed on the shared host | 97601 ms |
+| Elapsed on the shared host | 166174 ms |
 | Changed tracker files/bytes | 0 / 0 |
 
 The exact copy fingerprint before and after is

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PmClient, certifyCompleteListResult, createPmCliExpectedError, estimatePmOutputTokens,
   getContracts, readSettings, readWorkflowPolicies, resolveRuntimeStatusRegistry,
-  resolveItemBlockers, computeActionabilityReport, resolveItemTypeRegistry,
+  resolveItemBlockers, computeActionabilityReport, resolveItemTypeRegistry, buildItemChildrenRollup,
   evaluateTransition, resolveTypeWorkflows, evaluateWorkflowPolicies,
   createLifecycleCompletenessPolicies, resolveTerminalReason, workflowPolicyApplies,
 } from "@unbrained/pm-cli/sdk";
@@ -137,6 +137,8 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
     const refuse = (capability: string, remedy: string): void => { result.refusals.push({ code: "unsupported", capability, remedy }); };
     const add = (entry: ActionPrerequisiteEntry): void => { entries.set(`${entry.kind}:${entry.key}`, entry); };
     const supported = native && ["close", "start-task"].includes(native.action);
+    const closing = native?.action === "close";
+    const starting = native?.action === "start-task";
     if (!supported) refuse("command", "Use the exact native close or start-task command; inspect other actions with pm contracts --command <command> --full");
     if (native?.action !== "close" && request.input && Object.keys(request.input).length) refuse("close-input", "Supply close inputs only for a close preview");
     const rows = new Map(items.map(row => [row.id.toLowerCase(), row]));
@@ -144,17 +146,21 @@ export async function buildActionPrerequisiteBrief(value: ActionPrerequisiteRequ
       add({ kind: "prerequisite", key: blocker.id, state: blocker.resolved ? "satisfied" : "unresolved", ref: `${blocker.id}#/status`, ...(blocker.resolved ? {} : { remedy: blocker.external ? "Resolve this external prerequisite through its owning integration" : "Resolve the prerequisite or correct its native relationship before acting" }) });
     }
     const report = computeActionabilityReport([item], items, registry, resolveItemTypeRegistry(settings));
-    for (const [key, unresolved] of [["blocked-status", registry.blocked_statuses.has(item.status)], ["active-children", report.containers.some(row => row.item.id === item.id)], ["human-decision", report.decisions.some(row => row.item.id === item.id)], ["outcome-gate", report.gates.some(row => row.item.id === item.id)]] as const) {
+    if (closing) {
+      const children = buildItemChildrenRollup(item.id, items, registry, items.length);
+      if (children.truncated) throw new ActionPrerequisiteError("budget", "Native child prerequisites are incomplete", "Inspect the complete native child projection before retrying; no unfinished child is silently omitted");
+      for (const child of children.sample) if (!registry.terminal_statuses.has(child.status)) add({ kind: "prerequisite", key: child.id, state: "unresolved", ref: `${child.id}#/status`, remedy: "Resolve this unfinished direct child before closing its parent" });
+    }
+    for (const [key, unresolved] of [["blocked-status", starting && registry.blocked_statuses.has(item.status)], ["active-children", starting && report.containers.some(row => row.item.id === item.id)], ["human-decision", starting && report.decisions.some(row => row.item.id === item.id)], ["outcome-gate", starting && report.gates.some(row => row.item.id === item.id)]] as const) {
       if (unresolved) add({ kind: "readiness", key, state: "unresolved", ref: `${item.id}#/status`, remedy: "Resolve the SDK readiness classification before attempting the selected action" });
     }
-    if (!registry.active_statuses.has(item.status)) add({ kind: "readiness", key: "inactive", state: "unresolved", ref: `${item.id}#/status`, remedy: "Review the configured lifecycle role; use native reopen/update where appropriate" });
+    if ((starting && !registry.active_statuses.has(item.status)) || (closing && registry.terminal_statuses.has(item.status))) add({ kind: "readiness", key: "inactive", state: "unresolved", ref: `${item.id}#/status`, remedy: "Review the configured lifecycle role; use native reopen/update where appropriate" });
     for (const [index, evidence] of (request.requiredEvidence ?? []).entries()) {
       const links = item[evidence.kind] ?? [];
       const found = links.findIndex(link => ("command" in link && link.command === evidence.ref) || link.path === evidence.ref);
       add({ kind: "evidence", key: `${evidence.kind}:${evidence.ref}`, state: found < 0 ? "missing" : "satisfied", ref: found < 0 ? `request#/requiredEvidence/${index}` : `${item.id}#/${evidence.kind}/${found}`, ...(found < 0 ? { remedy: `Record the required native ${evidence.kind} link; linkage alone does not prove validation` } : {}) });
     }
     if (supported) {
-      const closing = native.action === "close";
       const after: ListedItem = { ...item, status: closing ? registry.close_status : registry.in_progress_status };
       const inputFields = { resolution: "resolution", expectedResult: "expected_result", actualResult: "actual_result" } as const;
       for (const [option, field] of Object.entries(inputFields)) {

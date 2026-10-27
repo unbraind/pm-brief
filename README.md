@@ -744,6 +744,10 @@ bodies are never repeated. Link presence records linkage, not successful tests
 or artifact verification. This composes core admission facts; pm-lint remains
 the item quality diagnostic, and this command never chooses work.
 
+Readiness is scoped to the action: starting work uses native dispatch roles;
+closing uses native terminal-state and direct-child facts. A decision, outcome
+gate, draft or blocked status alone does not prevent an evidenced close.
+
 The typed SDK entry point is `buildActionPrerequisiteBrief(request, { pmRoot,
 client })`. Pass the host's injected client when embedding. A standalone caller
 can omit it to construct a tracker-bound public SDK client lazily after request
