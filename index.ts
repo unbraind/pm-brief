@@ -1,6 +1,9 @@
 import { registerDecisionAlternativesCommand } from "./alternatives.ts";
 import { registerDisclosureCommand } from "./disclosure.ts";
 import { registerActionPrerequisiteCommand } from "./action.ts";
+import { registerDecisionFollowThroughCommands } from "./follow-through.ts";
+export { buildDecisionFollowThroughBrief, readFollowThroughObservation, parseFollowThroughDeclaration, parseFollowThroughRequest, validateFollowThroughAccounting, FollowThroughError, FOLLOW_THROUGH_SCHEMA } from "./follow-through.ts";
+export type { FollowThroughObservation, FollowThroughOutcome, FollowThroughDeclaration, FollowThroughRequest, FollowThroughOptions, FollowThroughRefusalCode, FollowThroughEvidence, FollowThroughAction, FollowThroughRow, DecisionFollowThroughBrief } from "./follow-through.ts";
 export { buildActionPrerequisiteBrief, parseActionPrerequisiteRequest, ActionPrerequisiteError, ACTION_PREREQUISITE_SCHEMA } from "./action.ts";
 export type { ActionEvidence, ActionPrerequisiteRequest, ActionPrerequisiteOptions, ActionRefusalCode, ActionPrerequisiteEntry, ActionPrerequisiteBrief } from "./action.ts";
 export { buildDisclosureBrief, renderDisclosureBrief, parseDisclosurePolicy, DisclosureError } from "./disclosure.ts";
@@ -4751,6 +4754,7 @@ function registerCommands(api: ExtensionApi): void {
   registerDecisionAlternativesCommand(api);
   registerDisclosureCommand(api);
   registerActionPrerequisiteCommand(api);
+  registerDecisionFollowThroughCommands(api);
   const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },

@@ -591,6 +591,86 @@ final verified read appears on the next repair read. See the
 [complete example](docs/examples/handoff-repair.md) and
 [validation evidence](docs/handoff-repair-validation.md).
 
+## Decision follow-through briefs
+
+```bash
+pm brief observation measurement-id --json
+pm brief follow-through decision-id
+pm brief follow-through decision-id --json --token-budget 1500
+```
+
+Follow declared consequences after a choice has been explicitly adopted. Store a
+version 1 `brief_follow_through` object on a native `Decision`, using native
+`pm update --field brief_follow_through='<json>'` (or the SDK custom-field
+options). The extension registers this optional field. The object contains an
+explicit `adopted` boolean and 1–128 outcomes, each with a unique `id`, `expected`
+text, `observations` and `actions`. See the [complete example](docs/examples/follow-through.md).
+
+An observation is an explicit `{item, revision, verdict}` judgement: `observed`
+or `contradicted`. Read its revision with `brief observation`, review that item's
+native `actual_result`, then record the judgement on the associated outcome.
+Revisions hash the complete SDK-read native item and its verified append-only
+history; an edit, relationship change or replay invalidates earlier judgements,
+including an edit that restores old text. Empty or missing observations provide
+no support. The brief never interprets prose, opens linked files or runs tests.
+
+Every outcome retains its own `unsupported`, `observed`, `contradicted` or
+`conflicted` state. Conflicted means current observations contain both explicit
+verdicts; neither disappears. A changed observation invalidates only outcomes
+citing it. Unrelated outcomes retain their evidence. `unsupported` identifies
+what remains untested by current observations. Action states use the tracker's
+configured SDK status roles (`pending`, `blocked`, `done`, `canceled`, `terminal`
+or `missing`), and completing work never supplies an outcome judgement. Closing
+a Decision does not adopt it. Malformed outcome records are isolated with an
+`invalid_outcome` remedy while other outcomes remain readable.
+
+The default 1500-token ceiling (integer 1–64000) preserves every outcome id and
+state. Optional expected text, observations and actions are included as whole
+detail groups. Each row's `omitted` counts absent details: one for expected text,
+one per observation and one per action. `restore` reads the original declaration;
+use native `pm get <observation-id> --full` for source measurements. The SDK UTF-8
+estimator covers twice the complete pretty JSON size plus 256 framing bytes,
+including the estimate and omissions. It bounds normal native JSON/TOON, not a
+model tokenizer or extra host accounting receipts. For larger briefs also use
+`--output-budget unbounded --output-limit unbounded`. If mandatory summaries
+cannot fit, the command refuses instead of silently removing outcomes.
+
+```ts
+import {
+  buildDecisionFollowThroughBrief, readFollowThroughObservation,
+  parseFollowThroughDeclaration, FollowThroughError,
+} from "pm-brief";
+
+const options = { pmRoot: ".agents/pm" }; // Pass the host-bound client when available.
+const source = await readFollowThroughObservation("measurement-id", options);
+const declaration = parseFollowThroughDeclaration({
+  version: 1, adopted: true,
+  outcomes: [{ id: "latency", expected: "Lower latency", observations: [
+    { ...source, verdict: "observed" },
+  ], actions: ["next-experiment-id"] }],
+});
+// Persist declaration with native pm mutation APIs, then read current state:
+try {
+  const brief = await buildDecisionFollowThroughBrief({ decision: "decision-id" }, options);
+  console.log(brief.outcomes);
+} catch (error) {
+  if (error instanceof FollowThroughError) console.error(error.code, error.remedy);
+  else throw error;
+}
+```
+
+`parseFollowThroughDeclaration` is the strict producer validator, preserving
+recorded whitespace and CRLF. Readers reuse its per-outcome rules but isolate
+bad rows. Sparse arrays, accessors/proxies, unknown keys, duplicate ids,
+unbounded collections and nonfinite budgets refuse. Refusal codes are `invalid`,
+`missing`, `not_adopted`, `tracker`, `changed` and `budget`, always with a remedy
+(CLI exit 2). The reader revalidates native state and history before returning;
+retry recomputes from current SDK data. It creates no plan, journal, lease,
+importer, sync engine or remote side effect. History is accessed through the
+public SDK; a backend must expose that native history at the supplied tracker
+root to certify a revision. Alternatives digests explain choices before
+adoption; pm-review owns review judgments; pm-evidence owns source citations.
+
 ## Decision alternatives digest
 
 ```bash
@@ -814,7 +894,9 @@ See the [worked example](docs/examples/action.md) and
 ## Without git
 
 Briefs, prompts, ranking, history deltas, governance, duplicate checks and all
-handoff, decision alternatives, stakeholder disclosure and action prerequisite commands work in plain initialized trackers without a git executable.
+handoff, decision alternatives, decision follow-through, observation revision,
+stakeholder disclosure and action prerequisite commands work in plain initialized
+trackers without a git executable.
 Handoff storage uses the native SDK dispatcher and can reuse a host client.
 `brief diverge` needs a git repository and git refs. Handoff receipts have no
 branch, commit or repository dependency.
