@@ -41,7 +41,8 @@ A behavioral revert in a disposable non-git copy disabled only the revision
 freshness comparison. The stale-observation regression failed (exit 1), retaining
 `observed` where `unsupported` was required. The fixed worktree was untouched;
 the fixed regression subsequently passed through `pm test --run --progress`.
-Both linked tests passed (2/2). Focused module coverage was 100.00% lines,
+All three linked test commands passed (six test cases), including the updated
+native command inventory. Focused module coverage was 100.00% lines,
 98.45% branches and 100.00% functions, with nine focused tests passing. The
 separate 500-sequence model also passed. Input/output fuzzing additionally checks
 1,000 seeded IEEE-754 bit patterns and explicit extreme values.
