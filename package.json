@@ -15,7 +15,8 @@
     "docs/examples/alternatives.md",
     "docs/examples/disclosure.md",
     "docs/examples/handoff-repair.md",
-    "docs/examples/action.md"
+    "docs/examples/action.md",
+    "docs/examples/follow-through.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -105,7 +106,8 @@
       "docs/examples/alternatives.md",
       "docs/examples/disclosure.md",
       "docs/examples/handoff-repair.md",
-      "docs/examples/action.md"
+      "docs/examples/action.md",
+      "docs/examples/follow-through.md"
     ],
     "capabilities": [
       "commands",

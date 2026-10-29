@@ -6,6 +6,7 @@ import type { HandoffPacket, HandoffStatus } from "../handoff.ts";
 import type { DecisionAlternativesDigest } from "../alternatives.ts";
 import type { DisclosureResult } from "../disclosure.ts";
 import type { ActionPrerequisiteBrief } from "../action.ts";
+import type { DecisionFollowThroughBrief } from "../follow-through.ts";
 import { PmClient, readSettings, readWorkflowPolicies, writeSettings, resolveItemTypeRegistry, resolveItemTypesFilePath, writeWorkspaceJsonWithHistory } from "@unbrained/pm-cli/sdk";
 
 /** Package fields that define the packed acceptance matrix. */
@@ -55,6 +56,8 @@ interface AcceptanceReceipt {
   readonly action_explicit_start: true;
   /** Advisory policies and warning transitions remain non-blocking on both actions. */
   readonly action_severity: true;
+  /** Post-adoption outcomes retain independent support under every acquisition mode. */
+  readonly decision_follow_through: true;
 }
 
 const repoRoot = resolve(import.meta.dirname, "..");
@@ -78,7 +81,7 @@ const cleanEnvironment: NodeJS.ProcessEnv = {
   NPM_CONFIG_USERCONFIG: devNull,
 };
 for (const key of Object.keys(cleanEnvironment)) {
-  if (key.toLowerCase() === "npm_config_allow_scripts") delete cleanEnvironment[key];
+  if (key.toLowerCase() === "npm_config_allow_scripts" || /token|secret|password|credential|api_key|npm_media_server/i.test(key)) delete cleanEnvironment[key];
 }
 
 /** Run one acceptance command without a shell and fail with bounded diagnostics.
@@ -223,6 +226,27 @@ try {
     // records and residual metadata written by the previously released host.
     const actionRoot = join(scenarioRoot, ".agents/pm");
     const actionClient = new PmClient({ pmRoot: actionRoot, author: "packed-prior", noExtensions: true });
+    await actionClient.schemaAddField("brief_follow_through", { type: "object" });
+    const followScope = { parent: "none", sprint: "none", release: "none", clearDeps: true };
+    const measurement = (await actionClient.create({ title: "Packed latency observation", type: "Task", actualResult: "Measured lower latency", ...followScope })).item.id;
+    const choice = (await actionClient.create({ title: "Packed adopted Decision", type: "Decision", ...followScope })).item.id;
+    const observation = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "observation", measurement]).stdout) as { item: string; revision: string };
+    const declaration = { version: 1, adopted: true, outcomes: [
+      { id: "latency", expected: "Lower latency", observations: [{ ...observation, verdict: "observed" }], actions: [] },
+      { id: "maintenance", expected: "Less maintenance", observations: [], actions: [fixtureId] },
+    ] };
+    const followFields = { briefFollowThrough: JSON.stringify(declaration) };
+    await actionClient.update(choice, { ...followScope, ...followFields });
+    const followBefore = (await actionClient.get(choice, { full: true })).item;
+    for (const format of ["json", "toon"]) {
+      const output = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "follow-through", choice]);
+      if (output.stderr || Math.ceil(Buffer.byteLength(output.stdout) / 4) > 1500 || !output.stdout.includes("unsupported")) throw new Error(`${scenario.name} follow-through output contract failed`);
+      if (format === "json" && (JSON.parse(output.stdout) as DecisionFollowThroughBrief).outcomes[0].state !== "observed") throw new Error(`${scenario.name} lost the explicit observation`);
+    }
+    if (JSON.stringify((await actionClient.get(choice, { full: true })).item) !== JSON.stringify(followBefore)) throw new Error(`${scenario.name} follow-through mutated its Decision`);
+    await actionClient.update(measurement, { actualResult: "Changed measurement", ...followScope });
+    const staleFollow = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "follow-through", choice]).stdout) as DecisionFollowThroughBrief;
+    if (staleFollow.outcomes.some(row => row.state !== "unsupported")) throw new Error(`${scenario.name} retained a stale observation judgement`);
     for (const type of ["Decision", "Milestone", "Task"]) {
       const id = (await actionClient.create({ title: `Explicit native ${type}`, type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", parent: "none", sprint: "none", release: "none", clearDeps: true })).item.id;
       if (type === "Task") {
@@ -311,6 +335,7 @@ try {
       action_live_ownership: true,
       action_explicit_start: true,
       action_severity: true,
+      decision_follow_through: true,
     });
   }
 

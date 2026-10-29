@@ -1,0 +1,37 @@
+id: pm-brief-decision-follow-through
+title: Track declared outcomes after an adopted Decision
+description: "Compose a read-only typed SDK and CLI follow-through brief for explicit Decision adoption, declared consequences, linked revision-bound observations and pending actions. Include strict bounded input, TOON/JSON budgets, isolated invalid records, native status roles, no-git and packed acceptance, seeded model-based validation and public tracker measurements."
+type: Feature
+status: in_progress
+priority: 2
+tags[1]: "gh:unbraind/pm-brief#194"
+created_at: "2026-10-28T22:58:54.994Z"
+updated_at: "2026-10-28T23:52:28.039Z"
+author: codex-agent
+acceptance_criteria: "Unsupported, contradicted and observed outcomes remain separate; changing an observation invalidates only its associated outcome; a 20-outcome fixture renders within 1500 estimated tokens with explicit omissions"
+comments[7]{created_at,author,text}:
+  "2026-10-28T22:59:39.004Z",codex-agent,"Overlap recheck on current package main and pinned SDK: alternatives.ts/buildDecisionAlternatives extracts proposal and Plan rationale before adoption; pm-review owns review verdicts and source judgements; pm-evidence owns citation freshness; core exposes native Decision records, certified complete reads, history projection, runtime status registry and host output rendering. None composes declared post-adoption consequences with outcome-specific observations and pending actions. Plan: add an optional namespaced Decision declaration read through the SDK, explicit adoption, independent outcome evaluation, revision-bound observations, bounded whole-row output and strict refusals. This feature has no import/sync writer, journal, claim or outbox path; native mutations remain owned by pm."
+  "2026-10-28T23:08:59.832Z",codex-agent,"Implemented the typed native declaration, follow-through and observation commands, isolated bad outcome records, verified-history revision binding including ABA, SDK status-role action states, whole-summary compaction, README/example and seven-mode packed acceptance. Focused tests prove the 20-outcome fixture preserves all 20 ids/states with 50 explicit omitted details: 1905 pretty JSON bytes, conservative ceiling 1017 of 1500 tokens. Initial immutable public tracker validation: 99 items, zero Decisions, three real observation revisions, maximum response 102 bytes/26 estimated tokens, 212 files checked and zero changed. A second public tracker containing Decisions will exercise safe adoption refusals. Model-based and race validation are ongoing."
+  "2026-10-28T23:24:44.859Z",codex-agent,"Behavioral revert proof: in a disposable non-git copy, disabling only the observation-revision freshness comparison makes the only-outcomes-linked regression fail (exit 1: observed retained where unsupported is required). The package worktree was untouched; the fixed test then passed through pm test --run --progress. Both linked tests passed (2/2). Focused module coverage: 9 passing tests, 100.00% lines, 98.45% branches, 100.00% functions. Typecheck, test/script typecheck, docstrings and input/output IEEE-754 fuzzing passed. Public pm-vcs main 1671ccb4d2bb8672c83627f015bb5ef60a8d1898: 164 items, four Decisions, no explicit declarations, four not_adopted refusals, three observation revisions, maximum 164 bytes/41 estimated tokens, 341 tracker files checked and zero changed. No successful real outcomes are claimed."
+  "2026-10-28T23:25:13.654Z",codex-agent,"Final local model evidence: seed 0x5eed1029 passed 500 sequences, 136 native operations, 22 persisted historical declaration replays and eight generated status definitions (213269 ms on the saturated host). Every sequence evaluates native SDK read-back; checkpoint mutations bound audit growth. The initial high-mutation stress variant timed out and was replaced by this bounded model, not reported as a pass. Final public-copy verification includes every SDK read inside the hash window: pm-brief 212/0 files checked/changed and pm-vcs 341/0; windows 3535 ms and 4117 ms. Final local checks: focused behavior/coverage 9/9, model 1/1, IEEE-754 boundary fuzz 1/1, linked native tests 2/2, typecheck/test-script typecheck/docstrings passed. Full npm and Bun release checks will run in CI at the final commit; no merge or release is authorized. Tracker item remains in progress for orchestrator verification."
+  "2026-10-28T23:27:10.483Z",codex-agent,"Local strict health verifies native storage, integrity and history drift, but its extension check refuses an ambient pm-github host-version skew (pinned pm 2026.10.24 versus installed extension 2026.10.28). The feature does not change either dependency pin or ambient extension configuration. Fresh-clone CI health is the final evidence for that environment. This is a local environment limitation, not an inferred SDK gap."
+  "2026-10-28T23:50:54.897Z",codex-agent,"PR https://github.com/unbraind/pm-brief/pull/194 initial CI https://github.com/unbraind/pm-brief/actions/runs/40787750855 completed: npm release, Bun release and Node 22/26 each ran 633 tests with 632 passed, one failed, zero canceled/skipped. The sole failure was an existing command-inventory assertion in test/brief.test.ts that omitted the two intentional new commands. All new follow-through tests and 500-sequence models passed in all four jobs; new module coverage was 100.00/98.46/100.00. Updated that expected inventory; no production behavior changed. Reclaiming solely to record and verify the correction before a fresh final-head CI run."
+  "2026-10-28T23:52:20.212Z",codex-agent,"Command-inventory correction verified locally: node --test --test-concurrency=1 --test-name-pattern=registers test/brief.test.ts passed 4/4; npm run build:test passed. Re-ran all three linked commands through pm test --run --progress: 3/3 commands and 6/6 test cases passed, zero failures/skips. Only test/brief.test.ts expected command names and this evidence changed; production source is unchanged. A fresh npm/Bun full release run is required on the next head; the initial 632/633 run is retained as failed evidence and is not approval."
+files[8]{path,scope}:
+  follow-through.ts,project
+  index.ts,project
+  package.json,project
+  scripts/accept-packed.ts,project
+  scripts/validate-follow-through.ts,project
+  test/brief.test.ts,project
+  test/follow-through.test.ts,project
+  test/renderer-ownership.test.ts,project
+tests[3]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=1 --test-name-pattern=only test/follow-through.test.ts,project,codex-agent,"2026-10-28T23:22:42.624Z",local_mutation,feat/decision-follow-through-briefs
+  node --test --test-concurrency=1 test/renderer-ownership.test.ts,project,codex-agent,"2026-10-28T23:22:42.624Z",local_mutation,feat/decision-follow-through-briefs
+  node --test --test-concurrency=1 --test-name-pattern=registers test/brief.test.ts,project,codex-agent,"2026-10-28T23:51:09.616Z",local_mutation,feat/decision-follow-through-briefs
+docs[3]{path,scope}:
+  docs/examples/follow-through.md,project
+  docs/follow-through-validation.md,project
+  README.md,project
+body: ""
