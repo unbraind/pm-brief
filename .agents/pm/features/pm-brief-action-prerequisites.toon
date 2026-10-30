@@ -2,13 +2,19 @@ id: pm-brief-action-prerequisites
 title: Compose a compact prerequisite brief for one intended native action
 description: "Combine SDK command contracts, item readiness and declared evidence for an explicitly selected native command and item. Compose authoritative core facts without duplicating validators or selecting work."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags: []
 created_at: "2026-10-27T04:25:34.000Z"
-updated_at: "2026-10-27T09:57:19.866Z"
+updated_at: "2026-10-30T18:03:49.497Z"
+closed_at: "2026-10-30T18:03:47.214Z"
+completed_at: "2026-10-27T11:22:49.000Z"
 author: codex-agent
 acceptance_criteria: "One call identifies missing close fields and unresolved prerequisites; Satisfied fields are references without repeated bodies; Read-only previews perform zero mutations and carry typed unsupported-capability refusals with remedies; Typed SDK and CLI emit bounded TOON/JSON; docs, non-git public-data validation and npm/Bun release evidence are recorded"
+release: 2026.10.28
+resolution: "Delivered by PR #189 (4828b3d): Show missing inputs and prerequisites before native actions"
+expected_result: "One call identifies missing close fields and unresolved prerequisites; Satisfied fields are references without repeated bodies; Read-only previews perform zero mutations and carry typed unsupported-capability refusals with remedies; Typed SDK and CLI emit bounded TOON/JSON; docs, non-git public-data validation and npm/Bun release evidence are recorded"
+actual_result: "PR #189 merged at 2026-10-27T11:22:49Z as 4828b3d; required CI passed on the merged head."
 comments[22]{created_at,author,text}:
   "2026-10-27T04:25:48.456Z",codex-agent,"Overlap rechecked against pinned SDK public contracts/actionability/lifecycle/schema declarations, core command discovery, pm-lint quality rules and pm-evidence selectors, plus existing tracker items and upstream issue search. Core owns native command availability, lifecycle admission and configured status semantics; pm-lint owns quality diagnosis; pm-evidence owns evidence collection. This feature composes those facts for one explicit action and item, without selecting work, applying actions or creating a second validator. No existing action prerequisite item or GitHub issue found. Plan: typed bounded preview, native command registration, strict shared request schema, reference-only satisfied evidence, non-git and no-write regressions, public-copy measurement, packed install matrix and CI npm/Bun gates. Import/export/sync and journal mutation paths are outside this read-only feature; existing paths remain unchanged."
   "2026-10-27T04:31:37.604Z",codex-agent,"Implementation now composes getContracts availability, certified complete-list reads, resolveItemBlockers (including reverse/external/missing edges), runtime status roles, computeActionabilityReport, native transition evaluation, workflow policy evaluation and SDK lifecycle completeness presets. Satisfied evidence is item/input JSON Pointer references, never copied bodies. Validation found that cold native certified reads initialize derived runtime metadata caches; item/schema/history bytes remain unchanged. Warm repeated previews also preserve all runtime bytes. This distinction will be explicit in measured evidence rather than claiming the SDK performs no derived cache IO."
@@ -112,4 +118,5 @@ docs[3]{path,scope}:
   docs/action-validation.md,project
   docs/examples/action.md,project
   README.md,project
+close_reason: "Delivered by PR #189 (4828b3d): Show missing inputs and prerequisites before native actions"
 body: ""
