@@ -1,10 +1,26 @@
 # Changelog
 
+## 2026.10.29 - 2026-10-29
+
+### Added
+
+- Track declared outcomes after an adopted Decision ([pm-brief-decision-follow-through](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-decision-follow-through.toon))
+
+## 2026.10.28 - 2026-10-28
+
+### Added
+
+- Compose a compact prerequisite brief for one intended native action ([pm-brief-action-prerequisites](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-action-prerequisites.toon))
+
 ## 2026.10.26 - 2026-10-26
 
 ### Added
 
 - Renew only affected handoff obligations after source revisions change ([pm-brief-03r3](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-03r3.toon))
+
+### Other
+
+- Point the npm homepage at the package catalog and link the author ([pm-brief-kgt1](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-kgt1.toon))
 
 ## 2026.10.25 - 2026-10-25
 

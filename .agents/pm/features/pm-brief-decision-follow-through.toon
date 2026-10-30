@@ -2,13 +2,19 @@ id: pm-brief-decision-follow-through
 title: Track declared outcomes after an adopted Decision
 description: "Compose a read-only typed SDK and CLI follow-through brief for explicit Decision adoption, declared consequences, linked revision-bound observations and pending actions. Include strict bounded input, TOON/JSON budgets, isolated invalid records, native status roles, no-git and packed acceptance, seeded model-based validation and public tracker measurements."
 type: Feature
-status: in_progress
+status: closed
 priority: 2
 tags[1]: "gh:unbraind/pm-brief#194"
 created_at: "2026-10-28T22:58:54.994Z"
-updated_at: "2026-10-28T23:52:28.039Z"
+updated_at: "2026-10-30T18:03:55.697Z"
+closed_at: "2026-10-30T18:03:53.641Z"
+completed_at: "2026-10-29T00:28:26.000Z"
 author: codex-agent
 acceptance_criteria: "Unsupported, contradicted and observed outcomes remain separate; changing an observation invalidates only its associated outcome; a 20-outcome fixture renders within 1500 estimated tokens with explicit omissions"
+release: 2026.10.29
+resolution: "Delivered by PR #194 (67c0be6): Show which adopted Decision outcomes remain untested"
+expected_result: "Unsupported, contradicted and observed outcomes remain separate; changing an observation invalidates only its associated outcome; a 20-outcome fixture renders within 1500 estimated tokens with explicit omissions"
+actual_result: "PR #194 merged at 2026-10-29T00:28:26Z as 67c0be6; required CI passed on the merged head."
 comments[7]{created_at,author,text}:
   "2026-10-28T22:59:39.004Z",codex-agent,"Overlap recheck on current package main and pinned SDK: alternatives.ts/buildDecisionAlternatives extracts proposal and Plan rationale before adoption; pm-review owns review verdicts and source judgements; pm-evidence owns citation freshness; core exposes native Decision records, certified complete reads, history projection, runtime status registry and host output rendering. None composes declared post-adoption consequences with outcome-specific observations and pending actions. Plan: add an optional namespaced Decision declaration read through the SDK, explicit adoption, independent outcome evaluation, revision-bound observations, bounded whole-row output and strict refusals. This feature has no import/sync writer, journal, claim or outbox path; native mutations remain owned by pm."
   "2026-10-28T23:08:59.832Z",codex-agent,"Implemented the typed native declaration, follow-through and observation commands, isolated bad outcome records, verified-history revision binding including ABA, SDK status-role action states, whole-summary compaction, README/example and seven-mode packed acceptance. Focused tests prove the 20-outcome fixture preserves all 20 ids/states with 50 explicit omitted details: 1905 pretty JSON bytes, conservative ceiling 1017 of 1500 tokens. Initial immutable public tracker validation: 99 items, zero Decisions, three real observation revisions, maximum response 102 bytes/26 estimated tokens, 212 files checked and zero changed. A second public tracker containing Decisions will exercise safe adoption refusals. Model-based and race validation are ongoing."
@@ -34,4 +40,5 @@ docs[3]{path,scope}:
   docs/examples/follow-through.md,project
   docs/follow-through-validation.md,project
   README.md,project
+close_reason: "Delivered by PR #194 (67c0be6): Show which adopted Decision outcomes remain untested"
 body: ""
