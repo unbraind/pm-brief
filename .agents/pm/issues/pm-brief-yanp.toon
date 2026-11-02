@@ -1,0 +1,11 @@
+id: pm-brief-yanp
+title: Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI
+description: "Tracks gh:unbraind/pm-brief#193 (filed 2026-10-28, missed by the blind issue watch). test/coverage-gaps.test.ts:360 (and brief.test.ts since-fixtures) manufacture an empty activity window with the lower bound 2999-01-01; the host activity command rejects --from after --to with invalid_argument_value ('Activity --from must be before --to') once the dev toolchain moves to SDK 2026.10.25 or newer. Main still pins 2026.10.24 and is green, so the defect only surfaces on the pending toolchain bump PR (#192), whose four gates currently fail on it (latest run 41316901703). Fix by replacing the future-date fixture with a bounded past window (or an explicit empty-window construction the host accepts) without weakening the quiet-output assertions; then reland the toolchain update."
+type: Issue
+status: open
+priority: 2
+tags[3]: ci,"gh:unbraind/pm-brief#193",toolchain
+created_at: "2026-11-02T09:16:26.337Z"
+updated_at: "2026-11-02T09:16:26.337Z"
+author: pi-glm
+body: ""
