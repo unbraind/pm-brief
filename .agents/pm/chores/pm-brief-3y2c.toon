@@ -1,0 +1,24 @@
+id: pm-brief-3y2c
+title: Adapt native admission fixtures to the pm-toolchain SDK contract
+description: ""
+type: Chore
+status: in_progress
+priority: 2
+tags[4]: dependencies,"gh:unbraind/pm-brief#192",migration,sdk
+created_at: "2026-11-03T09:15:52.227Z"
+updated_at: "2026-11-03T10:06:14.391Z"
+author: codex-toolchain-1103
+comments[3]{created_at,author,text}:
+  "2026-11-03T09:18:32.635Z",codex-toolchain-1103,"Reproduced both reported action tests on the actual 2026.10.30 pin. Neither reaches policy admission: fixture client.create rejects parent:\"none\" with --parent must not use placeholder token none; use --unset parent. Root cause: pm-cli 2026.10.30 GH-1614 typed SDK data stays literal. Classification: test and packed-acceptance fixture contract drift. Replace absent parent/sprint/release with typed unset, and clear assignee using unset during matrix reset (literal none is now a real assignee). Preserve explicit parents in positive controls. Apply the same correction to follow-through fixtures and packed scenarios; retain all native policy/parity assertions, then rerun them to detect any independent admission change."
+  "2026-11-03T09:55:50.416Z",codex-toolchain-1103,"Validation so far: npm test -- --test-concurrency=2 builds and typechecks the test graph after correcting the literal field fixture types. Native retained-ownership admission passes through pm test; explicit start roles, close roles, policy advisories, workflow authority, partial-record capability refusals and competing-writer checks also pass. The 120-case severity matrix reaches its existing 600000ms deadline; the full command-option matrix reaches 180000ms on both Node and Bun; the 500-sequence property reaches 300000ms. No deadlines or assertions were widened. Memory-backed temporary trackers and disabled provenance probes are diagnostic runs only; neither is evidence of a passing matrix yet. The original refusal is confirmed GH-1614 parent:none at fixture create, not a changed policy decision. Full exact-head acceptance remains a CI requirement."
+  "2026-11-03T10:06:10.753Z",codex-toolchain-1103,"Final bounded npm receipt: 420 reported tests, 407 pass, 1 assertion failure and 12 canceled, zero skips. The assertion failure was the existing future-date activity window, now fixed and independently passing under pm-brief-yanp. The admission severity and option matrices and the 500-sequence property reached their original deadlines; other queued or active files were canceled when the bounded run stopped. Bun focused admission also timed out; memory-backed trackers and disabled provenance probes did not establish a passing matrix. Retained-ownership native admission and the corrected window pass through pm test. Typecheck, build:test, docstring and changelog check pass. No lint script exists. No full suite, packed acceptance, coverage or release:check pass is claimed. All literal sentinel fixture and packed scenario updates are retained, with native parity assertions unchanged."
+files[3]{path,scope}:
+  scripts/accept-packed.ts,project
+  test/action.test.ts,project
+  test/follow-through.test.ts,project
+tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test test/action.test.ts test/follow-through.test.ts,project,codex-toolchain-1103,"2026-11-03T09:18:57.866Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-82f052e758
+  "node --test --test-name-pattern=\"retained ownership metadata\" test/action.test.ts",project,codex-toolchain-1103,"2026-11-03T09:32:48.345Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-82f052e758
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+body: ""

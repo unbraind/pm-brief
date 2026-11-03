@@ -22,9 +22,9 @@ async function fixture(t: TestContext) {
   const pmRoot = join(workspace, ".agents/pm"); const client = new PmClient({ pmRoot, noExtensions: true, author: "fixture" });
   await client.init("follow", { defaults: true, agentGuidance: "skip", mergeFence: false });
   await client.schemaAddField("brief_follow_through", { type: "object" });
-  const scope = { parent: "none", sprint: "none", release: "none", clearDeps: true };
-  const create = async (title: string, extra: Parameters<PmClient["create"]>[0] = {}) => (await client.create({ title, type: "Task", ...scope, ...extra })).item.id;
-  const update = (id: string, extra: Parameters<PmClient["update"]>[1]) => client.update(id, { ...scope, clearDeps: extra?.dep ? undefined : true, ...extra });
+  const scope = { unset: ["parent", "sprint", "release"] as ("parent" | "sprint" | "release")[], clearDeps: true };
+  const create = async (title: string, extra: Parameters<PmClient["create"]>[0] = {}) => (await client.create({ title, type: "Task", ...scope, ...extra, unset: scope.unset.filter(field => extra[field] === undefined) })).item.id;
+  const update = (id: string, extra: Parameters<PmClient["update"]>[1]) => client.update(id, { ...scope, clearDeps: extra?.dep ? undefined : true, ...extra, unset: scope.unset.filter(field => extra?.[field] === undefined) });
   const options = { pmRoot, client };
   const decision = await create("Adopt the measured approach", { type: "Decision" });
   const observed = await create("Recorded latency measurement", { actualResult: "Latency fell.\r\nSecond measurement. 測定😀" });

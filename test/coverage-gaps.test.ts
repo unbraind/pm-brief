@@ -357,7 +357,9 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
       assert.equal(truncated.ok, true);
       assert.equal(truncated.truncated, true);
       const quietPath = join(outputDir, "delta-quiet.txt");
-      const quiet = await run({ format: "text", output: quietPath }, ["2999-01-01"]);
+      // pm-cli 2026.10.25 GH-1554 validates from < to. Use a bounded
+      // pre-tracker window to retain the empty-output control.
+      const quiet = await run({ format: "text", output: quietPath, until: "1900-01-02" }, ["1900-01-01"]);
       assert.equal(quiet.ok, true);
       assert.equal(quiet.truncated, false);
     } finally {

@@ -227,7 +227,7 @@ try {
     const actionRoot = join(scenarioRoot, ".agents/pm");
     const actionClient = new PmClient({ pmRoot: actionRoot, author: "packed-prior", noExtensions: true });
     await actionClient.schemaAddField("brief_follow_through", { type: "object" });
-    const followScope = { parent: "none", sprint: "none", release: "none", clearDeps: true };
+    const followScope = { unset: ["parent", "sprint", "release"], clearDeps: true };
     const measurement = (await actionClient.create({ title: "Packed latency observation", type: "Task", actualResult: "Measured lower latency", ...followScope })).item.id;
     const choice = (await actionClient.create({ title: "Packed adopted Decision", type: "Decision", ...followScope })).item.id;
     const observation = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "observation", measurement]).stdout) as { item: string; revision: string };
@@ -248,7 +248,7 @@ try {
     const staleFollow = JSON.parse(runPm(scenario, scenarioRoot, ["--json", "brief", "follow-through", choice]).stdout) as DecisionFollowThroughBrief;
     if (staleFollow.outcomes.some(row => row.state !== "unsupported")) throw new Error(`${scenario.name} retained a stale observation judgement`);
     for (const type of ["Decision", "Milestone", "Task"]) {
-      const id = (await actionClient.create({ title: `Explicit native ${type}`, type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", parent: "none", sprint: "none", release: "none", clearDeps: true })).item.id;
+      const id = (await actionClient.create({ title: `Explicit native ${type}`, type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", unset: ["parent", "sprint", "release"], clearDeps: true })).item.id;
       if (type === "Task") {
         await actionClient.claim(id);
         await actionClient.close(id, "Previously completed");
