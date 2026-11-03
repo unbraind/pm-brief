@@ -18,7 +18,7 @@ async function fixture(t: TestContext) {
   t.after(() => rm(workspace, { recursive: true, force: true }));
   const pmRoot = join(workspace, ".agents/pm"); const client = new PmClient({ pmRoot, noExtensions: true, author: "fixture" });
   await client.init("action", { defaults: true, agentGuidance: "skip", mergeFence: false });
-  const create = async (title: string, extra: Parameters<PmClient["create"]>[0] = {}) => (await client.create({ title, type: "Task", parent: "none", sprint: "none", release: "none", ...(extra.dep ? {} : { clearDeps: true }), ...extra })).item.id;
+  const create = async (title: string, extra: Parameters<PmClient["create"]>[0] = {}) => (await client.create({ title, type: "Task", unset: (["parent", "sprint", "release"] as const).filter(field => extra[field] === undefined), ...(extra.dep ? {} : { clearDeps: true }), ...extra })).item.id;
   const item = await create("Selected native action", { resolution: "Recorded large evidence. ".repeat(400), expectedResult: "Expected outcome" });
   return { workspace, pmRoot, client, item, create, options: { pmRoot, client } };
 }
@@ -57,7 +57,7 @@ test("effective policy severity agrees with native admission for every rule, mod
   const reset = async (): Promise<void> => {
     const current = (await f.client.get(f.item, { full: true })).item;
     if (registry.terminal_statuses.has(current.status!)) await f.client.reopen(f.item, "Next severity case");
-    await f.client.update(f.item, { status: registry.open_status, assignee: "none", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", parent: "none", sprint: "none", release: "none", clearDeps: true });
+    await f.client.update(f.item, { status: registry.open_status, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", unset: ["assignee", "parent", "sprint", "release"], clearDeps: true });
   };
   let cases = 0;
   for (const mode of ["refuse", "advise"]) for (const effect of ["refuse", "advise", "warn", undefined] as const) for (const operation of ["claim", "update", "close"]) for (const rule of rules) {
@@ -255,7 +255,7 @@ test("explicit start admission matches native execution across dispatch types an
 test("one preview combines missing close inputs, reverse/missing/external prerequisites and reference-only evidence without mutations", async t => {
   const f = await fixture(t);
   const blocker = await f.create("Unfinished prerequisite", { dep: [`id=${f.item},kind=blocks`] });
-  await f.client.update(f.item, { dep: ["id=action-missing,kind=blocked_by", "id=https://example.com/review/1,kind=blocked_by,source_kind=external"], allowUnresolvedDeps: true, parent: "none", sprint: "none", release: "none" });
+  await f.client.update(f.item, { dep: ["id=action-missing,kind=blocked_by", "id=https://example.com/review/1,kind=blocked_by,source_kind=external"], allowUnresolvedDeps: true, unset: ["parent", "sprint", "release"] });
   await f.client.docs(f.item, { add: ["path=docs/result.md"] });
   await f.client.files(f.item, { add: ["path=action.ts"] });
   await f.client.run("test", { id: f.item, options: { add: ["command=node --version"] } });
@@ -299,7 +299,7 @@ test("SDK lifecycle roles and workflow rules govern custom active, blocked, term
   await f.client.schemaAddStatus("custom-done", { role: ["terminal_done"] });
   await f.client.schemaAddStatus("custom-canceled", { role: ["terminal_canceled"] });
   const terminal = await f.create("Resolved predecessor", { status: "custom-done", closeReason: "Accepted" });
-  await f.client.update(f.item, { status: "custom-active", dep: [`id=${terminal},kind=blocked_by`], parent: "none", sprint: "none", release: "none" });
+  await f.client.update(f.item, { status: "custom-active", dep: [`id=${terminal},kind=blocked_by`], unset: ["parent", "sprint", "release"] });
   let result = await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options);
   assert.equal(result.ready, true, JSON.stringify(result)); assert.ok(result.item.roles.includes("active"));
   assert.equal(result.checklist.find(row => row.key === terminal)?.state, "satisfied");
@@ -312,9 +312,9 @@ test("SDK lifecycle roles and workflow rules govern custom active, blocked, term
   assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).ready, true);
   result = await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options);
   assert.ok(result.checklist.some(row => row.kind === "prerequisite" && row.key === child));
-  await f.client.update(child, { status: "custom-canceled", closeReason: "Canceled", parent: f.item, sprint: "none", release: "none" });
+  await f.client.update(child, { status: "custom-canceled", closeReason: "Canceled", parent: f.item, unset: ["sprint", "release"] });
   assert.ok(!(await buildActionPrerequisiteBrief({ command: "close", item: f.item }, f.options)).checklist.some(row => row.key === child));
-  await f.client.update(f.item, { status: "blocked", blockedReason: "Pending review", parent: "none", sprint: "none", release: "none" });
+  await f.client.update(f.item, { status: "blocked", blockedReason: "Pending review", unset: ["parent", "sprint", "release"] });
   assert.ok(resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema).blocked_statuses.has((await f.client.get(f.item, { full: true })).item.status!));
   assert.equal((await buildActionPrerequisiteBrief({ command: "start-task", item: f.item }, f.options)).ready, true);
   for (const type of ["Decision", "Milestone"]) {
@@ -375,7 +375,7 @@ test("native workflow transition and optional reason governance remain authorita
 
 test("native automatic metadata and composed claim policies cannot be certified from a partial proposed record", async t => {
   const f = await fixture(t);
-  await f.client.update(f.item, { actualResult: "Observed", parent: "none", sprint: "none", release: "none" });
+  await f.client.update(f.item, { actualResult: "Observed", unset: ["parent", "sprint", "release"] });
   await f.client.claim(f.item, { author: "fixture" });
   await f.client.workflowPolicy("policy-mode", "refuse");
   for (const rule of [{ kind: "field_writers", fields: ["assignee"], authors: ["reviewer"] }, { kind: "require_fields", fields: ["assignee"] }]) {
@@ -416,9 +416,9 @@ test("competing native writes at either corpus-read boundary cause a typed retry
     const original = competing.listAllComplete.bind(competing);
     competing.listAllComplete = async options => {
       reads++;
-      if (boundary === 2 && reads === 2) await f.client.update(f.item, { description: "Peer changed second boundary", parent: "none", sprint: "none", release: "none" });
+      if (boundary === 2 && reads === 2) await f.client.update(f.item, { description: "Peer changed second boundary", unset: ["parent", "sprint", "release"] });
       const result = await original(options);
-      if (boundary === 1 && reads === 1) await f.client.update(f.item, { description: "Peer changed first boundary", parent: "none", sprint: "none", release: "none" });
+      if (boundary === 1 && reads === 1) await f.client.update(f.item, { description: "Peer changed first boundary", unset: ["parent", "sprint", "release"] });
       return result;
     };
     await assert.rejects(buildActionPrerequisiteBrief({ command: "close", item: f.item }, { pmRoot: f.pmRoot, client: competing }), refusal("changed"));
@@ -485,9 +485,9 @@ test("seeded 500 operation sequences replay old requests across whitespace, fiel
     const status = statuses[random(statuses.length)];
     const field = fields[random(fields.length)]; const fieldValue = values[random(values.length)];
     if (sequence % 8 === 0) {
-      await f.client.update(predecessor, { status, closeReason: "Model lifecycle", parent: "none", sprint: "none", release: "none" });
+      await f.client.update(predecessor, { status, closeReason: "Model lifecycle", unset: ["parent", "sprint", "release"] });
       await f.client.focus(predecessor);
-      await f.client.update(f.item, { [field]: fieldValue, dep: [`id=${predecessor},kind=blocked_by`], parent: "none", sprint: "none", release: "none" });
+      await f.client.update(f.item, { [field]: fieldValue, dep: [`id=${predecessor},kind=blocked_by`], unset: ["parent", "sprint", "release"] });
     }
     const current = (await f.client.get(f.item, { full: true })).item;
     const request: ActionPrerequisiteRequest = { command: "close", item: f.item, input: { [fields[random(fields.length)]]: values[random(values.length)] }, tokenBudget: 64000 };

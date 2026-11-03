@@ -2,10 +2,19 @@ id: pm-brief-yanp
 title: Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI
 description: "Tracks gh:unbraind/pm-brief#193 (filed 2026-10-28, missed by the blind issue watch). test/coverage-gaps.test.ts:360 (and brief.test.ts since-fixtures) manufacture an empty activity window with the lower bound 2999-01-01; the host activity command rejects --from after --to with invalid_argument_value ('Activity --from must be before --to') once the dev toolchain moves to SDK 2026.10.25 or newer. Main still pins 2026.10.24 and is green, so the defect only surfaces on the pending toolchain bump PR (#192), whose four gates currently fail on it (latest run 41316901703). Fix by replacing the future-date fixture with a bounded past window (or an explicit empty-window construction the host accepts) without weakening the quiet-output assertions; then reland the toolchain update."
 type: Issue
-status: open
+status: in_progress
 priority: 2
-tags[3]: ci,"gh:unbraind/pm-brief#193",toolchain
+tags[4]: ci,"gh:unbraind/pm-brief#192","gh:unbraind/pm-brief#193",toolchain
 created_at: "2026-11-02T09:16:26.337Z"
-updated_at: "2026-11-02T09:16:26.337Z"
+updated_at: "2026-11-03T10:06:12.639Z"
 author: pi-glm
+comments[2]{created_at,author,text}:
+  "2026-11-03T10:03:26.178Z",codex-toolchain-1103,"The bounded npm test run exposed the existing GH-193 fixture failure: brief since passed activity --from 2999-01-01 with implicit --to now, rejected as invalid_argument_value (Activity --from must be before --to). Root cause: pm-cli 2026.10.25 GH-1554 stable bounded activity window validation. Classification: test contract drift. Replace only this activity empty-window control with 1900-01-01 through 1900-01-02, before tracker history, retaining quiet ok=true and truncated=false assertions. Duplicate-list future since filters have no activity upper bound and remain valid empty-selection controls, so they are unchanged."
+  "2026-11-03T10:06:07.092Z",codex-toolchain-1103,"The corrected bounded past-window test passes 1/1 directly (node --test --test-name-pattern=\"brief since requires a checkpoint\" test/coverage-gaps.test.ts), including until/text/slack outputs, quiet ok=true and truncated=false; it also passes through pm test. Typecheck, build:test and docstring pass after the fixture change. This is a test-only update; no activity admission behavior or duplicate since filters were changed. Leave open for coordinator verification."
+files[1]{path,scope}:
+  test/coverage-gaps.test.ts,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  "node --test --test-name-pattern=\"brief since requires a checkpoint\" test/coverage-gaps.test.ts",project,codex-toolchain-1103,"2026-11-03T10:03:38.809Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-82f052e758
+docs[1]{path,scope}:
+  CHANGELOG.md,project
 body: ""
