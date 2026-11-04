@@ -1,0 +1,29 @@
+id: pm-brief-toolchain-1104
+title: Adapt brief host contracts to the November 4 toolchain
+description: "Verify current failures on the newest pm toolchain for https://github.com/unbraind/pm-brief/pull/204. Prior completed migrations remain closed; preserve all assertions and thresholds."
+type: Chore
+status: in_progress
+priority: 2
+tags[4]: dependencies,"gh:unbraind/pm-brief#204",migration,sdk
+created_at: "2026-11-04T19:11:30.676Z"
+updated_at: "2026-11-04T23:08:38.589Z"
+author: codex-toolchain-1104
+acceptance_criteria: "Reproduce each failure in its test file; classify upstream contract changes; pass focused tests, full coverage and typecheck; regenerate tracked build and changelog."
+comments[7]{created_at,author,text}:
+  "2026-11-04T19:17:13.074Z",codex-toolchain-1104,"Installed SDK/ops 2026.11.4 with changelog 2026.10.31 after merging current main. Changelog check already passes; do not apply the empty-window policy used by other packages. Reproducing brief.test.ts, action.test.ts and read-output-host.test.ts separately before the full coverage run. Keep prior completed fixture migrations closed."
+  "2026-11-04T19:33:38.498Z",codex-toolchain-1104,"Verified hosted logs and local action.test.ts: the retained-owner fixture expects claim_principal=prior-agent after close/reopen, but gets undefined. Root cause: pm-cli 2026.10.31 pm-8xgg7i intentionally clears orphan claim metadata (classification: test). Assert the exact new clear contract and preserve stale-principal/no-assignee coverage by importing a valid legacy record through commitImportedItem, then exercise unchanged previews and native start/close for both current and legacy records. Keep the live-assignee refusal controls."
+  "2026-11-04T19:36:14.813Z",codex-toolchain-1104,"Ownership regression passes through pm test. Six enforcement-mode/actor combinations now each exercise both a freshly reopened native record with cleared claim_principal and an SDK-imported legacy record retaining prior-agent without an assignee. Preview byte-preservation, native start/close success and live-assignee refusals remain asserted. Main brief.test.ts passed 245/245; typecheck passes; no lint script is declared."
+  "2026-11-04T19:51:28.557Z",codex-toolchain-1104,"The repaired ownership regression passes on Node 22.23.4 and Node 26.13.0 (one selected test on each), as well as via pm test on Node 24.19.0. Packaged host output tests pass 13/13 and the main brief file passes 245/245. All original action-file failures were the cleared-principal assertion now replaced with both native-clear and legacy-import controls. Test compilation, production audit, typecheck and strict health pass. Full coverage remains queued."
+  "2026-11-04T20:53:02.766Z",codex-toolchain-1104,"Strengthened the migrated ownership regression to assert both ownership fields are cleared immediately after native close, as well as after reopen. The imported legacy record still retains prior-agent without an assignee, preserving the original stale-owner control. Updated focused case passes again on Node 22 and Node 26; test compilation passes."
+  "2026-11-04T23:08:34.594Z",codex-toolchain-1104,"Remaining local gate blocker: on SDK 2026.11.4 and Node 24.19.0, npm run coverage exceeded the 2400-second linked-test limit. The recorded-dependency 500-sequence model in test/handoff-coverage.test.ts and the contract/acknowledgment/renewal 500-sequence model in test/handoff-repair.test.ts each also reached its existing 900-second test deadline. Later files were interrupted, so there is no complete full-suite count or valid final coverage claim. These runtime-limit failures are not classified as SDK semantic regressions without a controlled reproduction; no production workaround, reduced sequence count, timeout increase or threshold change is applied. Diagnose the two long model cases and complete the full gate in follow-up verification. The package budget prevents another long run in this task."
+  "2026-11-04T23:08:36.847Z",codex-toolchain-1104,"Verified migration result: the native close/reopen ownership regression passes on Node 22 and Node 26 with both ownership fields cleared immediately after close and after reopen. A real SDK-imported legacy record retains stale principal/no-assignee controls across all six enforcement-mode/actor combinations; preview byte-preservation, native start/close and live-assignee refusals remain asserted. The main brief file passes 245/245 and packaged-host output tests pass 13/13 separately. Typecheck, test compilation, build, docstrings, production audit, workflow verification, strict health, changelog checks, publish-attestation verification and pack dry-run pass; no lint script is declared. Existing coverage thresholds remain lines 100, functions 100, branches 97.85. Push the verified pm-8xgg7i test-contract fix and leave this item in progress with full coverage incomplete."
+files[3]{path,scope}:
+  package-lock.json,project
+  package.json,project
+  test/action.test.ts,project
+tests[2]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  nice -n 10 env NPM_CONFIG_USERCONFIG=/dev/null npm run coverage,project,2400,codex-toolchain-1104,"2026-11-04T19:26:32.286Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-e75a7720a9
+  "nice -n 10 node --test --test-name-pattern=\"native close clears ownership\" test/action.test.ts",project,600,codex-toolchain-1104,"2026-11-04T19:33:42.538Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-e75a7720a9
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+body: ""
