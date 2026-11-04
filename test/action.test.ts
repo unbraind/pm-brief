@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "n
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
-import { PmClient, locateItem, readSettings, readWorkflowPolicies, writeSettings, resolveRuntimeStatusRegistry, evaluateWorkflowPolicies, createLifecycleCompletenessPolicies, estimatePmOutputTokens, resolveItemTypeRegistry, resolveTypeDefinition, resolveCommandOptionPolicyState, canonicalizeCommandOptionKey, COMMON_MUTATION_COMMAND_OPTION_KEYS, computeActionabilityReport, writeWorkspaceJsonWithHistory, resolveItemTypesFilePath } from "@unbrained/pm-cli/sdk";
+import { PmClient, locateItem, readLocatedItem, getItemPath, commitImportedItem, readSettings, readWorkflowPolicies, writeSettings, resolveRuntimeStatusRegistry, evaluateWorkflowPolicies, createLifecycleCompletenessPolicies, estimatePmOutputTokens, resolveItemTypeRegistry, resolveTypeDefinition, resolveCommandOptionPolicyState, canonicalizeCommandOptionKey, COMMON_MUTATION_COMMAND_OPTION_KEYS, computeActionabilityReport, writeWorkspaceJsonWithHistory, resolveItemTypesFilePath } from "@unbrained/pm-cli/sdk";
 import type { WorkflowPolicy } from "@unbrained/pm-cli/sdk";
 import { createExtensionTestHarness } from "@unbrained/pm-cli/sdk/testing";
 import extension, { buildActionPrerequisiteBrief, parseActionPrerequisiteRequest, ActionPrerequisiteError } from "../index.ts";
@@ -196,26 +196,40 @@ test("composed start admission checks every SDK type command option policy befor
   t.diagnostic(JSON.stringify({ nativeUpdateOptionKeys: options.length, policyStates: "required,disabled,hidden,contradictory,create-only" }));
 });
 
-test("retained ownership metadata never denies either action without a live assignee", async t => {
+test("native close clears ownership and imported stale metadata never denies actions without a live assignee", async t => {
   const f = await fixture(t);
   for (const mode of ["none", "warn", "strict"]) for (const actor of ["new-agent-a", "new-agent-b"]) {
     await f.client.config("project", "set", "governance_ownership_enforcement", mode);
     const id = await f.create(`Recurred work ${mode} ${actor}`, { resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
     await f.client.claim(id, { author: "prior-agent" });
     await f.client.close(id, "Previously completed", { author: "prior-agent" });
+    const closed = (await f.client.get(id, { full: true })).item;
+    assert.equal(closed.assignee, undefined); assert.equal(closed.claim_principal, undefined);
     await f.client.reopen(id, "Newly recurring work", { author: actor });
     const item = (await f.client.get(id, { full: true })).item;
-    assert.equal(item.assignee, undefined); assert.equal(item.claim_principal, "prior-agent");
-    const before = await snapshot(f.pmRoot);
-    for (const command of ["start-task", "close"]) {
-      const result = await buildActionPrerequisiteBrief({ command, item: id, actor, ...(command === "close" ? { input: { reason: "Reverified", resolution: "Resolved again", expectedResult: "Expected", actualResult: "Observed" } } : {}) }, f.options);
-      assert.equal(result.ready, true, JSON.stringify(result));
-      assert.ok(!result.checklist.some(row => row.key === "ownership"));
+    // pm-cli 2026.10.31 (pm-8xgg7i) clears both ownership fields on close.
+    assert.equal(item.assignee, undefined); assert.equal(item.claim_principal, undefined);
+    // Import a valid pre-fix record through the SDK to retain the stale-owner control.
+    const located = await locateItem(f.pmRoot, id); assert.ok(located);
+    const { document } = await readLocatedItem(located);
+    const importedId = `${id}-legacy`;
+    document.metadata.id = importedId; document.metadata.claim_principal = "prior-agent";
+    const imported = await commitImportedItem({ pmRoot: f.pmRoot, id: importedId, itemPath: getItemPath(f.pmRoot, "Task", importedId), document, author: "fixture", message: "Import legacy unassigned claim", settings: await readSettings(f.pmRoot), conflictWarningPrefix: "fixture_import_conflict" });
+    assert.equal(imported.committed, true);
+    const stale = (await f.client.get(importedId, { full: true })).item;
+    assert.equal(stale.assignee, undefined); assert.equal(stale.claim_principal, "prior-agent");
+    for (const target of [id, importedId]) {
+      const before = await snapshot(f.pmRoot);
+      for (const command of ["start-task", "close"]) {
+        const result = await buildActionPrerequisiteBrief({ command, item: target, actor, ...(command === "close" ? { input: { reason: "Reverified", resolution: "Resolved again", expectedResult: "Expected", actualResult: "Observed" } } : {}) }, f.options);
+        assert.equal(result.ready, true, JSON.stringify(result));
+        assert.ok(!result.checklist.some(row => row.key === "ownership"));
+      }
+      assert.deepEqual(await snapshot(f.pmRoot), before);
+      await f.client.startTask(target, { author: actor });
+      assert.equal((await f.client.get(target, { full: true })).item.assignee, actor);
+      await f.client.close(target, "Reverified", { author: actor, resolution: "Resolved again", expectedResult: "Expected", actualResult: "Observed" });
     }
-    assert.deepEqual(await snapshot(f.pmRoot), before);
-    await f.client.startTask(id, { author: actor });
-    assert.equal((await f.client.get(id, { full: true })).item.assignee, actor);
-    await f.client.close(id, "Reverified", { author: actor, resolution: "Resolved again", expectedResult: "Expected", actualResult: "Observed" });
   }
   const legacy = await f.create("Previously persisted assignee without principal", { assignee: "prior-agent", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
   assert.equal((await f.client.get(legacy, { full: true })).item.claim_principal, undefined);
