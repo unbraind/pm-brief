@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI ([pm-brief-yanp](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-yanp.toon))
+
+### Other
+
+- Adapt native admission fixtures to the pm-toolchain SDK contract ([pm-brief-3y2c](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-3y2c.toon))
+
 ## 2026.10.29 - 2026-10-29
 
 ### Added
