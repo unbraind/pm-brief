@@ -2,12 +2,17 @@ id: pm-brief-3y2c
 title: Adapt native admission fixtures to the pm-toolchain SDK contract
 description: ""
 type: Chore
-status: in_progress
+status: closed
 priority: 2
 tags[4]: dependencies,"gh:unbraind/pm-brief#192",migration,sdk
 created_at: "2026-11-03T09:15:52.227Z"
-updated_at: "2026-11-03T10:06:14.391Z"
+updated_at: "2026-11-04T05:37:26.779Z"
+closed_at: "2026-11-04T05:37:26.764Z"
+completed_at: "2026-11-04T05:37:26.764Z"
 author: codex-toolchain-1103
+resolution: Implemented and merged in #192 (a4f1197).
+expected_result: The change described by this item is on main.
+actual_result: "Merged in #192 as a4f1197; checks successful at head a579e73: CodeQL, audit-windows, codeql, enable-auto-merge, release-gate (bun), release-gate (npm), semgrep-cloud-platform/scan, test (22), test (26)."
 comments[3]{created_at,author,text}:
   "2026-11-03T09:18:32.635Z",codex-toolchain-1103,"Reproduced both reported action tests on the actual 2026.10.30 pin. Neither reaches policy admission: fixture client.create rejects parent:\"none\" with --parent must not use placeholder token none; use --unset parent. Root cause: pm-cli 2026.10.30 GH-1614 typed SDK data stays literal. Classification: test and packed-acceptance fixture contract drift. Replace absent parent/sprint/release with typed unset, and clear assignee using unset during matrix reset (literal none is now a real assignee). Preserve explicit parents in positive controls. Apply the same correction to follow-through fixtures and packed scenarios; retain all native policy/parity assertions, then rerun them to detect any independent admission change."
   "2026-11-03T09:55:50.416Z",codex-toolchain-1103,"Validation so far: npm test -- --test-concurrency=2 builds and typechecks the test graph after correcting the literal field fixture types. Native retained-ownership admission passes through pm test; explicit start roles, close roles, policy advisories, workflow authority, partial-record capability refusals and competing-writer checks also pass. The 120-case severity matrix reaches its existing 600000ms deadline; the full command-option matrix reaches 180000ms on both Node and Bun; the 500-sequence property reaches 300000ms. No deadlines or assertions were widened. Memory-backed temporary trackers and disabled provenance probes are diagnostic runs only; neither is evidence of a passing matrix yet. The original refusal is confirmed GH-1614 parent:none at fixture create, not a changed policy decision. Full exact-head acceptance remains a CI requirement."
@@ -21,4 +26,5 @@ tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   "node --test --test-name-pattern=\"retained ownership metadata\" test/action.test.ts",project,codex-toolchain-1103,"2026-11-03T09:32:48.345Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-82f052e758
 docs[1]{path,scope}:
   CHANGELOG.md,project
+close_reason: "Delivered by #192 \"chore(deps-dev): bump the pm-toolchain group across 1 directory with 3 updates\" (merged as a4f1197). Checks successful at the PR head a579e73: CodeQL, audit-windows, codeql, enable-auto-merge, release-gate (bun), release-gate (npm), semgrep-cloud-platform/scan, test (22), test (26)."
 body: ""
