@@ -271,6 +271,22 @@ try {
         if (legacy.assignee !== undefined || legacy.claim_principal !== "packed-prior") throw new Error(`${scenario.name} legacy ownership fixture was not retained`);
         targets.push(legacyId);
         await actionClient.config("project", "set", "governance_ownership_enforcement", "strict");
+        // Close must execute against its own still-unassigned stale record.
+        const { document: closeDocument } = await readLocatedItem(located);
+        const closeId = `${id}-legacy-close`;
+        closeDocument.metadata.id = closeId; closeDocument.metadata.claim_principal = "packed-prior";
+        const closeImported = await commitImportedItem({ pmRoot: actionRoot, id: closeId, itemPath: getItemPath(actionRoot, "Task", closeId), document: closeDocument, author: "packed-setup", message: "Import independent legacy close control", settings: await readSettings(actionRoot), conflictWarningPrefix: "packed_import_close_conflict" });
+        if (!closeImported.committed) throw new Error(`${scenario.name} independent close import failed`);
+        const closeBefore = runPm(scenario, scenarioRoot, ["--json", "get", closeId, "--full"]).stdout;
+        for (const format of ["json", "toon"]) {
+          const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", "close", closeId, "--request", JSON.stringify({ actor: "packed-next", input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } })]);
+          if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} independent close preview disagreed with native admission`);
+        }
+        if (runPm(scenario, scenarioRoot, ["--json", "get", closeId, "--full"]).stdout !== closeBefore) throw new Error(`${scenario.name} independent close preview mutated state`);
+        const staleClose = (await actionClient.get(closeId, { full: true })).item;
+        if (staleClose.assignee !== undefined || staleClose.claim_principal !== "packed-prior") throw new Error(`${scenario.name} independent close lost its stale unassigned control`);
+        runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "close", closeId, "Reviewed", "--resolution", "Resolved", "--expected-result", "Expected", "--actual-result", "Observed"]);
+        if ((await actionClient.get(closeId, { full: true })).item.status !== "closed") throw new Error(`${scenario.name} independent close did not close the record`);
       }
       for (const target of targets) {
         const before = runPm(scenario, scenarioRoot, ["--json", "get", target, "--full"]).stdout;

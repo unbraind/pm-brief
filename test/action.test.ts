@@ -245,6 +245,32 @@ test("native close clears ownership and imported stale metadata never denies act
   await assert.rejects(f.client.close(legacy, "Reviewed", { author: "different-agent" }), /assign|claim|owner/i);
 });
 
+test("direct native close accepts an independent unassigned stale principal without starting or claiming", async t => {
+  const f = await fixture(t);
+  const located = await locateItem(f.pmRoot, f.item); assert.ok(located);
+  for (const mode of ["none", "warn", "strict"]) for (const actor of ["new-agent-a", "new-agent-b"]) {
+    await f.client.config("project", "set", "governance_ownership_enforcement", mode);
+    const { document } = await readLocatedItem(located);
+    const id = `${f.item}-close-${mode}-${actor}`;
+    document.metadata.id = id; document.metadata.claim_principal = "prior-agent";
+    const imported = await commitImportedItem({ pmRoot: f.pmRoot, id, itemPath: getItemPath(f.pmRoot, "Task", id), document, author: "fixture", message: "Import independent legacy close control", settings: await readSettings(f.pmRoot), conflictWarningPrefix: "fixture_import_close_conflict" });
+    assert.equal(imported.committed, true);
+    const before = await snapshot(f.pmRoot);
+    const input = { reason: "Reverified", resolution: "Resolved again", expectedResult: "Expected", actualResult: "Observed" };
+    const preview = await buildActionPrerequisiteBrief({ command: "close", item: id, actor, input }, f.options);
+    assert.equal(preview.ready, true, JSON.stringify(preview));
+    assert.ok(!preview.checklist.some(row => row.key === "ownership"));
+    assert.deepEqual(await snapshot(f.pmRoot), before);
+    const stale = (await f.client.get(id, { full: true })).item;
+    assert.equal(stale.assignee, undefined); assert.equal(stale.claim_principal, "prior-agent");
+    await f.client.close(id, input.reason, { author: actor, ...input });
+    const closed = (await f.client.get(id, { full: true })).item;
+    assert.equal(closed.status, "closed");
+    assert.equal(closed.assignee, undefined); assert.equal(closed.claim_principal, undefined);
+  }
+  t.diagnostic("Independent direct close: 3 enforcement modes x 2 actors; no startTask or claim on the imported records");
+});
+
 test("explicit start admission matches native execution across dispatch types and status roles", async t => {
   const f = await fixture(t);
   let seed = 0x1892026;

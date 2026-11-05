@@ -4,12 +4,12 @@ description: "Verify current failures on the newest pm toolchain for https://git
 type: Chore
 status: in_progress
 priority: 2
-tags[4]: dependencies,"gh:unbraind/pm-brief#204",migration,sdk
+tags[5]: dependencies,"gh:unbraind/pm-brief#204","gh:unbraind/pm-brief#207",migration,sdk
 created_at: "2026-11-04T19:11:30.676Z"
-updated_at: "2026-11-05T06:19:46.650Z"
+updated_at: "2026-11-05T09:20:16.947Z"
 author: codex-toolchain-1104
 acceptance_criteria: "Reproduce each failure in its test file; classify upstream contract changes; pass focused tests, full coverage and typecheck; regenerate tracked build and changelog."
-comments[12]{created_at,author,text}:
+comments[16]{created_at,author,text}:
   "2026-11-04T19:17:13.074Z",codex-toolchain-1104,"Installed SDK/ops 2026.11.4 with changelog 2026.10.31 after merging current main. Changelog check already passes; do not apply the empty-window policy used by other packages. Reproducing brief.test.ts, action.test.ts and read-output-host.test.ts separately before the full coverage run. Keep prior completed fixture migrations closed."
   "2026-11-04T19:33:38.498Z",codex-toolchain-1104,"Verified hosted logs and local action.test.ts: the retained-owner fixture expects claim_principal=prior-agent after close/reopen, but gets undefined. Root cause: pm-cli 2026.10.31 pm-8xgg7i intentionally clears orphan claim metadata (classification: test). Assert the exact new clear contract and preserve stale-principal/no-assignee coverage by importing a valid legacy record through commitImportedItem, then exercise unchanged previews and native start/close for both current and legacy records. Keep the live-assignee refusal controls."
   "2026-11-04T19:36:14.813Z",codex-toolchain-1104,"Ownership regression passes through pm test. Six enforcement-mode/actor combinations now each exercise both a freshly reopened native record with cleared claim_principal and an SDK-imported legacy record retaining prior-agent without an assignee. Preview byte-preservation, native start/close success and live-assignee refusals remain asserted. Main brief.test.ts passed 245/245; typecheck passes; no lint script is declared."
@@ -22,15 +22,28 @@ comments[12]{created_at,author,text}:
   "2026-11-05T05:42:59.940Z",codex-toolchain-1104,"The exact Bun packed command first reproduced npm-current legacy ownership fixture was not retained. The repaired sequential run has advanced past npm-current and bun-current into npm-minimum, retaining both native-clear and separately imported stale-principal controls in the packed artifact. The retained unit regression passes again through pm test (one selected test, six mode/actor combinations); typecheck, test compilation, build, docstrings and changelog checks pass. No lint script exists. Full coverage is now the only queued full suite; its original thresholds and model deadlines remain unchanged. The unpublished branch carries all earlier agent changes with inherited trees preserved during author normalization."
   "2026-11-05T06:00:16.408Z",codex-toolchain-1104,"The repaired exact Bun packed command reached its 2400-second linked-test bound. Its sequential loop completed npm-current, bun-current, npm-minimum, npm-global and bun-global, then started npx-ephemeral; bunx-ephemeral was not reached and no final seven-scenario receipt exists. All assertions and all seven default scenarios remain. This is incomplete local acceptance evidence, not a green full gate or a proven SDK regression. The full npm coverage gate is still running with the original model deadlines and thresholds."
   "2026-11-05T06:19:44.828Z",codex-toolchain-1104,"At the approximately 75-minute repo budget, stopped the full npm coverage attempt after 2162 seconds, preserving PM output capture. Partial output records three unchanged test deadlines: the effective-policy severity matrix at 600000 ms and both 500-sequence handoff models at 900000 ms. There is no final test count and no valid final coverage receipt; partial LCOV is invalidated. The focused native/legacy ownership test passes and the repaired packed loop completed five acquisition scenarios before its separate 2400-second bound. These local deadline failures do not establish a new SDK semantic regression. Preserve all scenarios, assertions, model sequence counts and thresholds; publish the verified pm-8xgg7i fixture correction for exact-head CI and orchestrator verification."
-files[4]{path,scope}:
-  package-lock.json,project
-  package.json,project
-  scripts/accept-packed.ts,project
-  test/action.test.ts,project
-tests[3]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+  "2026-11-05T09:12:30.329Z",codex-agent,"Review round for PR 207: fetched all review threads and comments (one unresolved: PRRT_kwDOSzIO-c6z9ytC; pagination complete), and the latest CodeRabbit review has no Outside diff range section. Branch matches remote and includes current main. Valid finding: startTask changes ownership before existing close execution. Add independent imported stale-principal direct-close fixtures across all modes and actors; inspect packed acceptance for the same sequencing gap. Preserve existing previews, start assertions, live-owner refusal controls and thresholds. Prove added coverage with an isolated stale-principal close regression, then run both full release gates. No thread replies or resolutions."
+  "2026-11-05T09:20:09.903Z",codex-agent,"Resolved PRRT_kwDOSzIO-c6z9ytC in code: added a separate real non-git tracker regression with six independent imported close records (none/warn/strict x two actors). Each record retains prior-agent and no assignee immediately before direct close; no startTask or claim runs on those records. Assert ready ownership-free preview, unchanged tracker snapshot, successful native close and cleared ownership. Existing start/preview cases and live-owner refusal controls are unchanged. Whole-PR self-review found the same missing direct-close execution in scripts/accept-packed.ts: added a separate stale record, JSON/TOON previews with no mutation, pre-close stale/unassigned assertions, actual installed-host close and terminal-status assertion for every one of seven acquisition scenarios. No other instance found."
+  "2026-11-05T09:20:12.762Z",codex-agent,"Behavioral revert proof for this test-only review finding: in a disposable code/dependency copy, injected stale-principal/no-assignee rejection into only the bundled native mutateCloseMetadata function used by the SDK. Existing ownership regression still PASSED 1/1; new independent direct-close regression FAILED 0/1 with review207_stale_principal_close_regression. Selecting the pre-fix regression alone reproduces the coverage hole. Restored both bundled SDK function copies in finally, then reran both regressions: PASSED 2/2, zero failed/skipped. No installed dependency or reviewed source was mutated for the proof. There is no changed production function to revert in this coverage-only correction."
+  "2026-11-05T09:20:14.870Z",codex-agent,"Local validation: pinned pm test run of node --test --test-concurrency=2 --test-name-pattern=\"native close clears ownership|direct native close\" test/action.test.ts PASSED 2/2, zero failed/skipped (six independent direct-close combinations). Typecheck, test compilation, changelog generation/check and strict health with required merge drivers pass. Full npm and Bun release commands are linked unchanged; validate the final pushed head through both CI release-gate jobs and report their exact counts. A local npm full-gate attempt uses a fresh HOME and disabled global/system Git configuration to reproduce CI identity; any shared-host timeout remains incomplete local evidence until CI passes. All model counts, deadlines, seven packed scenarios and thresholds remain unchanged: lines 100, functions 100, branches 97.85. dist is generated and ignored, with no tracked dist files. Greptile is unavailable (trial ended); skipped reviewer checks are not approval. Leave item in progress and release this claim for orchestrator verification."
+files[4]:
+  - path: package-lock.json
+    scope: project
+  - path: package.json
+    scope: project
+  - path: scripts/accept-packed.ts
+    scope: project
+    note: Independent direct close through every installed host launcher
+  - path: test/action.test.ts
+    scope: project
+    note: Independent stale-principal close regression
+tests[6]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
   nice -n 10 env NPM_CONFIG_USERCONFIG=/dev/null npm run coverage,project,2400,codex-toolchain-1104,"2026-11-04T19:26:32.286Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-e75a7720a9
   "nice -n 10 node --test --test-name-pattern=\"native close clears ownership\" test/action.test.ts",project,600,codex-toolchain-1104,"2026-11-04T19:33:42.538Z",local_mutation,dependabot/npm_and_yarn/pm-toolchain-e75a7720a9
   "NPM_CONFIG_USERCONFIG=/dev/null nice -n 10 bun run accept:packed",project,2400,codex-toolchain-1104,"2026-11-05T05:13:44.951Z",local_mutation,fix/toolchain-2026-11-4
+  "node --test --test-concurrency=2 --test-name-pattern=\"native close clears ownership|direct native close\" test/action.test.ts",project,900,codex-agent,"2026-11-05T09:13:54.881Z",local_mutation,fix/toolchain-2026-11-4
+  "npm run release:check",project,14400,codex-agent,"2026-11-05T09:15:43.336Z",local_mutation,fix/toolchain-2026-11-4
+  "bun run release:check",project,14400,codex-agent,"2026-11-05T09:15:48.639Z",local_mutation,fix/toolchain-2026-11-4
 docs[1]{path,scope}:
   CHANGELOG.md,project
 body: ""
