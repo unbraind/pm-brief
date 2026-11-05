@@ -7,7 +7,7 @@ import type { DecisionAlternativesDigest } from "../alternatives.ts";
 import type { DisclosureResult } from "../disclosure.ts";
 import type { ActionPrerequisiteBrief } from "../action.ts";
 import type { DecisionFollowThroughBrief } from "../follow-through.ts";
-import { PmClient, readSettings, readWorkflowPolicies, writeSettings, resolveItemTypeRegistry, resolveItemTypesFilePath, writeWorkspaceJsonWithHistory } from "@unbrained/pm-cli/sdk";
+import { PmClient, locateItem, readLocatedItem, getItemPath, commitImportedItem, readSettings, readWorkflowPolicies, writeSettings, resolveItemTypeRegistry, resolveItemTypesFilePath, writeWorkspaceJsonWithHistory } from "@unbrained/pm-cli/sdk";
 
 /** Package fields that define the packed acceptance matrix. */
 interface PackageContract {
@@ -249,22 +249,55 @@ try {
     if (staleFollow.outcomes.some(row => row.state !== "unsupported")) throw new Error(`${scenario.name} retained a stale observation judgement`);
     for (const type of ["Decision", "Milestone", "Task"]) {
       const id = (await actionClient.create({ title: `Explicit native ${type}`, type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed", unset: ["parent", "sprint", "release"], clearDeps: true })).item.id;
+      const targets = [id];
       if (type === "Task") {
         await actionClient.claim(id);
         await actionClient.close(id, "Previously completed");
+        const closed = (await actionClient.get(id, { full: true })).item;
+        if (closed.assignee !== undefined || closed.claim_principal !== undefined) throw new Error(`${scenario.name} native close retained ownership`);
         await actionClient.reopen(id, "Recurred work");
-        const legacy = (await actionClient.get(id, { full: true })).item;
-        if (legacy.assignee || legacy.claim_principal !== "packed-prior") throw new Error(`${scenario.name} legacy ownership fixture was not retained`);
+        const reopened = (await actionClient.get(id, { full: true })).item;
+        if (reopened.assignee !== undefined || reopened.claim_principal !== undefined) throw new Error(`${scenario.name} native reopen restored ownership`);
+        // pm-cli 2026.10.31 pm-8xgg7i clears native ownership. Import an independent
+        // pre-fix record to retain the stale-principal/no-assignee control.
+        const located = await locateItem(actionRoot, id);
+        if (!located) throw new Error(`${scenario.name} native ownership fixture is missing`);
+        const { document } = await readLocatedItem(located);
+        const legacyId = `${id}-legacy`;
+        document.metadata.id = legacyId; document.metadata.claim_principal = "packed-prior";
+        const imported = await commitImportedItem({ pmRoot: actionRoot, id: legacyId, itemPath: getItemPath(actionRoot, "Task", legacyId), document, author: "packed-setup", message: "Import legacy unassigned claim", settings: await readSettings(actionRoot), conflictWarningPrefix: "packed_import_conflict" });
+        if (!imported.committed) throw new Error(`${scenario.name} legacy ownership import failed`);
+        const legacy = (await actionClient.get(legacyId, { full: true })).item;
+        if (legacy.assignee !== undefined || legacy.claim_principal !== "packed-prior") throw new Error(`${scenario.name} legacy ownership fixture was not retained`);
+        targets.push(legacyId);
         await actionClient.config("project", "set", "governance_ownership_enforcement", "strict");
+        // Close must execute against its own still-unassigned stale record.
+        const { document: closeDocument } = await readLocatedItem(located);
+        const closeId = `${id}-legacy-close`;
+        closeDocument.metadata.id = closeId; closeDocument.metadata.claim_principal = "packed-prior";
+        const closeImported = await commitImportedItem({ pmRoot: actionRoot, id: closeId, itemPath: getItemPath(actionRoot, "Task", closeId), document: closeDocument, author: "packed-setup", message: "Import independent legacy close control", settings: await readSettings(actionRoot), conflictWarningPrefix: "packed_import_close_conflict" });
+        if (!closeImported.committed) throw new Error(`${scenario.name} independent close import failed`);
+        const closeBefore = runPm(scenario, scenarioRoot, ["--json", "get", closeId, "--full"]).stdout;
+        for (const format of ["json", "toon"]) {
+          const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", "close", closeId, "--request", JSON.stringify({ actor: "packed-next", input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } })]);
+          if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} independent close preview disagreed with native admission`);
+        }
+        if (runPm(scenario, scenarioRoot, ["--json", "get", closeId, "--full"]).stdout !== closeBefore) throw new Error(`${scenario.name} independent close preview mutated state`);
+        const staleClose = (await actionClient.get(closeId, { full: true })).item;
+        if (staleClose.assignee !== undefined || staleClose.claim_principal !== "packed-prior") throw new Error(`${scenario.name} independent close lost its stale unassigned control`);
+        runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "close", closeId, "Reviewed", "--resolution", "Resolved", "--expected-result", "Expected", "--actual-result", "Observed"]);
+        if ((await actionClient.get(closeId, { full: true })).item.status !== "closed") throw new Error(`${scenario.name} independent close did not close the record`);
       }
-      const before = runPm(scenario, scenarioRoot, ["--json", "get", id, "--full"]).stdout;
-      for (const command of (type === "Task" ? ["start-task", "close"] : ["start-task"])) for (const format of ["json", "toon"]) {
-        const request = { actor: "packed-next", ...(command === "close" ? { input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } } : {}) };
-        const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", command, id, "--request", JSON.stringify(request)]);
-        if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} explicit start preview disagreed with native admission`);
+      for (const target of targets) {
+        const before = runPm(scenario, scenarioRoot, ["--json", "get", target, "--full"]).stdout;
+        for (const command of (type === "Task" ? ["start-task", "close"] : ["start-task"])) for (const format of ["json", "toon"]) {
+          const request = { actor: "packed-next", ...(command === "close" ? { input: { reason: "Reviewed", resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" } } : {}) };
+          const result = runPm(scenario, scenarioRoot, [...(format === "json" ? ["--json"] : []), "brief", "action", command, target, "--request", JSON.stringify(request)]);
+          if (result.stderr || (format === "json" ? !(JSON.parse(result.stdout) as ActionPrerequisiteBrief).ready : !/ready: true/.test(result.stdout))) throw new Error(`${scenario.name} explicit start preview disagreed with native admission`);
+        }
+        if (runPm(scenario, scenarioRoot, ["--json", "get", target, "--full"]).stdout !== before) throw new Error(`${scenario.name} explicit start preview mutated state`);
+        runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "start-task", target]);
       }
-      if (runPm(scenario, scenarioRoot, ["--json", "get", id, "--full"]).stdout !== before) throw new Error(`${scenario.name} explicit start preview mutated state`);
-      runPm(scenario, scenarioRoot, ["--json", "--author", "packed-next", "start-task", id]);
       if (type === "Task") await actionClient.config("project", "set", "governance_ownership_enforcement", "none");
     }
     const actionSettings = await readSettings(actionRoot);
