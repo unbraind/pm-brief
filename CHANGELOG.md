@@ -78,6 +78,12 @@
 
 - Enable GitHub CodeQL code scanning ([pm-brief-1p5o](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-1p5o.toon))
 
+## 2026.10.21 - 2026-10-21
+
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates ([#163](https://github.com/unbraind/pm-brief/pull/163))
+
 ## 2026.10.14 - 2026-10-14
 
 ### Added
