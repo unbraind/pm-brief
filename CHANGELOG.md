@@ -177,8 +177,8 @@
 
 ### Fixed
 
-- A failed provenance publish silently falls back to an unattested one ([pm-brief-k1xr](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-k1xr.toon))
 - Close PR 90 shell scanner review gaps ([pm-brief-d400](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-d400.toon))
+- A failed provenance publish silently falls back to an unattested one ([pm-brief-k1xr](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-k1xr.toon))
 
 ## 2026.8.28 - 2026-08-28
 
@@ -393,9 +393,9 @@
 
 ### Added
 
-- Add max-tokens alias and dependency-aware ordering ([pm-brief-nu7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nu7u.toon))
-- Add agent handoff prompt command to pm-brief ([pm-brief-am6l](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-am6l.toon))
 - Add evidence-weighted next-action ranking ([pm-brief-6xr0](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-6xr0.toon))
+- Add agent handoff prompt command to pm-brief ([pm-brief-am6l](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-am6l.toon))
+- Add max-tokens alias and dependency-aware ordering ([pm-brief-nu7u](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-nu7u.toon))
 
 ### Fixed
 
