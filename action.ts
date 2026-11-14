@@ -288,8 +288,10 @@ export function registerActionPrerequisiteCommand(api: ExtensionApi): void {
     ],
     async run(ctx) {
       try {
-        if (ctx.args.length !== 2 || (ctx.options.request !== undefined && (typeof ctx.options.request !== "string" || ctx.options.request.length > 196608)) || (ctx.options.tokenBudget !== undefined && typeof ctx.options.tokenBudget !== "string")) return invalid();
-        const extra = ctx.options.request === undefined ? {} : record(JSON.parse(ctx.options.request as string));
+        // The host normalizes declared string flags for CLI and direct callers (GH-1665).
+        const request = ctx.options.request as string | undefined;
+        if (ctx.args.length !== 2 || (request !== undefined && request.length > 196608)) return invalid();
+        const extra = request === undefined ? {} : record(JSON.parse(request));
         if (Object.hasOwn(extra, "command") || Object.hasOwn(extra, "item") || Object.hasOwn(extra, "tokenBudget")) return invalid();
         return await buildActionPrerequisiteBrief({ ...extra, command: ctx.args[0], item: ctx.args[1], ...(ctx.options.tokenBudget === undefined ? {} : { tokenBudget: Number(ctx.options.tokenBudget) }) }, { pmRoot: ctx.pm_root, client: ctx.sdk?.client });
       } catch (error) {

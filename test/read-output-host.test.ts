@@ -150,14 +150,17 @@ for (const scenario of scenarios) {
   });
 }
 
-test("ordinary document files preserve summary output without row-contract validation", () => {
+test("ordinary document files preserve compact summary output through host row-contract validation", () => {
   for (const args of [scenarios[0]!.args(), scenarios[1]!.args(), scenarios[5]!.args(), scenarios[6]!.args(), scenarios[7]!.args(), scenarios[8]!.args()]) {
     const path = join(workspace, "ordinary-output.md");
     const result = pm([...args, "--output", path]);
     assert.equal(result.ok, true);
     assert.equal(result.output, path);
     assert.equal(result.pmBriefFileSummary, undefined);
+    assert.equal(result.pmBriefFileSummaryData, undefined);
+    assert.ok(!Object.values(result).some(Array.isArray), "the file receipt must not expose structured row collections");
     assert.ok(existsSync(path));
+    assert.ok(readFileSync(path, "utf8").length > 0);
   }
   const result = run(process.execPath, [cli, "--pm-path", ".agents/pm", "brief", "--no-governance", "--output", join(workspace, "ordinary-toon.md")]);
   assert.equal(result.status, 0, result.stderr);
