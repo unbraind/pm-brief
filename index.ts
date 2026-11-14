@@ -597,7 +597,7 @@ function readOutputAwareResult(
 ): object {
   if (hostReadOutputControlsRequested(ctx.options, ctx.global)) return structured;
   if (ctx.options.output !== undefined) {
-    return { ...rendered, pmBriefFileSummary: true };
+    return { ...structured, pmBriefFileSummary: true, pmBriefFileSummaryData: rendered };
   }
   return { ...structured, ...rendered };
 }
@@ -630,7 +630,7 @@ function renderCommandResultService(context: ServiceOverrideContext): string | {
   const payload = context.payload as { result?: unknown; format?: unknown } | undefined;
   const result = payload?.result;
   if (context.command !== undefined && BRIEF_COMMANDS.includes(context.command) && typeof result === "object" && result !== null && "pmBriefFileSummary" in result && result.pmBriefFileSummary === true) {
-    const summary = Object.fromEntries(Object.entries(result).filter(([key]) => key !== "pmBriefFileSummary"));
+    const summary = (result as { pmBriefFileSummary: true; pmBriefFileSummaryData: Record<string, unknown> }).pmBriefFileSummaryData;
     return payload?.format === "json" ? `${JSON.stringify(summary, null, 2)}\n`
       : `${Object.entries(summary).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\n`;
   }

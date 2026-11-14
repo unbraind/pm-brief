@@ -238,7 +238,9 @@ export function registerDecisionFollowThroughCommands(api: ExtensionApi): void {
     flags: observation ? [] : [{ long: "--token-budget", type: "string", value_name: "n", description: "Complete TOON/JSON ceiling 1..64000 (default 1500)" }],
     async run(ctx) {
       try {
-        if (ctx.args.length !== 1 || (ctx.options.tokenBudget !== undefined && (typeof ctx.options.tokenBudget !== "string" || !/^[0-9]+$/.test(ctx.options.tokenBudget)))) return invalid();
+        // Validate CLI spelling after the host's shared string coercion (GH-1665).
+        const tokenBudget = ctx.options.tokenBudget as string | undefined;
+        if (ctx.args.length !== 1 || (tokenBudget !== undefined && !/^[0-9]+$/.test(tokenBudget))) return invalid();
         const options = { pmRoot: ctx.pm_root, client: ctx.sdk?.client };
         return observation ? await readFollowThroughObservation(ctx.args[0], options) : await buildDecisionFollowThroughBrief({ decision: ctx.args[0], ...(ctx.options.tokenBudget === undefined ? {} : { tokenBudget: Number(ctx.options.tokenBudget) }) }, options);
       } catch (error) {

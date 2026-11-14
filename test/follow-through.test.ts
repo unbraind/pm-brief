@@ -337,5 +337,7 @@ test("real native non-git CLI emits JSON/TOON and injected handlers share the sc
   assert.equal((registered.result as DecisionFollowThroughBrief).outcomes[0].state, "observed");
   assert.deepEqual((await harness.runCommand({ command: "brief observation", args: [f.observed], pmRoot: f.pmRoot })).result, f.positive);
   for (const args of [[], [f.decision, "extra"]]) await assert.rejects(harness.runCommand({ command: "brief follow-through", args, pmRoot: f.pmRoot }), /follow-through invalid/);
-  await assert.rejects(harness.runCommand({ command: "brief follow-through", args: [f.decision], pmRoot: f.pmRoot, options: { tokenBudget: 1 } }), /follow-through invalid/);
+  await assert.rejects(harness.runCommand({ command: "brief follow-through", args: [f.decision], pmRoot: f.pmRoot, options: { tokenBudget: 1 } }), /follow-through budget/);
+  await assert.rejects(harness.runCommand({ command: "brief follow-through", args: [f.decision], pmRoot: f.pmRoot, options: { tokenBudget: "Infinity" } }), /follow-through invalid/);
+  assert.deepEqual(await snapshot(f.pmRoot), before);
 });

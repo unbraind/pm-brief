@@ -579,8 +579,11 @@ test("native non-git CLI and injected command emit bounded JSON/TOON and typed u
   assert.equal((registered.result as ActionPrerequisiteBrief).ready, true);
   const requested = await harness.runCommand({ command: "brief action", args: ["close", f.item], pmRoot: f.pmRoot, options: { request: '{"input":{"reason":"Reviewed"}}', tokenBudget: "4000" } });
   assert.ok((requested.result as ActionPrerequisiteBrief).checklist.some(row => row.key === "reason" && row.state === "satisfied"));
-  for (const options of [{ request: "[" }, { request: 1 }, { request: "x".repeat(196609) }, { tokenBudget: 4000 }, { tokenBudget: "1" }, { request: '{"command":"close"}' }, { request: '{"item":"action-foreign"}' }, { request: '{"tokenBudget":10}' }]) await assert.rejects(harness.runCommand({ command: "brief action", args: ["close", f.item], pmRoot: f.pmRoot, options }), /action (invalid|budget)/);
+  const normalized = await harness.runCommand({ command: "brief action", args: ["close", f.item], pmRoot: f.pmRoot, options: { tokenBudget: 4000 } });
+  assert.equal((normalized.result as ActionPrerequisiteBrief).protocol, "pm-brief.action/v1");
+  for (const options of [{ request: "[" }, { request: 1 }, { request: "x".repeat(196609) }, { tokenBudget: "Infinity" }, { tokenBudget: "1" }, { request: '{"command":"close"}' }, { request: '{"item":"action-foreign"}' }, { request: '{"tokenBudget":10}' }]) await assert.rejects(harness.runCommand({ command: "brief action", args: ["close", f.item], pmRoot: f.pmRoot, options }), /action (invalid|budget)/);
   await assert.rejects(harness.runCommand({ command: "brief action", args: ["close"], pmRoot: f.pmRoot }), /action invalid/);
+  assert.deepEqual(await snapshot(f.pmRoot), before);
   for (const type of ["Decision", "Milestone", "Task"]) {
     const id = await f.create(`Native CLI admission ${type}`, { type, resolution: "Resolved", expectedResult: "Expected", actualResult: "Observed" });
     if (type === "Task") {
