@@ -188,20 +188,6 @@ test("hermetic alert script test: does not mutate when the dedup lookup fails", 
   }
 });
 
-test("release.yml wiring: the alert job checks out the repository and executes scripts/alert-on-release-failure.sh", () => {
-  const yaml = readFileSync(WORKFLOW_YAML, "utf8");
-  const jobStart = yaml.indexOf("alert-on-release-failure:");
-  assert.notEqual(jobStart, -1, "alert-on-release-failure job missing from release.yml");
-  const job = yaml.slice(jobStart);
-  assert.match(job, /^\s+if: failure\(\) && github\.event_name == 'schedule'$/m);
-  assert.match(job, /^\s+group: release-failure-alert-\$\{\{ github\.repository \}\}$/m);
-  assert.match(job, /^\s+cancel-in-progress: false$/m);
-  assert.match(job, /^\s+uses: actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7$/m);
-  assert.match(job, /^\s+ref: \$\{\{ github\.event\.repository\.default_branch \}\}$/m);
-  assert.match(job, /^\s+persist-credentials: false$/m);
-  assert.match(job, /^\s+run: bash scripts\/alert-on-release-failure\.sh$/m);
-});
-
 /** Read the stub call log written by {@link makeStubGh}. */
 function readLog(logPath: string): string {
   return readFileSync(logPath, "utf8");
@@ -219,3 +205,10 @@ function bodyOfLastCall(calls: string): string {
   const last = match[match.length - 1];
   return last.replace("BODY-BEGIN\n", "").replace(/\nBODY-END$/, "");
 }
+
+test('release caller delegates the tracked failure-alert hook', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /alert-script: release:alert/u);
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> };
+  assert.equal(manifest.scripts['release:alert'], 'bash scripts/alert-on-release-failure.sh');
+});
