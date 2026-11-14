@@ -6,11 +6,13 @@ status: in_progress
 priority: 2
 tags[2]: dependencies,"gh:unbraind/pm-brief#217"
 created_at: "2026-11-14T10:30:51.432Z"
-updated_at: "2026-11-14T10:43:21.762Z"
+updated_at: "2026-11-14T11:10:37.167Z"
 author: codex-toolchain-1114a
-comments[2]{created_at,author,text}:
+comments[4]{created_at,author,text}:
   "2026-11-14T10:37:34.625Z",codex-toolchain-1114a,"Failure -> cause -> fix: action native/harness test expects numeric tokenBudget 4000 to refuse -> GH-1665 string coercion -> prove numeric 4000 succeeds and replace the refusal with Infinity, retaining invalid JSON/schema/size and budget-boundary cases. Follow-through numeric tokenBudget 1 now reaches follow_through_budget -> assert that exact category and replace raw-type refusal with malformed integer spelling. Removed CLI-unreachable raw string-type guards in both adapters; strict public data parsers remain. Ordinary document files instead fail extension_read_output_invalid before the owned renderer: undocumented upstream candidate, reproduced with a minimal synthetic extension; harness succeeds but native CLI exits 2 for missing rows. Compatibility fix retains real structured rows internally and emits only the separate bounded file receipt. The new migration document records exact version, harness call, native command, observations and expected behavior; no upstream issue filed."
   "2026-11-14T10:43:17.780Z",codex-toolchain-1114a,"Final focused evidence: native action and follow-through cases pass 2/2 after adapter/type-test migration. The corrected file-summary case passes through pm test --run --only-last with real native JSON/TOON output, nonempty files and no leaked row collections or internal markers. The disposable behavioral revert restored only the original index adapters while retaining current tests/dependencies: ordinary file output fails extension_read_output_invalid; the fixed worktree passes. npm/Bun typecheck, build:test and docstrings (200 declarations) pass. No standalone lint script is declared. Full npm/Bun release checks are queued serially at unchanged thresholds; prior native action scenario took 232 seconds under shared load. Original current-pin baseline failed all 3 reported cases. Minimal synthetic harness/native reproduction confirms the undocumented host file-receipt mismatch."
+  "2026-11-14T11:07:26.201Z",codex-toolchain-1114a,"Broader release matrix caught a receipt-compatibility regression in the first adapter change: direct SDK consumers require ok, format and output alongside the host validation rows. Preserve rendered receipt metadata first, overlay structured rows so count fields cannot replace declared row arrays, and keep the separately rendered compact file receipt. Existing divergence, since and all-command-family acceptance tests fail with the previous helper and cover this correction without lowering any assertion or threshold. Stopped the failed broad run and am verifying those SDK cases plus the native compact receipt before restarting exact-head release gates."
+  "2026-11-14T11:10:32.786Z",codex-toolchain-1114a,"Receipt compatibility correction verified: the SDK all-command-family output matrix, direct divergence text/slack receipt case, and native compact file-output case pass 3/3, zero failures/cancellations/skips (138 seconds). The prior helper fails existing ok/format/output assertions in the release matrix; the corrected merge preserves that metadata while structured row arrays take precedence over count fields. Native emitted file receipts remain bounded and contain no internal markers or row arrays. This is the behavioral revert proof for the correction. Full exact-head gates will restart after this commit; no assertions or thresholds were weakened."
 files[8]{path,scope}:
   action.ts,project
   follow-through.ts,project
@@ -20,9 +22,10 @@ files[8]{path,scope}:
   test/action.test.ts,project
   test/follow-through.test.ts,project
   test/read-output-host.test.ts,project
-tests[2]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
+tests[3]{command,scope,timeout_seconds,provenance{author,created_at,source_kind,source_ref}}:
   "node --test --test-concurrency=2 --test-name-pattern=\"native non-git CLI|ordinary document files\" test/action.test.ts test/read-output-host.test.ts test/follow-through.test.ts",project,900,codex-toolchain-1114a,"2026-11-14T10:39:03.936Z",local_mutation,chore/adopt-pm-cli-option-contract
   "node --test --test-concurrency=2 --test-name-pattern=\"ordinary document files\" test/read-output-host.test.ts",project,900,codex-toolchain-1114a,"2026-11-14T10:40:50.785Z",local_mutation,chore/adopt-pm-cli-option-contract
+  "node --test --test-concurrency=2 --test-name-pattern=\"an explicit base with omitted|all command families render supported|ordinary document files\" test/coverage-gaps.test.ts test/brief.test.ts test/read-output-host.test.ts",project,900,codex-toolchain-1114a,"2026-11-14T11:10:27.614Z",local_mutation,chore/adopt-pm-cli-option-contract
 docs[1]{path,scope}:
   docs/option-contract-migration.md,project
 body: ""

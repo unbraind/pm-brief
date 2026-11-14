@@ -597,7 +597,7 @@ function readOutputAwareResult(
 ): object {
   if (hostReadOutputControlsRequested(ctx.options, ctx.global)) return structured;
   if (ctx.options.output !== undefined) {
-    return { ...structured, pmBriefFileSummary: true, pmBriefFileSummaryData: rendered };
+    return { ...rendered, ...structured, pmBriefFileSummary: true, pmBriefFileSummaryData: rendered };
   }
   return { ...structured, ...rendered };
 }
