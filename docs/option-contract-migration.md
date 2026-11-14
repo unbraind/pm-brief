@@ -55,3 +55,9 @@ then emits only the separate file summary. This preserves the original file
 receipt under both host behaviors. Tests require a nonempty output file, no
 internal markers and no row collections in the emitted receipt. Reverting this
 adapter change reproduces the native document-file failure.
+
+Compatibility acceptance also passed with the published CLI 2026.11.7 in an
+independent synthetic tracker: native JSON and TOON both wrote nonempty files
+and emitted compact receipts without row collections or internal markers.
+The older host's TOON receipt was 106 bytes. CLI 2026.11.14 acceptance is covered
+by the linked native document-file test.
