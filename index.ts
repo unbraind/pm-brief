@@ -597,7 +597,12 @@ function readOutputAwareResult(
 ): object {
   if (hostReadOutputControlsRequested(ctx.options, ctx.global)) return structured;
   if (ctx.options.output !== undefined) {
-    return { ...rendered, ...structured, pmBriefFileSummary: true, pmBriefFileSummaryData: rendered };
+    const fileResult: Record<string, unknown> = { ...structured, ...rendered };
+    // Row collections override compact counts; receipt scalars keep their explicit defaults.
+    for (const [key, value] of Object.entries(structured)) {
+      if (Array.isArray(value)) fileResult[key] = value;
+    }
+    return { ...fileResult, pmBriefFileSummary: true, pmBriefFileSummaryData: rendered };
   }
   return { ...structured, ...rendered };
 }

@@ -56,6 +56,12 @@ receipt under both host behaviors. Tests require a nonempty output file, no
 internal markers and no row collections in the emitted receipt. Reverting this
 adapter change reproduces the native document-file failure.
 
+Direct SDK results retain the compact receipt's scalar metadata, including an
+explicit `truncated: false` for empty deltas. Structured row arrays override
+compact row counts only where the host requires those collections. The existing
+`brief since` empty-window case catches a merge that lets a structured
+`truncated: undefined` overwrite the explicit receipt default.
+
 Compatibility acceptance also passed with the published CLI 2026.11.7 in an
 independent synthetic tracker: native JSON and TOON both wrote nonempty files
 and emitted compact receipts without row collections or internal markers.
