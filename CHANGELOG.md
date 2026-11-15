@@ -20,6 +20,14 @@
 
 - Adapt native admission fixtures to the pm-toolchain SDK contract ([pm-brief-3y2c](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-3y2c.toon))
 
+## 2026.11.1 - 2026-11-01
+
+No changes.
+
+## 2026.10.31 - 2026-10-31
+
+No changes.
+
 ## 2026.10.29 - 2026-10-29
 
 ### Added
@@ -94,6 +102,22 @@
 
 - Bump the pm-toolchain group with 2 updates ([#163](https://github.com/unbraind/pm-brief/pull/163))
 
+## 2026.10.20 - 2026-10-20
+
+No changes.
+
+## 2026.10.18 - 2026-10-18
+
+No changes.
+
+## 2026.10.17 - 2026-10-17
+
+No changes.
+
+## 2026.10.16 - 2026-10-16
+
+No changes.
+
 ## 2026.10.14 - 2026-10-14
 
 ### Added
@@ -105,6 +129,10 @@
 ### Other
 
 - Repair SDK installation metadata contract for automated dependency upgrades ([pm-brief-m8hh](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-m8hh.toon))
+
+## 2026.10.11 - 2026-10-11
+
+No changes.
 
 ## 2026.10.8 - 2026-10-08
 
@@ -156,11 +184,19 @@
 
 - Certify pm CLI 2026.9.10 and pick up the canonical auditor fixes the lockfile was holding back ([pm-brief-5fv2](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-5fv2.toon))
 
+## 2026.9.9 - 2026-09-09
+
+No changes.
+
 ## 2026.9.8 - 2026-09-08
 
 ### Security
 
 - Consume the canonical attestation gate instead of carrying a copy of it ([pm-brief-hxoj](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-hxoj.toon))
+
+## 2026.9.6 - 2026-09-06
+
+No changes.
 
 ## 2026.9.1 - 2026-09-01
 
@@ -238,6 +274,10 @@
 
 - Adopt the canonical pm-ops docstring gate ([pm-brief-jmnb](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-jmnb.toon))
 
+## 2026.8.8 - 2026-08-08
+
+No changes.
+
 ## 2026.8.7 - 2026-08-07
 
 ### Fixed
@@ -259,6 +299,10 @@
 ### Other
 
 - Resolve pm-changelog to the release that derives release dates in UTC ([pm-brief-iqbi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-iqbi.toon))
+
+## 2026.8.3 - 2026-08-03
+
+No changes.
 
 ## 2026.7.29 - 2026-07-29
 
@@ -344,6 +388,14 @@
 
 - Closed: Recommend pm merge reconcile (2026.7.22) over raw history-repair in Multi-agent merge safety docs ([pm-brief-lizi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-lizi.toon))
 
+## 2026.7.22 - 2026-07-22
+
+No changes.
+
+## 2026.7.20 - 2026-07-20
+
+No changes.
+
 ## 2026.7.14-1 - 2026-07-14
 
 ### Other
@@ -355,6 +407,10 @@
 ### Closed
 
 - Closed: brief: blocked_by edges doubled in blockers/risks (dependencies + blocked_by both parsed) ([pm-brief-o4s9](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-o4s9.toon))
+
+## 2026.7.12 - 2026-07-12
+
+No changes.
 
 ## 2026.7.11-2 - 2026-07-11
 
@@ -368,6 +424,10 @@
 
 - brief momentum: velocity + cycle-time context from closed_at ([pm-brief-gza2](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-gza2.toon))
 
+## 2026.7.11 - 2026-07-11
+
+No changes.
+
 ## 2026.7.10-1 - 2026-07-10
 
 ### Added
@@ -380,6 +440,14 @@
 - Adversarial review pass 2026-07-10 ([pm-brief-kk7m](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-kk7m.toon))
 - Full-cycle hardening wave: pm-brief ([pm-brief-0dru](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-0dru.toon))
 - Harden release bun-verify so registry-mirror lag cannot block the GitHub release ([pm-brief-93z7](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-93z7.toon))
+
+## 2026.7.10 - 2026-07-10
+
+No changes.
+
+## 2026.7.7 - 2026-07-07
+
+No changes.
 
 ## 2026.7.6 - 2026-07-06
 
@@ -414,6 +482,26 @@
 ### Other
 
 - Daily Release publish step runs prepublishOnly post-tag: align npm publish with --ignore-scripts ([pm-brief-k5em](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-k5em.toon))
+
+## 2026.6.10 - 2026-06-10
+
+No changes.
+
+## 2026.6.9 - 2026-06-09
+
+No changes.
+
+## 2026.6.8 - 2026-06-08
+
+No changes.
+
+## 2026.6.7-2 - 2026-06-07
+
+No changes.
+
+## 2026.6.7-1 - 2026-06-06
+
+No changes.
 
 ## 2026.6.7 - 2026-06-06
 
