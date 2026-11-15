@@ -71,3 +71,5 @@ and 100% functions. The 90 touched tests passed in 732.601 seconds (12m13s);
 the generated-count diagnostic correction passed its focused model rerun in
 43.007 seconds. Hosted full and loaded-local quick times are not directly
 comparable. No flaky failure or late-seed coverage gap reproduced.
+
+CodeQL ignores inert tracker data extensions while keeping executable tracker scripts eligible on PRs and main pushes.

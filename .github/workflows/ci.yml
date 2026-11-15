@@ -95,7 +95,9 @@ jobs:
       # existing README/example, package metadata and public commit contracts.
       - name: Check documentation and tracker changes
         if: steps.changes.outputs.code != 'true'
+        shell: bash
         run: |
+          set -euo pipefail
           npm run changelog:check
           npm run verify:release-publish-attestation
           npm run build
@@ -185,7 +187,9 @@ jobs:
 
       - name: Check documentation and tracker changes
         if: steps.changes.outputs.code != 'true'
+        shell: bash
         run: |
+          set -euo pipefail
           node node_modules/@unbrained/pm-cli/dist/cli.js health --strict-exit --require-merge-drivers
           npm run changelog:check
           npm run verify:release-publish-attestation
