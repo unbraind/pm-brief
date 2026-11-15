@@ -2,7 +2,7 @@
 
 Required checks remain `test (22)`, `test (26)` and `audit-windows`.
 PRs and dispatch use quick depth; superseded PRs cancel. Ubuntu jobs have a
-25-minute limit; Windows audit has 10 minutes. Dispatch selects code checks.
+25-minute limit; Windows audit has 3 minutes. Dispatch selects code checks.
 The old separate `release-gate (npm/bun)` jobs are folded into Node 26.
 
 | Check | Code PR 22 | Code PR 26 | Docs/tracker-only | Deep 22 + 26 |
@@ -10,7 +10,7 @@ The old separate `release-gate (npm/bun)` jobs are folded into Node 26.
 | npm ci / prepare merge drivers | yes | yes | all required jobs | yes |
 | Strict tracker health / merge drivers | — | yes | all required jobs | yes |
 | Build / test typecheck | yes | via coverage | build for package contents | npm + Bun |
-| Tests | quick | quick via coverage | identity, packaging, metadata | full npm + Bun |
+| Tests | quick | quick via coverage | identity, packaging, metadata; packed host-output on Node 26 | full npm + Bun |
 | Typecheck / docstrings | — | yes | — | npm + Bun |
 | Coverage, unchanged 100/97.85/100 lines/branches/functions | — | quick | — | full npm + Bun |
 | Release workflow contract | via tests | gate | — | npm + Bun |
@@ -18,7 +18,7 @@ The old separate `release-gate (npm/bun)` jobs are folded into Node 26.
 | Pack dry-run / shipped file list | — | gate | both Ubuntu jobs | npm + Bun |
 | Packed npm/Bun/minimum-host/global/npx/bunx acceptance | — | gate | Node 26 | npm + Bun |
 | Changelog consistency | — | gate | all required jobs | npm + Bun |
-| Publish attestation | via tests | gate | — | npm + Bun |
+| Publish attestation | via tests | gate | all required jobs | npm + Bun |
 | Bun package-graph smoke | — | yes | packed acceptance | yes |
 | Windows audit, normal and allow-scripts environment | separate required job | separate required job | health/changelog/identity instead | retained in PR |
 | CodeQL | matching paths | separate workflow | filtered | main matching paths and weekly scan |
@@ -61,3 +61,6 @@ reported up to 680.327 seconds for the 500-sequence handoff model and
 19m52s and 19m07s execution, versus 3h19m02s and 3h43m15s wall time; the Windows
 job took 47 seconds execution and 23m12s wall. Full depth is not rerun locally;
 quick measurements and PR observations belong in the tracker and PR.
+
+The attestation auditor inspects shebangs in tracked docs and tracker files, so
+publish-attestation verification also runs on every cheap path.

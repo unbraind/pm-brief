@@ -97,13 +97,16 @@ jobs:
         if: steps.changes.outputs.code != 'true'
         run: |
           npm run changelog:check
+          npm run verify:release-publish-attestation
           npm run build
           node --test test/packaging.test.ts test/package-metadata.test.ts test/identity-audit.test.ts
           npm pack --dry-run --ignore-scripts
 
       - name: Accept packed documentation changes
         if: steps.changes.outputs.code != 'true' && matrix.node-version == 26
-        run: npm run accept:packed
+        run: |
+          npm run accept:packed
+          node --test test/read-output-host.test.ts
 
       - name: Engines floor tests
         if: steps.changes.outputs.code == 'true' && matrix.node-version == 22
@@ -126,7 +129,7 @@ jobs:
   # gets a Windows job of its own rather than a caveat in the commit message.
   audit-windows:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     env:
       PM_TEST_DEPTH: quick
     steps:
@@ -185,4 +188,5 @@ jobs:
         run: |
           node node_modules/@unbrained/pm-cli/dist/cli.js health --strict-exit --require-merge-drivers
           npm run changelog:check
+          npm run verify:release-publish-attestation
           node --test test/identity-audit.test.ts
