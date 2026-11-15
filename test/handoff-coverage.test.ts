@@ -1,3 +1,5 @@
+import { testTime } from "./support/time.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -103,7 +105,7 @@ test("recorded dependency regression: removed blocker cannot drop still-required
   }
 });
 
-test("recorded dependency model: 500 seeded random sequences cover acknowledgments, graph edits, evidence edits and deletion", { timeout: 900000 }, async t => {
+test("recorded dependency model: 500 seeded random sequences cover acknowledgments, graph edits, evidence edits and deletion", { timeout: testTime(900000) }, async t => {
   // Each independent sequence has bounded live state, so long receipt streams cannot hide state-model mistakes.
   for (const item of (await rows()).values()) await client.delete(item.id);
   const seeds = [0xdecafbad, 0x1052026];
@@ -111,7 +113,7 @@ test("recorded dependency model: 500 seeded random sequences cover acknowledgmen
   for (const seed of seeds) {
     let randomState = seed;
     const random = () => { randomState ^= randomState << 13; randomState ^= randomState >>> 17; randomState ^= randomState << 5; return randomState >>> 0; };
-    for (let sequence = 0; sequence < 250; sequence++) {
+    for (let sequence = 0; sequence < testDepth(250); sequence++) {
       const ids: string[] = [];
       for (const label of ["focus", "blocker", "outside-evidence", "unrelated-focus"]) ids.push((await client.create({ type: "Task", title: `${label} ${seed} ${sequence}` })).item.id);
       const [focus, blocker, outside, unrelated] = ids;
@@ -183,7 +185,7 @@ test("recorded dependency model: 500 seeded random sequences cover acknowledgmen
     }
   }
   for (const count of Object.values(counts)) assert.ok(count > 0);
-  t.diagnostic(JSON.stringify({ seeds: seeds.map(seed => `0x${seed.toString(16)}`), sequences: 500, operations: counts }));
+  t.diagnostic(JSON.stringify({ seeds: seeds.map(seed => `0x${seed.toString(16)}`), sequences: testDepth(500), operations: counts }));
 });
 
 test("recorded coverage keeps legacy acknowledgments readable and skips malformed foreign inventories", async () => {

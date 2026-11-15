@@ -1,3 +1,4 @@
+import { testTime } from "./support/time.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -18,7 +19,7 @@ let cli = "";
 
 /** Run a real process without a shell, retaining failure diagnostics. */
 function run(bin: string, args: string[], cwd = workspace) {
-  return spawnSync(bin, args, { cwd, env, encoding: "utf8", timeout: 180_000, maxBuffer: 32 * 1024 * 1024 });
+  return spawnSync(bin, args, { cwd, env, encoding: "utf8", timeout: testTime(180_000), maxBuffer: 32 * 1024 * 1024 });
 }
 
 /** Require a successful subprocess, with stdout available for fixture creation. */

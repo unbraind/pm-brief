@@ -1,3 +1,4 @@
+import { testTime } from "../test/support/time.ts";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
@@ -97,6 +98,7 @@ function run(command: string, args: string[], cwd: string, allowFailure = false,
     encoding: "utf8",
     env: environment,
     maxBuffer: 64 * 1024 * 1024,
+    timeout: testTime(300_000),
   });
   if (result.status !== 0 && !allowFailure) {
     throw new Error(
