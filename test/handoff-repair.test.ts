@@ -174,7 +174,7 @@ test("seeded model: 500 random sequences round-trip contracts, acknowledgments a
   }
   assert.ok(generated > 0);
   assert.ok(replayed >= generated - 1); assert.ok(roundTrips >= Math.ceil(generated * 0.8));
-  t.diagnostic(JSON.stringify({ seed: "0x5eed2025", sequences: testDepth(500), olderInputReplays: replayed, changedRevisionRoundTrips: roundTrips, nativeNoOpSequences: 500 - roundTrips }));
+  t.diagnostic(JSON.stringify({ seed: "0x5eed2025", sequences: testDepth(500), olderInputReplays: replayed, changedRevisionRoundTrips: roundTrips, nativeNoOpSequences: generated - roundTrips }));
 });
 
 /** Replay the original input through native ifAbsent without bypassing old-revision refusal. */

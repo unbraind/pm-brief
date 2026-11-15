@@ -64,3 +64,10 @@ quick measurements and PR observations belong in the tracker and PR.
 
 The attestation auditor inspects shebangs in tracked docs and tracker files, so
 publish-attestation verification also runs on every cheap path.
+
+Local quick coverage passed 635 tests with zero skips in 1046.96 seconds
+(17m27s): all six configured source files reported 100% lines, 98.05% branches
+and 100% functions. The 90 touched tests passed in 732.601 seconds (12m13s);
+the generated-count diagnostic correction passed its focused model rerun in
+43.007 seconds. Hosted full and loaded-local quick times are not directly
+comparable. No flaky failure or late-seed coverage gap reproduced.
