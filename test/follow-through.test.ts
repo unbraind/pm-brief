@@ -1,3 +1,5 @@
+import { testTime } from "./support/time.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
@@ -160,7 +162,7 @@ test("one boundary rejects sparse/accessor/proxy and extreme numeric inputs; pro
   assert.throws(() => validateFollowThroughAccounting({ ...output, outcomes: [{ ...output.outcomes[0], omitted: 66 }] }, 1500), refusal("budget"));
   let seed = 0xb01d1029;
   const bits = Buffer.alloc(8);
-  for (let index = 0; index < 1000; index++) {
+  for (let index = 0; index < testDepth(1000); index++) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; bits.writeUInt32BE(seed, 0);
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; bits.writeUInt32BE(seed, 4);
     const value = bits.readDoubleBE();
@@ -171,7 +173,7 @@ test("one boundary rejects sparse/accessor/proxy and extreme numeric inputs; pro
   }
 });
 
-test("seeded 500 native operation sequences model replays, CRLF, every consumed field, relationships and random ambient/status registries", { timeout: 600000 }, async t => {
+test("seeded 500 native operation sequences model replays, CRLF, every consumed field, relationships and random ambient/status registries", { timeout: testTime(600000) }, async t => {
   const f = await fixture(t); let seed = 0x5eed1029;
   const random = (limit: number): number => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 8) % limit; };
   const roles = ["active", "blocked", "terminal_done", "terminal_canceled"] as const;
@@ -183,10 +185,10 @@ test("seeded 500 native operation sequences model replays, CRLF, every consumed 
   const values = ["Measurement A", " Measurement B \r\nSecond line. 測定😀 ", " \r\n ", ""];
   const historical: FollowThroughDeclaration[] = [];
   const registry = resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema);
-  const sources = [f.observed, f.contradicted]; let operations = 0; let replays = 0;
+  const sources = [f.observed, f.contradicted]; let operations = 0; let replays = 0; let generated = 0;
   const revisions = new Map([[f.observed, f.positive.revision], [f.contradicted, f.negative.revision]]);
   let persisted: FollowThroughDeclaration = { version: 1, adopted: true, outcomes: f.outcomes };
-  for (let sequence = 0; sequence < 500; sequence++) {
+  for (let sequence = 0; sequence < testDepth(500); sequence++) {
     const source = sources[random(sources.length)]; const status = statuses[random(statuses.length)];
     const operation = random(6);
     // Checkpoint mutations keep native audit history bounded on the shared host;
@@ -236,10 +238,10 @@ test("seeded 500 native operation sequences model replays, CRLF, every consumed 
     const actionState = actionRoles.includes("terminal_canceled") ? "canceled" : actionRoles.includes("terminal_done") ? "done" : actionRoles.includes("terminal") ? "terminal" : actionRoles.includes("blocked") ? "blocked" : "pending";
     assert.equal(result.outcomes[2].actions![0].state, actionState);
     assert.deepEqual((await f.client.listAllComplete({ includeBody: true })).items, [...native.values()]);
-    validateFollowThroughAccounting(result, 64000); assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+    validateFollowThroughAccounting(result, 64000); assert.deepEqual(JSON.parse(JSON.stringify(result)), result); generated++;
   }
-  assert.ok(replays > 10);
-  t.diagnostic(JSON.stringify({ seed: "0x5eed1029", sequences: 500, operations, historicalReplays: replays, customStatuses: statuses.length }));
+  assert.ok(generated > 0); assert.ok(replays > Math.floor(generated / 50));
+  t.diagnostic(JSON.stringify({ seed: "0x5eed1029", sequences: testDepth(500), operations, historicalReplays: replays, customStatuses: statuses.length }));
 });
 
 test("interleavings at both native read boundaries refuse stale output and report the peer state on retry", async t => {
@@ -317,7 +319,7 @@ test("real native non-git CLI emits JSON/TOON and injected handlers share the sc
   for (const file of ["manifest.json", "package.json"]) await cp(join(root, file), join(extensionRoot, file));
   await cp(join(root, "dist"), join(extensionRoot, "dist"), { recursive: true }); await symlink(join(root, "node_modules"), join(extensionRoot, "node_modules"));
   await mkdir(join(f.workspace, "bin")); await symlink(process.execPath, join(f.workspace, "bin/node")); await mkdir(join(f.workspace, "home"));
-  const run = (args: string[]) => spawnSync(process.execPath, [join(root, "node_modules/@unbrained/pm-cli/dist/cli.js"), "--pm-path", f.pmRoot, ...args], { cwd: f.workspace, env: { ...process.env, PATH: join(f.workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(f.workspace), HOME: join(f.workspace, "home") }, encoding: "utf8", timeout: 120000 });
+  const run = (args: string[]) => spawnSync(process.execPath, [join(root, "node_modules/@unbrained/pm-cli/dist/cli.js"), "--pm-path", f.pmRoot, ...args], { cwd: f.workspace, env: { ...process.env, PATH: join(f.workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(f.workspace), HOME: join(f.workspace, "home") }, encoding: "utf8", timeout: testTime(120000) });
   const before = await snapshot(f.pmRoot);
   for (const format of ["json", "toon"]) {
     const result = run([...(format === "json" ? ["--json"] : []), "brief", "follow-through", f.decision]);

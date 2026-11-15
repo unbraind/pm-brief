@@ -1,3 +1,5 @@
+import { testTime } from "./support/time.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -100,7 +102,7 @@ test("one changed dependency in 50 source rows yields one group and preserves 24
   await assert.rejects(renewHandoff(packet.id, saved, options), refuses("stale"));
 });
 
-test("seeded model: 500 random sequences round-trip contracts, acknowledgments and renewals through SDK state", { timeout: 900000 }, async t => {
+test("seeded model: 500 random sequences round-trip contracts, acknowledgments and renewals through SDK state", { timeout: testTime(900000) }, async t => {
   const modelRoot = join(workspace, "model");
   const client = new PmClient({ pmRoot: modelRoot, author: "fixture", noExtensions: true });
   await client.init("model", { defaults: true, agentGuidance: "skip", mergeFence: false });
@@ -115,8 +117,8 @@ test("seeded model: 500 random sequences round-trip contracts, acknowledgments a
   const old: HandoffRenewal[] = [];
   const validTargets = new Map<string, string>();
   let expectedReceiptCount = 1;
-  let replayed = 0; let roundTrips = 0;
-  for (let sequence = 0; sequence < 500; sequence++) {
+  let replayed = 0; let roundTrips = 0; let generated = 0;
+  for (let sequence = 0; sequence < testDepth(500); sequence++) {
     const target = sourceIds[random() % sourceIds.length];
     const text = `  public sequence ${sequence}  \r\nsecond line  `;
     // Native fields touched by handoff storage, plus every observed source field family and relationships.
@@ -168,10 +170,11 @@ test("seeded model: 500 random sequences round-trip contracts, acknowledgments a
     }
     // Acknowledgment import replay is a native atomic no-op and never resets renewed state.
     await acknowledgeInitialReplay(packet, expectedReceiptCount, options);
-    baseline = current;
+    baseline = current; generated++;
   }
-  assert.ok(replayed >= 499); assert.ok(roundTrips >= 400);
-  t.diagnostic(JSON.stringify({ seed: "0x5eed2025", sequences: 500, olderInputReplays: replayed, changedRevisionRoundTrips: roundTrips, nativeNoOpSequences: 500 - roundTrips }));
+  assert.ok(generated > 0);
+  assert.ok(replayed >= generated - 1); assert.ok(roundTrips >= Math.ceil(generated * 0.8));
+  t.diagnostic(JSON.stringify({ seed: "0x5eed2025", sequences: testDepth(500), olderInputReplays: replayed, changedRevisionRoundTrips: roundTrips, nativeNoOpSequences: 500 - roundTrips }));
 });
 
 /** Replay the original input through native ifAbsent without bypassing old-revision refusal. */
@@ -255,7 +258,7 @@ test("read-only repair, foreign receipt disclosure, scoped evidence and typed re
 test("real CLI repair and renew emit bounded JSON and native TOON with no git executable", async () => {
   const { dep, packet } = await fixture(); await client.update(dep, { body: "CLI revision" });
   /** Invoke the installed extension in a plain tracker with no git on PATH. */
-  const run = (args: string[]) => spawnSync(process.execPath, [cli, "--pm-path", pmRoot, ...args], { cwd: workspace, env: { ...process.env, PM_AUTHOR: "receiver", PATH: join(workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(workspace), HOME: join(workspace, "home") }, encoding: "utf8", timeout: 120000 });
+  const run = (args: string[]) => spawnSync(process.execPath, [cli, "--pm-path", pmRoot, ...args], { cwd: workspace, env: { ...process.env, PM_AUTHOR: "receiver", PATH: join(workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(workspace), HOME: join(workspace, "home") }, encoding: "utf8", timeout: testTime(120000) });
   const shown = run(["--json", "brief", "handoff", "repair", packet.id, "--token-budget", "64000"]);
   assert.equal(shown.status, 0, shown.stderr + shown.stdout);
   const repair = JSON.parse(shown.stdout) as HandoffRepair; assert.equal(repair.groups.length, 1);

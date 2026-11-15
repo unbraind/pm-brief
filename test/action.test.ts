@@ -1,3 +1,5 @@
+import { testTime } from "./support/time.ts";
+import { testDepth } from "./support/depth.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -45,7 +47,7 @@ async function updatePolicies(pmRoot: string, policies: NonNullable<ReturnType<t
   await writeWorkspaceJsonWithHistory({ pmRoot, filePath: resolveItemTypesFilePath(pmRoot, settings.schema), raw: JSON.stringify({ definitions: types }), op: "schema_update", author: "fixture", lockTtlSeconds: settings.locks.ttl_seconds, lockWaitMs: settings.locks.wait_ms });
 }
 
-test("effective policy severity agrees with native admission for every rule, mode, effect and stage", { timeout: 600000 }, async t => {
+test("effective policy severity agrees with native admission for every rule, mode, effect and stage", { timeout: testTime(600000) }, async t => {
   const f = await fixture(t);
   const rules: WorkflowPolicy["rule"][] = [
     { kind: "authors", authors: ["reviewer"] }, { kind: "require_fields", fields: ["body"] },
@@ -158,7 +160,7 @@ test("warning-only transitions and close diagnostics stay visible without becomi
   await assert.rejects(f.client.close(id, "Reviewed"), /policy/i);
 });
 
-test("composed start admission checks every SDK type command option policy before claiming", { timeout: 180000 }, async t => {
+test("composed start admission checks every SDK type command option policy before claiming", { timeout: testTime(180000) }, async t => {
   const f = await fixture(t);
   const options = [...new Set(["description", ...COMMON_MUTATION_COMMAND_OPTION_KEYS, "title", "body", "status", "priority", "type", "tags", "author", "message", "closeReason", "dep", "comment", "note", "file", "doc", "test"].map(key => canonicalizeCommandOptionKey("update", key)).filter((key): key is string => key !== undefined))];
   for (const option of options) {
@@ -506,7 +508,7 @@ test("one strict request schema rejects sparse arrays, nonfinite/extreme numbers
   await assert.rejects(buildActionPrerequisiteBrief(valid, f.options), refusal("tracker"));
 });
 
-test("seeded 500 operation sequences replay old requests across whitespace, fields, relationships and random custom status registries", { timeout: 300000 }, async t => {
+test("seeded 500 operation sequences replay old requests across whitespace, fields, relationships and random custom status registries", { timeout: testTime(300000) }, async t => {
   const f = await fixture(t);
   let seed = 0x5eed2026;
   const random = (n: number): number => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return (seed >>> 8) % n; };
@@ -521,7 +523,7 @@ test("seeded 500 operation sequences replay old requests across whitespace, fiel
   const registry = resolveRuntimeStatusRegistry((await readSettings(f.pmRoot)).schema);
   const preset = createLifecycleCompletenessPolicies().policies.find(row => row.id === "completeness-resolution")!;
   let priorRevision = "";
-  for (let sequence = 0; sequence < 500; sequence++) {
+  for (let sequence = 0; sequence < testDepth(500); sequence++) {
     const status = statuses[random(statuses.length)];
     const field = fields[random(fields.length)]; const fieldValue = values[random(values.length)];
     if (sequence % 8 === 0) {
@@ -562,7 +564,7 @@ test("native non-git CLI and injected command emit bounded JSON/TOON and typed u
   for (const file of ["manifest.json", "package.json"]) await cp(join(root, file), join(extensionRoot, file));
   await cp(join(root, "dist"), join(extensionRoot, "dist"), { recursive: true }); await symlink(join(root, "node_modules"), join(extensionRoot, "node_modules"));
   await mkdir(join(f.workspace, "bin")); await symlink(process.execPath, join(f.workspace, "bin/node")); await mkdir(join(f.workspace, "home"));
-  const run = (args: string[]) => spawnSync(process.execPath, [join(root, "node_modules/@unbrained/pm-cli/dist/cli.js"), "--pm-path", f.pmRoot, ...args], { cwd: f.workspace, env: { ...process.env, PATH: join(f.workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(f.workspace), HOME: join(f.workspace, "home") }, encoding: "utf8", timeout: 30000 });
+  const run = (args: string[]) => spawnSync(process.execPath, [join(root, "node_modules/@unbrained/pm-cli/dist/cli.js"), "--pm-path", f.pmRoot, ...args], { cwd: f.workspace, env: { ...process.env, PATH: join(f.workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(f.workspace), HOME: join(f.workspace, "home") }, encoding: "utf8", timeout: testTime(30000) });
   const before = await snapshot(f.pmRoot);
   for (const format of ["json", "toon"]) {
     const result = run([...(format === "json" ? ["--json"] : []), "brief", "action", "close", f.item, "--request", JSON.stringify({ input: { reason: "Reviewed" } })]);

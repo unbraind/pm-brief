@@ -1,3 +1,4 @@
+import { testTime } from "./support/time.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
@@ -37,7 +38,7 @@ async function withBlockedHistory(pmRoot: string, action: () => Promise<void>): 
 }
 /** Run the real installed CLI in a directory whose PATH cannot resolve git. */
 function run(args: string[], author = "receiver-a") {
-  return spawnSync(process.execPath, [cli, "--pm-path", pmRoot, ...args], { cwd: workspace, env: { ...process.env, PM_AUTHOR: author, PATH: join(workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(workspace), HOME: join(workspace, "home") }, encoding: "utf8", timeout: 180000 });
+  return spawnSync(process.execPath, [cli, "--pm-path", pmRoot, ...args], { cwd: workspace, env: { ...process.env, PM_AUTHOR: author, PATH: join(workspace, "bin"), GIT_CEILING_DIRECTORIES: dirname(workspace), HOME: join(workspace, "home") }, encoding: "utf8", timeout: testTime(180000) });
 }
 /** Launch independent receiver processes against the same tracker, without serializing their writes. */
 function concurrentAck(id: string, input: string, author: string): Promise<string> {

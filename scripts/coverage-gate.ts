@@ -1,3 +1,4 @@
+import { testTime } from "../test/support/time.ts";
 /**
  * Coverage gate for the package test suite.
  *
@@ -279,6 +280,7 @@ const result = spawnSync(
   {
     cwd: repoRoot,
     stdio: "inherit",
+    timeout: testTime(20 * 60_000),
     // Pin the timezone so the measurement is reproducible on any machine.
     // Code that branches on a timestamp's UTC offset takes different paths under
     // a local offset than under UTC, which moves the reported percentage between
