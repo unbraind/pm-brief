@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.11.15 - 2026-11-15
+
+### Dependencies
+
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#219](https://github.com/unbraind/pm-brief/pull/219))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#220](https://github.com/unbraind/pm-brief/pull/220))
+
 ## 2026.11.11 - 2026-11-11
 
 ### Dependencies
