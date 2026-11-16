@@ -2,12 +2,17 @@ id: pm-brief-yanp
 title: Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI
 description: "Tracks gh:unbraind/pm-brief#193. The quiet-output fixture used a future activity lower bound without an upper bound and failed the host from-before-to contract. Already fixed by merged PR #192 (a4f1197), which uses the deterministic bounded pre-tracker window 1900-01-01 through 1900-01-02 and retains ok=true and truncated=false assertions. November 6 verification on main 977ff2b reproduced the old failure in a disposable copy and confirmed the fixed registered command plus a real SDK-seeded non-git tracker. This item remains open for orchestrator verification and GitHub issue closure; no implementation changes are needed."
 type: Issue
-status: in_progress
+status: closed
 priority: 2
 tags[6]: ci,"gh:unbraind/pm-brief#192","gh:unbraind/pm-brief#193","gh:unbraind/pm-brief#226",performance,toolchain
 created_at: "2026-11-02T09:16:26.337Z"
-updated_at: "2026-11-15T19:03:35.575Z"
+updated_at: "2026-11-16T20:24:01.073Z"
+closed_at: "2026-11-16T20:24:01.055Z"
+completed_at: "2026-11-16T20:24:01.055Z"
 author: pi-glm
+resolution: Implemented and merged in #192 (a4f1197).
+expected_result: The change described by this item is on main.
+actual_result: "Merged in #192 as a4f1197; checks successful at head a579e73: CodeQL, audit-windows, codeql, enable-auto-merge, release-gate (bun), release-gate (npm), semgrep-cloud-platform/scan, test (22), test (26)."
 comments[19]{created_at,author,text}:
   "2026-11-03T10:03:26.178Z",codex-toolchain-1103,"The bounded npm test run exposed the existing GH-193 fixture failure: brief since passed activity --from 2999-01-01 with implicit --to now, rejected as invalid_argument_value (Activity --from must be before --to). Root cause: pm-cli 2026.10.25 GH-1554 stable bounded activity window validation. Classification: test contract drift. Replace only this activity empty-window control with 1900-01-01 through 1900-01-02, before tracker history, retaining quiet ok=true and truncated=false assertions. Duplicate-list future since filters have no activity upper bound and remain valid empty-selection controls, so they are unchanged."
   "2026-11-03T10:06:07.092Z",codex-toolchain-1103,"The corrected bounded past-window test passes 1/1 directly (node --test --test-name-pattern=\"brief since requires a checkpoint\" test/coverage-gaps.test.ts), including until/text/slack outputs, quiet ok=true and truncated=false; it also passes through pm test. Typecheck, build:test and docstring pass after the fixture change. This is a test-only update; no activity admission behavior or duplicate since filters were changed. Leave open for coordinator verification."
@@ -99,4 +104,5 @@ docs[3]{path,scope}:
   CHANGELOG.md,project
   docs/ci-tiers.md,project
   README.md,project
+close_reason: "Delivered by #192 \"chore(deps-dev): bump the pm-toolchain group across 1 directory with 3 updates\" (merged as a4f1197). Checks successful at the PR head a579e73: CodeQL, audit-windows, codeql, enable-auto-merge, release-gate (bun), release-gate (npm), semgrep-cloud-platform/scan, test (22), test (26)."
 body: ""
