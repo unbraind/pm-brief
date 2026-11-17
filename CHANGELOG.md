@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.11.16 - 2026-11-16
+## Unreleased
 
 ### Fixed
 
@@ -10,6 +10,10 @@
 
 - Adopt pm-cli option contract and current pm-toolchain ([pm-brief-option-contract-1114](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-option-contract-1114.toon))
 - Adapt brief host contracts to the November 4 toolchain ([pm-brief-toolchain-1104](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-toolchain-1104.toon))
+
+## 2026.11.16 - 2026-11-16
+
+No changes.
 
 ## 2026.11.15 - 2026-11-15
 
