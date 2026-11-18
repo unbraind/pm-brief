@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.11.18 - 2026-11-18
+
+### Dependencies
+
+- Bump pm-changelog ([#229](https://github.com/unbraind/pm-brief/pull/229))
+
 ## 2026.11.16 - 2026-11-16
 
 No changes.
