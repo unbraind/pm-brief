@@ -19,13 +19,9 @@ No changes.
 
 ## 2026.11.11 - 2026-11-11
 
-### Dependencies
+### Fixed
 
-- Bump the pm-toolchain group with 2 updates ([#214](https://github.com/unbraind/pm-brief/pull/214))
-- Bump the pm-toolchain group with 3 updates ([#212](https://github.com/unbraind/pm-brief/pull/212))
-- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#210](https://github.com/unbraind/pm-brief/pull/210))
-- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#211](https://github.com/unbraind/pm-brief/pull/211))
-- Bump the codeql-action group with 2 updates ([#209](https://github.com/unbraind/pm-brief/pull/209))
+- Replace future-date empty-window fixture blocking PM .25 toolchain CI ([pm-brief-github-7e06b2eb1b44-193](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-193.toon))
 
 ## 2026.11.4 - 2026-11-04
 
@@ -66,6 +62,11 @@ No changes.
 ### Other
 
 - Point the npm homepage at the package catalog and link the author ([pm-brief-kgt1](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-kgt1.toon))
+
+### Closed
+
+- Closed: Point the npm homepage at the package's website and link the author ([pm-brief-github-7e06b2eb1b44-184](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-184.toon))
+- Closed: Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-182](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-182.toon))
 
 ## 2026.10.25 - 2026-10-25
 
