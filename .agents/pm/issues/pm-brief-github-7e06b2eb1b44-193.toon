@@ -1,0 +1,25 @@
+id: pm-brief-github-7e06b2eb1b44-193
+title: Replace future-date empty-window fixture blocking PM .25 toolchain CI
+description: "GH issue #193: https://github.com/unbraind/pm-brief/issues/193 · author @unbraind · state reason completed · created 2026-10-28T22:38:02Z · updated 2026-11-06T18:30:40Z"
+type: Issue
+status: closed
+priority: 2
+tags[2]: "gh:unbraind/pm-brief#193","github_author:unbraind"
+created_at: "2026-10-28T22:38:02Z"
+updated_at: "2026-11-21T11:19:22.868Z"
+closed_at: "2026-11-06T18:30:40Z"
+completed_at: "2026-11-06T18:30:40Z"
+author: pm-github
+release: v2026.11.11
+close_reason: "Closed on GitHub as completed on 2026-11-06T18:30:40Z; closing PR https://github.com/unbraind/pm-brief/pull/208 (\"Verify the delivered empty-window fixture fix for #193\")"
+github_close_reason: "Closed on GitHub as completed on 2026-11-06T18:30:40Z; closing PR https://github.com/unbraind/pm-brief/pull/208 (\"Verify the delivered empty-window fixture fix for #193\")"
+github_closed_at: "2026-11-06T18:30:40Z"
+github_created_at: "2026-10-28T22:38:02Z"
+github_link_only: false
+github_number: 193
+github_release: v2026.11.11
+github_state: closed
+github_state_reason: completed
+github_updated_at: "2026-11-06T18:30:40Z"
+github_url: "https://github.com/unbraind/pm-brief/issues/193"
+body: "## Classification and affected revision\nHosted CI reproduction + exact-source diagnosis; no independent local full-suite reproduction. PR #192 at `14ef9efbc795031a1df0890d116055b4f6da5b82` updates the dev PM toolchain from 2026.10.24 to 2026.10.25.\n\n## Reproduction / actual result\nThe registered-command test [test/coverage-gaps.test.ts:326–364](https://github.com/unbraind/pm-brief/blob/14ef9efbc795031a1df0890d116055b4f6da5b82/test/coverage-gaps.test.ts#L326-L364) reaches its quiet-output case:\n`run({ format: \"text\", output: quietPath }, [\"2999-01-01\"])`.\nIt expects `ok: true` and `truncated: false`, but invokes:\n`pm --pm-path <isolated-tracker> activity --json --full --from 2999-01-01 --limit 1000`.\nThe host exits 2 with `invalid_argument_value`, detail `Activity --from must be before --to`, rejected field `--from`.\n\nSame failure appears in all four current-head jobs:\n- [Node 22 test](https://github.com/unbraind/pm-brief/actions/runs/40771925357/job/123111079481)\n- [Node 26 test](https://github.com/unbraind/pm-brief/actions/runs/40771925357/job/123111079561)\n- [npm release gate](https://github.com/unbraind/pm-brief/actions/runs/40771925357/job/123111079572)\n- [Bun release gate](https://github.com/unbraind/pm-brief/actions/runs/40771925357/job/123111079084)\n\n## Diagnosis and impact\nThis fixture uses a future lower bound to manufacture an empty activity window; that is incompatible with the host's bounded-window validation. It blocks toolchain-update CI and release qualification. The npm/Bun failures are downstream coverage failures, not four independent defects or evidence of a Bun runtime problem. [readActivitySince](https://github.com/unbraind/pm-brief/blob/14ef9efbc795031a1df0890d116055b4f6da5b82/index.ts#L2766-L2780) does forward an explicit `to`; the quiet test simply supplies none. No normal valid-window runtime regression is established.\n\n## Goal / expected behavior\nThe accepted [delta brief item pm-brief-da2c](https://github.com/unbraind/pm-brief/blob/14ef9efbc795031a1df0890d116055b4f6da5b82/.agents/pm/features/pm-brief-da2c.toon) requires tested delta/empty-window behavior and passing release checks. The existing [coverage item pm-brief-gtiy](https://github.com/unbraind/pm-brief/blob/14ef9efbc795031a1df0890d116055b4f6da5b82/.agents/pm/issues/pm-brief-gtiy.toon) requires meaningful observable behavior with stable npm/Bun execution, not weakened coverage.\n\n## Acceptance / regression criteria\n- Replace the invalid future-window shortcut with an isolated, deterministic, valid empty activity window while retaining file-output, successful receipt, and `truncated: false` assertions.\n- Separately assert invalid/reversed-window rejection if that behavior needs coverage; do not weaken host validation or suppress errors to satisfy this test.\n- Rerun the targeted registered-command case and the Node 22/26 coverage plus npm/Bun release gates on the repaired immutable head; retain any unrelated incomplete gates.\n\nAll-status issues/PRs and linked canonical records were checked. #187 tracks a Daily Release failure on a different default-branch revision/run; this evidence is specifically the PR192 quiet-output fixture, not a claim to diagnose #187. No implementation edits or publication performed."
