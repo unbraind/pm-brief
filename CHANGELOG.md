@@ -1,15 +1,18 @@
 # Changelog
 
-## Unreleased
+## 2026.11.22 - 2026-11-22
 
-### Fixed
+### Dependencies
 
-- Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI ([pm-brief-yanp](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-yanp.toon))
+- Bump unbraind/pm-ops/.github/workflows/daily-release.yml ([#234](https://github.com/unbraind/pm-brief/pull/234))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#233](https://github.com/unbraind/pm-brief/pull/233))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#235](https://github.com/unbraind/pm-brief/pull/235))
 
-### Other
+## 2026.11.18 - 2026-11-18
 
-- Adopt pm-cli option contract and current pm-toolchain ([pm-brief-option-contract-1114](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-option-contract-1114.toon))
-- Adapt brief host contracts to the November 4 toolchain ([pm-brief-toolchain-1104](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-toolchain-1104.toon))
+### Dependencies
+
+- Bump pm-changelog ([#229](https://github.com/unbraind/pm-brief/pull/229))
 
 ## 2026.11.16 - 2026-11-16
 
