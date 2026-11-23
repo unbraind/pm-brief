@@ -30,3 +30,6 @@
 ".agents/pm/extensions/**" merge=text
 ".agents/pm/extensions/.managed-extensions.json" merge=pm-json
 # pm-cli:merge-drivers:v2:end
+
+# pm-changelog emits canonical LF output on every platform.
+CHANGELOG.md text eol=lf
