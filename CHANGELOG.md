@@ -16,9 +16,7 @@
 
 ## 2026.11.16 - 2026-11-16
 
-### Fixed
-
-- Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI ([pm-brief-yanp](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-yanp.toon))
+No changes.
 
 ## 2026.11.15 - 2026-11-15
 
@@ -33,6 +31,10 @@
 - Adapt brief host contracts to the November 4 toolchain ([pm-brief-toolchain-1104](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-toolchain-1104.toon))
 
 ## 2026.11.4 - 2026-11-04
+
+### Fixed
+
+- Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI ([pm-brief-yanp](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-yanp.toon))
 
 ### Other
 
