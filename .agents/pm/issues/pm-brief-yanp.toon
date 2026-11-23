@@ -6,7 +6,7 @@ status: closed
 priority: 2
 tags[6]: ci,"gh:unbraind/pm-brief#192","gh:unbraind/pm-brief#193","gh:unbraind/pm-brief#226",performance,toolchain
 created_at: "2026-11-02T09:16:26.337Z"
-updated_at: "2026-11-23T22:31:35.171Z"
+updated_at: "2026-11-23T23:11:48.929Z"
 closed_at: "2026-11-16T20:24:01.055Z"
 completed_at: "2026-11-03T14:51:52.000Z"
 author: pi-glm
@@ -41,21 +41,19 @@ comments[26]{created_at,author,text}:
   "2026-11-22T23:50:53.639Z",codex-agent,Fleet CI v2 was delivered by merged PR #226 at b0ecc492babd2846bc64d1da467f46f055cfbce0. The earlier future-date fixture was delivered by PR #192.
   "2026-11-23T16:12:18.483Z",codex-agent,"Completion recorded at the delivery merge 2026-11-03T14:51:52Z for PR #192 (https://github.com/unbraind/pm-brief/pull/192), merge commit a4f119790afdff49640529bf548f287cc60ec145; first containing tag v2026.11.04. PR #192 delivered the bounded pre-tracker window and preserved the quiet-output assertions; PR #226 reused the item for CI tier work."
   "2026-11-23T22:31:35.168Z",codex-agent,Confirmed both merge times on GitHub and both first containing tags. Delivery #192 owns the fixture changelog attribution. The #226 delivery and check evidence remain in the result and close rationale.
-files[13]{path,scope}:
-  .gitattributes,project
+files[11]{path,scope}:
   .github/workflows/ci-deep.yml,project
   .github/workflows/ci.yml,project
   .github/workflows/codeql.yml,project
   index.ts,project
   scripts/accept-packed.ts,project
   scripts/coverage-gate.ts,project
-  test/changelog-line-endings.test.ts,project
   test/ci-codeql.test.ts,project
   test/ci-docs.test.ts,project
   test/coverage-gaps.test.ts,project
   test/support/depth.ts,project
   test/support/time.ts,project
-tests[8]:
+tests[7]:
   - command: "node --test --test-name-pattern=\"brief since requires a checkpoint\" test/coverage-gaps.test.ts"
     scope: project
     provenance:
@@ -110,13 +108,6 @@ tests[8]:
       created_at: "2026-11-15T19:00:47.134Z"
       source_kind: local_mutation
       source_ref: ci/quick-pr-tier-deep-local-tier
-  - command: node --test test/changelog-line-endings.test.ts
-    scope: project
-    provenance:
-      author: codex-sol
-      created_at: "2026-11-17T05:39:50.563Z"
-      source_kind: local_mutation
-      source_ref: chore/close-merged-items-2026-11-16
 docs[3]{path,scope}:
   CHANGELOG.md,project
   docs/ci-tiers.md,project
