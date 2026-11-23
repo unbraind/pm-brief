@@ -6,9 +6,9 @@ status: in_progress
 priority: 2
 tags[2]: "gh:unbraind/pm-brief#228",tracker-sweep
 created_at: "2026-11-22T23:50:44.795Z"
-updated_at: "2026-11-23T22:38:41.388Z"
+updated_at: "2026-11-23T22:46:22.986Z"
 author: codex-agent
-comments[11]{created_at,author,text}:
+comments[12]{created_at,author,text}:
   "2026-11-22T23:50:47.822Z",codex-agent,Fleet CI v2 was delivered by PR #226. This item preserves the branch's three existing completion dates. Those dates differ from the delivering PR merge times and need an orchestrator decision before the merge-time verifier can pass.
   "2026-11-23T00:04:59.214Z",codex-agent,"Focused linked test completed successfully. 11 pass, 0 fail, 0 skipped."
   "2026-11-23T00:07:52.161Z",codex-agent,The focused suite passed 11/11. A scratch Git checkout using main attributes without the closure branch LF pin fails the existing line-ending test at the byte comparison. PR #226 was the Fleet CI v2 delivery and its successful checks include both Linux jobs and the Windows audit. The closure date evidence and the tracker-only file allowlist hold this branch.
@@ -20,12 +20,10 @@ comments[11]{created_at,author,text}:
   "2026-11-23T16:19:24.332Z",codex-agent,"The registered focused Node tests and changelog check passed. Identity, public-content and history prefix checks are part of the final-head gate. The full release gate runs in package CI."
   "2026-11-23T22:31:45.910Z",codex-agent,Moved the Windows changelog checkout work to the standalone fix branch. Restored the bounded-window fixture attribution to v2026.11.04 and verified the separate Fleet CI v2 merge evidence. Compare the dependency notes with and without the generator opt-in.
   "2026-11-23T22:38:37.759Z",codex-agent,Generated both forms with the pinned tool. The default invocation loses dependency bullets in 2026.11.11 and 2026.11.15. The explicit --dependency-updates invocation keeps every published dependency bullet and the release-pinned tracker entries. The package-script follow-up is pm-brief-changelog-dependency-updates. Hold closure PR #228 until the package opts in.
-files[3]{path,scope}:
-  .gitattributes,project
+  "2026-11-23T22:46:22.984Z",codex-agent,PR #237 owns the Windows checkout files and their test. Removed their active links from the closure item so its linked test commands run on this branch.
+files[1]{path,scope}:
   CHANGELOG.md,project
-  test/changelog-line-endings.test.ts,project
-tests[4]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  node --test --test-concurrency=2 test/changelog-line-endings.test.ts test/identity-audit.test.ts test/packaging.test.ts test/package-metadata.test.ts,project,codex-agent,"2026-11-22T23:50:58.168Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
+tests[3]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   node --test --test-concurrency=2 test/changelog-line-endings.test.ts test/identity-audit.test.ts test/packaging.test.ts test/package-metadata.test.ts test/prepare-merge-driver.test.ts,project,codex-agent,"2026-11-23T09:52:47.763Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
   "npm run changelog:check",project,codex-agent,"2026-11-23T16:13:13.414Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
   node --test --test-concurrency=2 test/identity-audit.test.ts test/packaging.test.ts test/package-metadata.test.ts test/prepare-merge-driver.test.ts test/release-workflow.test.ts test/sdk-semantics.test.ts,project,codex-agent,"2026-11-23T22:31:57.294Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
