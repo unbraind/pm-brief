@@ -6,7 +6,7 @@ status: in_progress
 priority: 2
 tags[2]: "gh:unbraind/pm-brief#228",tracker-sweep
 created_at: "2026-11-22T23:50:44.795Z"
-updated_at: "2026-11-23T22:46:22.986Z"
+updated_at: "2026-11-23T22:48:03.527Z"
 author: codex-agent
 comments[12]{created_at,author,text}:
   "2026-11-22T23:50:47.822Z",codex-agent,Fleet CI v2 was delivered by PR #226. This item preserves the branch's three existing completion dates. Those dates differ from the delivering PR merge times and need an orchestrator decision before the merge-time verifier can pass.
@@ -23,8 +23,7 @@ comments[12]{created_at,author,text}:
   "2026-11-23T22:46:22.984Z",codex-agent,PR #237 owns the Windows checkout files and their test. Removed their active links from the closure item so its linked test commands run on this branch.
 files[1]{path,scope}:
   CHANGELOG.md,project
-tests[3]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
-  node --test --test-concurrency=2 test/changelog-line-endings.test.ts test/identity-audit.test.ts test/packaging.test.ts test/package-metadata.test.ts test/prepare-merge-driver.test.ts,project,codex-agent,"2026-11-23T09:52:47.763Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
+tests[2]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
   "npm run changelog:check",project,codex-agent,"2026-11-23T16:13:13.414Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
   node --test --test-concurrency=2 test/identity-audit.test.ts test/packaging.test.ts test/package-metadata.test.ts test/prepare-merge-driver.test.ts test/release-workflow.test.ts test/sdk-semantics.test.ts,project,codex-agent,"2026-11-23T22:31:57.294Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
 docs[2]{path,scope}:
