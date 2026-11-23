@@ -1,0 +1,21 @@
+id: pm-brief-closure-1122
+title: Refresh tracker closure PR #228
+description: "Recheck current main, verify delivery evidence, regenerate the changelog and record the validation outcome."
+type: Chore
+status: open
+priority: 2
+tags[1]: tracker-sweep
+created_at: "2026-11-22T23:50:44.795Z"
+updated_at: "2026-11-23T00:07:52.162Z"
+author: codex-agent
+comments[3]{created_at,author,text}:
+  "2026-11-22T23:50:47.822Z",codex-agent,Fleet CI v2 was delivered by PR #226. This item preserves the branch's three existing completion dates. Those dates differ from the delivering PR merge times and need an orchestrator decision before the merge-time verifier can pass.
+  "2026-11-23T00:04:59.214Z",codex-agent,"Focused linked test completed successfully. 11 pass, 0 fail, 0 skipped."
+  "2026-11-23T00:07:52.161Z",codex-agent,The focused suite passed 11/11. A scratch Git checkout using main attributes without the closure branch LF pin fails the existing line-ending test at the byte comparison. PR #226 was the Fleet CI v2 delivery and its successful checks include both Linux jobs and the Windows audit. The closure date evidence and the tracker-only file allowlist hold this branch.
+files[1]{path,scope}:
+  CHANGELOG.md,project
+tests[1]{command,scope,provenance{author,created_at,source_kind,source_ref}}:
+  node --test --test-concurrency=2 test/changelog-line-endings.test.ts test/identity-audit.test.ts test/packaging.test.ts test/package-metadata.test.ts,project,codex-agent,"2026-11-22T23:50:58.168Z",local_mutation,codex/closure-1122/chore/close-merged-items-2026-11-16
+docs[1]{path,scope}:
+  CHANGELOG.md,project
+body: ""

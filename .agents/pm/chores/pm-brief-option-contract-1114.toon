@@ -6,10 +6,11 @@ status: closed
 priority: 2
 tags[3]: dependencies,"gh:unbraind/pm-brief#217","gh:unbraind/pm-brief#218"
 created_at: "2026-11-14T10:30:51.432Z"
-updated_at: "2026-11-16T20:24:41.105Z"
+updated_at: "2026-11-22T23:50:48.801Z"
 closed_at: "2026-11-16T20:24:41.083Z"
 completed_at: "2026-11-16T20:24:41.083Z"
 author: codex-toolchain-1114a
+release: 2026.11.15
 resolution: Implemented and merged in #218 (094b998).
 expected_result: The change described by this item is on main.
 actual_result: "Merged in #218 as 094b998; checks successful at head 9984f62: CodeQL, audit-windows, codeql, release-gate (bun), release-gate (npm), semgrep-cloud-platform/scan, test (22), test (26)."

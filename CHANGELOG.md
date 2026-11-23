@@ -16,30 +16,23 @@
 
 ## 2026.11.16 - 2026-11-16
 
-No changes.
-
-## 2026.11.15 - 2026-11-15
-
-### Dependencies
-
-- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#219](https://github.com/unbraind/pm-brief/pull/219))
-- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#220](https://github.com/unbraind/pm-brief/pull/220))
-
-## 2026.11.11 - 2026-11-11
-
-### Dependencies
-
-- Bump the pm-toolchain group with 2 updates ([#214](https://github.com/unbraind/pm-brief/pull/214))
-- Bump the pm-toolchain group with 3 updates ([#212](https://github.com/unbraind/pm-brief/pull/212))
-- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#210](https://github.com/unbraind/pm-brief/pull/210))
-- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#211](https://github.com/unbraind/pm-brief/pull/211))
-- Bump the codeql-action group with 2 updates ([#209](https://github.com/unbraind/pm-brief/pull/209))
-
-## 2026.11.4 - 2026-11-04
-
 ### Fixed
 
 - Replace the future-date empty-window fixture that blocks the PM 2026.10.25 toolchain CI ([pm-brief-yanp](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-yanp.toon))
+
+## 2026.11.15 - 2026-11-15
+
+### Other
+
+- Adopt pm-cli option contract and current pm-toolchain ([pm-brief-option-contract-1114](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-option-contract-1114.toon))
+
+## 2026.11.11 - 2026-11-11
+
+### Other
+
+- Adapt brief host contracts to the November 4 toolchain ([pm-brief-toolchain-1104](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-toolchain-1104.toon))
+
+## 2026.11.4 - 2026-11-04
 
 ### Other
 
