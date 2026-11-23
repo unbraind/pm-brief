@@ -6,16 +6,16 @@ status: closed
 priority: 2
 tags[5]: dependencies,"gh:unbraind/pm-brief#204","gh:unbraind/pm-brief#207",migration,sdk
 created_at: "2026-11-04T19:11:30.676Z"
-updated_at: "2026-11-22T23:50:50.925Z"
+updated_at: "2026-11-23T16:12:10.021Z"
 closed_at: "2026-11-16T20:24:35.875Z"
-completed_at: "2026-11-16T20:24:35.875Z"
+completed_at: "2026-11-05T09:52:35.000Z"
 author: codex-toolchain-1104
 acceptance_criteria: "Reproduce each failure in its test file; classify upstream contract changes; pass focused tests, full coverage and typecheck; regenerate tracked build and changelog."
 release: 2026.11.11
 resolution: Implemented and merged in #207 (977ff2b).
 expected_result: The change described by this item is on main.
 actual_result: "Merged in #207 as 977ff2b; checks successful at head 83bef04: CodeQL, audit-windows, codeql, release-gate (bun), release-gate (npm), semgrep-cloud-platform/scan, test (22), test (26)."
-comments[16]{created_at,author,text}:
+comments[17]{created_at,author,text}:
   "2026-11-04T19:17:13.074Z",codex-toolchain-1104,"Installed SDK/ops 2026.11.4 with changelog 2026.10.31 after merging current main. Changelog check already passes; do not apply the empty-window policy used by other packages. Reproducing brief.test.ts, action.test.ts and read-output-host.test.ts separately before the full coverage run. Keep prior completed fixture migrations closed."
   "2026-11-04T19:33:38.498Z",codex-toolchain-1104,"Verified hosted logs and local action.test.ts: the retained-owner fixture expects claim_principal=prior-agent after close/reopen, but gets undefined. Root cause: pm-cli 2026.10.31 pm-8xgg7i intentionally clears orphan claim metadata (classification: test). Assert the exact new clear contract and preserve stale-principal/no-assignee coverage by importing a valid legacy record through commitImportedItem, then exercise unchanged previews and native start/close for both current and legacy records. Keep the live-assignee refusal controls."
   "2026-11-04T19:36:14.813Z",codex-toolchain-1104,"Ownership regression passes through pm test. Six enforcement-mode/actor combinations now each exercise both a freshly reopened native record with cleared claim_principal and an SDK-imported legacy record retaining prior-agent without an assignee. Preview byte-preservation, native start/close success and live-assignee refusals remain asserted. Main brief.test.ts passed 245/245; typecheck passes; no lint script is declared."
@@ -32,6 +32,7 @@ comments[16]{created_at,author,text}:
   "2026-11-05T09:20:09.903Z",codex-agent,"Resolved PRRT_kwDOSzIO-c6z9ytC in code: added a separate real non-git tracker regression with six independent imported close records (none/warn/strict x two actors). Each record retains prior-agent and no assignee immediately before direct close; no startTask or claim runs on those records. Assert ready ownership-free preview, unchanged tracker snapshot, successful native close and cleared ownership. Existing start/preview cases and live-owner refusal controls are unchanged. Whole-PR self-review found the same missing direct-close execution in scripts/accept-packed.ts: added a separate stale record, JSON/TOON previews with no mutation, pre-close stale/unassigned assertions, actual installed-host close and terminal-status assertion for every one of seven acquisition scenarios. No other instance found."
   "2026-11-05T09:20:12.762Z",codex-agent,"Behavioral revert proof for this test-only review finding: in a disposable code/dependency copy, injected stale-principal/no-assignee rejection into only the bundled native mutateCloseMetadata function used by the SDK. Existing ownership regression still PASSED 1/1; new independent direct-close regression FAILED 0/1 with review207_stale_principal_close_regression. Selecting the pre-fix regression alone reproduces the coverage hole. Restored both bundled SDK function copies in finally, then reran both regressions: PASSED 2/2, zero failed/skipped. No installed dependency or reviewed source was mutated for the proof. There is no changed production function to revert in this coverage-only correction."
   "2026-11-05T09:20:14.870Z",codex-agent,"Local validation: pinned pm test run of node --test --test-concurrency=2 --test-name-pattern=\"native close clears ownership|direct native close\" test/action.test.ts PASSED 2/2, zero failed/skipped (six independent direct-close combinations). Typecheck, test compilation, changelog generation/check and strict health with required merge drivers pass. Full npm and Bun release commands are linked unchanged; validate the final pushed head through both CI release-gate jobs and report their exact counts. A local npm full-gate attempt uses a fresh HOME and disabled global/system Git configuration to reproduce CI identity; any shared-host timeout remains incomplete local evidence until CI passes. All model counts, deadlines, seven packed scenarios and thresholds remain unchanged: lines 100, functions 100, branches 97.85. dist is generated and ignored, with no tracked dist files. Greptile is unavailable (trial ended); skipped reviewer checks are not approval. Leave item in progress and release this claim for orchestrator verification."
+  "2026-11-23T16:12:10.020Z",codex-agent,"Completion recorded at the delivery merge 2026-11-05T09:52:35Z for PR #207 (https://github.com/unbraind/pm-brief/pull/207), merge commit 977ff2b68b9ba0b16c4af12d9a0b420ef6662f38; first containing tag v2026.11.11."
 files[4]:
   - path: package-lock.json
     scope: project
