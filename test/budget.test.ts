@@ -168,7 +168,7 @@ test("real command wiring budgets stdout and files and refuses to write an overr
     assert.deepEqual(activation.failed, []);
     for (const format of formats) {
       const command = format === "prompt" ? "brief prompt" : "brief";
-      const options = { format, "no-governance": true, "max-tokens": 1000 };
+      const options = { "no-governance": true, "max-tokens": 1000, ...(format === "prompt" ? {} : { format }) };
       const result = (await runRegisteredCommandForTest(activation.commands, { command, options, pmRoot: join(root, ".agents/pm") })).result as { output: string };
       assert.ok(Math.ceil(result.output.length / 4) <= 1000);
       const output = join(root, `${format}.txt`);
@@ -177,6 +177,12 @@ test("real command wiring budgets stdout and files and refuses to write an overr
       const refused = join(root, `refused-${format}.txt`);
       await assert.rejects(runRegisteredCommandForTest(activation.commands, { command, options: { ...options, output: refused, "max-tokens": 1 }, pmRoot: join(root, ".agents/pm") }), (error: unknown) => minimumBudget(error) > 1);
       assert.equal(existsSync(refused), false);
+      if (format === "prompt") {
+        await assert.rejects(runRegisteredCommandForTest(activation.commands, {
+          command, options: { ...options, format, output: refused }, pmRoot: join(root, ".agents/pm"),
+        }), { code: "unknown_option", message: /Unknown option 'format'/ });
+        assert.equal(existsSync(refused), false);
+      }
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

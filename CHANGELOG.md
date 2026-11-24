@@ -45,9 +45,17 @@ No changes.
 
 - Adapt native admission fixtures to the pm-toolchain SDK contract ([pm-brief-3y2c](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-3y2c.toon))
 
+### Dependencies
+
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#192](https://github.com/unbraind/pm-brief/pull/192))
+- Bump @types/node ([#202](https://github.com/unbraind/pm-brief/pull/202))
+
 ## 2026.11.1 - 2026-11-01
 
-No changes.
+### Dependencies
+
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#199](https://github.com/unbraind/pm-brief/pull/199))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#198](https://github.com/unbraind/pm-brief/pull/198))
 
 ## 2026.10.31 - 2026-10-31
 
@@ -64,6 +72,11 @@ No changes.
 ### Added
 
 - Compose a compact prerequisite brief for one intended native action ([pm-brief-action-prerequisites](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-action-prerequisites.toon))
+
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#190](https://github.com/unbraind/pm-brief/pull/190))
+- Bump the pm-toolchain group with 3 updates ([#188](https://github.com/unbraind/pm-brief/pull/188))
 
 ## 2026.10.26 - 2026-10-26
 
@@ -89,6 +102,12 @@ No changes.
 
 - Reconcile stale in-progress tracker records (2026-10-23) ([pm-brief-reconcile-1023](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-reconcile-1023.toon))
 
+### Dependencies
+
+- Bump the codeql-action group across 1 directory with 2 updates ([#175](https://github.com/unbraind/pm-brief/pull/175))
+- Bump unbraind/pm-github/.github/workflows/pm-github-closeout.yml ([#177](https://github.com/unbraind/pm-brief/pull/177))
+- Bump unbraind/pm-github/.github/workflows/pm-github-sync.yml ([#176](https://github.com/unbraind/pm-brief/pull/176))
+
 ## 2026.10.24 - 2026-10-24
 
 ### Added
@@ -103,6 +122,10 @@ No changes.
 ### Closed
 
 - Closed: Daily Release workflow is failing ([pm-brief-github-7e06b2eb1b44-170](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-github-7e06b2eb1b44-170.toon))
+
+### Dependencies
+
+- Bump the pm-toolchain group across 1 directory with 3 updates ([#167](https://github.com/unbraind/pm-brief/pull/167))
 
 ## 2026.10.23 - 2026-10-23
 
@@ -129,25 +152,37 @@ No changes.
 
 ## 2026.10.20 - 2026-10-20
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 3 updates ([#161](https://github.com/unbraind/pm-brief/pull/161))
 
 ## 2026.10.18 - 2026-10-18
 
-No changes.
+### Dependencies
+
+- Bump the codeql-action group with 2 updates ([#159](https://github.com/unbraind/pm-brief/pull/159))
 
 ## 2026.10.17 - 2026-10-17
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates ([#157](https://github.com/unbraind/pm-brief/pull/157))
 
 ## 2026.10.16 - 2026-10-16
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group with 2 updates ([#153](https://github.com/unbraind/pm-brief/pull/153))
 
 ## 2026.10.14 - 2026-10-14
 
 ### Added
 
 - Adopt the pm SDK 2026.10.13 read_output contract on every pm-brief read command ([pm-brief-ccwo](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/features/pm-brief-ccwo.toon))
+
+### Dependencies
+
+- Bump @types/node ([#150](https://github.com/unbraind/pm-brief/pull/150))
 
 ## 2026.10.12 - 2026-10-12
 
@@ -157,7 +192,9 @@ No changes.
 
 ## 2026.10.11 - 2026-10-11
 
-No changes.
+### Dependencies
+
+- Bump the pm-toolchain group across 1 directory with 2 updates ([#143](https://github.com/unbraind/pm-brief/pull/143))
 
 ## 2026.10.8 - 2026-10-08
 
@@ -175,6 +212,10 @@ No changes.
 
 - Auto-merge green Dependabot updates and group the pm toolchain into one daily PR ([pm-brief-hgo4](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-hgo4.toon))
 
+### Dependencies
+
+- Bump the codeql-action group across 1 directory with 2 updates ([#128](https://github.com/unbraind/pm-brief/pull/128))
+
 ## 2026.9.26 - 2026-09-26
 
 ### Other
@@ -191,6 +232,11 @@ No changes.
 
 - Certify pm CLI 2026.9.21 and install merge drivers through the canonical pm-ops launcher ([pm-brief-hw3t](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/tasks/pm-brief-hw3t.toon))
 
+### Dependencies
+
+- Bump yaml from 2.9.0 to 2.9.1 ([#123](https://github.com/unbraind/pm-brief/pull/123))
+- Bump @types/node from 26.5.1 to 26.6.2 ([#122](https://github.com/unbraind/pm-brief/pull/122))
+
 ## 2026.9.18 - 2026-09-18
 
 ### Other
@@ -202,6 +248,12 @@ No changes.
 ### Other
 
 - Certify pm CLI 2026.9.12 and the pm-ops 2026.9.11 auditor ([pm-brief-h56n](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-h56n.toon))
+
+### Dependencies
+
+- Bump the codeql-action group across 1 directory with 2 updates ([#116](https://github.com/unbraind/pm-brief/pull/116))
+- Bump pm-changelog from 2026.9.6 to 2026.9.9 ([#114](https://github.com/unbraind/pm-brief/pull/114))
+- Bump @types/node from 26.4.1 to 26.5.1 ([#115](https://github.com/unbraind/pm-brief/pull/115))
 
 ## 2026.9.11 - 2026-09-11
 
@@ -219,9 +271,16 @@ No changes.
 
 - Consume the canonical attestation gate instead of carrying a copy of it ([pm-brief-hxoj](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/chores/pm-brief-hxoj.toon))
 
+### Dependencies
+
+- Bump pm-ops from 2026.8.17 to 2026.9.2 ([#103](https://github.com/unbraind/pm-brief/pull/103))
+- Bump pm-changelog from 2026.8.30 to 2026.9.2 ([#104](https://github.com/unbraind/pm-brief/pull/104))
+
 ## 2026.9.6 - 2026-09-06
 
-No changes.
+### Dependencies
+
+- Bump @types/node from 26.4.0 to 26.4.1 ([#105](https://github.com/unbraind/pm-brief/pull/105))
 
 ## 2026.9.1 - 2026-09-01
 
@@ -243,6 +302,11 @@ No changes.
 ### Closed
 
 - Closed: Pin pm-changelog 2026.8.30 before the next release ([pm-brief-m4pi](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-m4pi.toon))
+
+### Dependencies
+
+- Bump @types/node from 26.3.0 to 26.4.0 ([#98](https://github.com/unbraind/pm-brief/pull/98))
+- Bump @types/node from 26.2.0 to 26.3.0 ([#92](https://github.com/unbraind/pm-brief/pull/92))
 
 ## 2026.8.29 - 2026-08-29
 
@@ -278,6 +342,12 @@ No changes.
 ### Closed
 
 - Closed: pm-brief consumes a truncated `pm list-all` answer as if it were complete ([pm-brief-g6ko](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-g6ko.toon))
+
+### Dependencies
+
+- Bump pm-ops from 2026.8.8 to 2026.8.10 ([#71](https://github.com/unbraind/pm-brief/pull/71))
+- Bump pm-changelog from 2026.8.7 to 2026.8.12 ([#72](https://github.com/unbraind/pm-brief/pull/72))
+- Bump @types/node from 26.1.2 to 26.2.0 ([#70](https://github.com/unbraind/pm-brief/pull/70))
 
 ## 2026.8.14 - 2026-08-14
 
@@ -327,7 +397,10 @@ No changes.
 
 ## 2026.8.3 - 2026-08-03
 
-No changes.
+### Dependencies
+
+- Bump pm-changelog from 2026.7.25 to 2026.7.29 ([#52](https://github.com/unbraind/pm-brief/pull/52))
+- Bump @types/node from 26.1.1 to 26.1.2 ([#53](https://github.com/unbraind/pm-brief/pull/53))
 
 ## 2026.7.29 - 2026-07-29
 
@@ -385,6 +458,10 @@ No changes.
 
 - Closed: Documented install command fails: pm install github.com/unbraind/pm-brief cannot resolve an entry file ([pm-brief-xd8z](https://github.com/unbraind/pm-brief/blob/main/.agents/pm/issues/pm-brief-xd8z.toon))
 
+### Dependencies
+
+- Bump pm-changelog from 2026.7.24 to 2026.7.25 ([#40](https://github.com/unbraind/pm-brief/pull/40))
+
 ## 2026.7.25 - 2026-07-25
 
 ### Added
@@ -419,7 +496,11 @@ No changes.
 
 ## 2026.7.20 - 2026-07-20
 
-No changes.
+### Dependencies
+
+- Bump actions/setup-node from 6 to 7 ([#28](https://github.com/unbraind/pm-brief/pull/28))
+- Bump pm-changelog from 2026.7.11 to 2026.7.18 ([#29](https://github.com/unbraind/pm-brief/pull/29))
+- Bump @unbrained/pm-cli from 2026.7.11 to 2026.7.18 ([#30](https://github.com/unbraind/pm-brief/pull/30))
 
 ## 2026.7.14-1 - 2026-07-14
 
@@ -451,7 +532,9 @@ No changes.
 
 ## 2026.7.11 - 2026-07-11
 
-No changes.
+### Dependencies
+
+- Bump actions/checkout from 6 to 7
 
 ## 2026.7.10-1 - 2026-07-10
 
