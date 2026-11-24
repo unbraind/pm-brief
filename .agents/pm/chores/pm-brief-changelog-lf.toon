@@ -6,12 +6,13 @@ status: in_progress
 priority: 2
 tags[2]: changelog,ci
 created_at: "2026-11-23T00:10:08.265Z"
-updated_at: "2026-11-23T22:32:38.743Z"
+updated_at: "2026-11-24T00:50:24.961Z"
 author: codex-agent
 acceptance_criteria: The real Git conversion regression fails without the LF attribute and passes with it.
-comments[2]{created_at,author,text}:
+comments[3]{created_at,author,text}:
   "2026-11-23T22:32:11.651Z",codex-agent,Move the canonical LF attribute and real Git checkout regression to the standalone branch. Verify the new test detects the checkout-byte failure without the attribute.
   "2026-11-23T22:32:35.426Z",codex-agent,"The Windows-style Git checkout regression fails on the LF-byte assertion when only the changelog attribute is reverted. With the attribute restored, the checkout and identity tests pass."
+  "2026-11-24T00:50:24.961Z","harness:claude-code","Review fix 2026-11-24 (CodeRabbit PRRT_kwDOSzIO-c67IjPO): the checkout fixture strips Git's repository-location variables (git rev-parse --local-env-vars: GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, …), so a caller's repository, such as a hook's index, is never written. New regression: running the fixture with a caller repo's GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE leaves that index byte-identical. Revert proof: without the stripping it fails (pass 0, fail 1). File: 2/2."
 files[2]{path,scope}:
   .gitattributes,project
   test/changelog-line-endings.test.ts,project
