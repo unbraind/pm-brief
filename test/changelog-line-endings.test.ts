@@ -16,7 +16,10 @@ const cli = join(dirname(createRequire(import.meta.url).resolve("pm-changelog/pa
  * repository, for example a hook's index, is never read or written by the fixture.
  */
 function fixtureEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const local = execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8", env: { PATH: base.PATH ?? "" } })
+  // Probe with the caller's environment minus every GIT_* variable, keeping the platform's search-path key
+  // as is (Windows spells it Path), so git.exe stays discoverable and no caller repository is consulted.
+  const probeEnv = Object.fromEntries(Object.entries(base).filter(([name]) => !name.toUpperCase().startsWith("GIT_")));
+  const local = execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8", env: probeEnv })
     .split("\n").filter(Boolean);
   const env: NodeJS.ProcessEnv = { ...base, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_NOSYSTEM: "1" };
   for (const name of local) delete env[name];
@@ -56,7 +59,7 @@ test("Windows-style checkout retains generated LF changelog bytes and neutral cl
 test("the fixture never stages into a caller's repository named by inherited Git location variables", () => {
   const caller = mkdtempSync(join(tmpdir(), "brief-changelog-caller-"));
   try {
-    const isolated = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_NOSYSTEM: "1" };
+    const isolated = fixtureEnv(process.env);
     execFileSync("git", ["init", "--quiet"], { cwd: caller, env: isolated });
     writeFileSync(join(caller, "keep.txt"), "caller\n");
     execFileSync("git", ["add", "keep.txt"], { cwd: caller, env: isolated });
