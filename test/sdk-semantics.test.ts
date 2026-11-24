@@ -77,8 +77,18 @@ test("F05: runtime terminal and active roles govern every lifecycle view and com
   try {
     process.env.PATH = join(workspace, "bin");
     process.env.GIT_CEILING_DIRECTORIES = dirname(workspace);
-    for (const command of ["brief", "brief prompt", "brief next", "brief stale", "brief momentum"]) {
-      const result = await harness.runCommand({ command, pmRoot, options: command === "brief" ? { format: "json", noGovernance: true, tokenBudget: "32000" } : command === "brief prompt" ? { noGovernance: true, tokenBudget: "32000" } : { format: "json", days: "7" } });
+    await assert.rejects(harness.runCommand({ command: "brief next", pmRoot, options: { days: "7" } }), {
+      code: "unknown_option", message: /Unknown option 'days'/,
+    });
+    const commandOptions = {
+      brief: { format: "json", noGovernance: true, tokenBudget: "32000" },
+      "brief prompt": { noGovernance: true, tokenBudget: "32000" },
+      "brief next": { format: "json" },
+      "brief stale": { format: "json", days: "7" },
+      "brief momentum": { format: "json", days: "7" },
+    };
+    for (const [command, options] of Object.entries(commandOptions)) {
+      const result = await harness.runCommand({ command, pmRoot, options });
       const serialized = JSON.stringify(result.result);
       if (command === "brief" || command === "brief prompt" || command === "brief next") {
         // Momentum may name accepted work, but executable next rows must exclude it.

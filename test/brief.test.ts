@@ -4401,7 +4401,12 @@ describe("registered command acceptance matrix", () => {
       const prompt = await run("brief prompt", { "no-governance": true, output: promptPath });
       assert.deepEqual({ ok: prompt.ok, format: prompt.format, output: prompt.output }, { ok: true, format: "prompt", output: promptPath });
       assert.match(await readFile(promptPath, "utf8"), /Working rules:/);
-      const renderedPrompt = await run("brief prompt", { threshold: 1 });
+      const refusedPrompt = join(outputDir, "refused-prompt.md");
+      await assert.rejects(run("brief prompt", { threshold: 1, output: refusedPrompt }), {
+        code: "unknown_option", message: /Unknown option 'threshold'/,
+      });
+      await assert.rejects(readFile(refusedPrompt), { code: "ENOENT" });
+      const renderedPrompt = await run("brief prompt", { "governance-threshold": 1 });
       assert.equal(renderedPrompt.pmBriefRendered, true);
       assert.match(renderedPrompt.output ?? "", /^You are continuing work in a pm-managed project\./);
 
