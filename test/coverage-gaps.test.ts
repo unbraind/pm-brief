@@ -375,18 +375,20 @@ describe("brief, next-work, and governance commands reject bad flags and honour 
     assert.equal(initialized.status, 0, initialized.stderr);
     const created = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-issue", "--type", "Issue", "--title", "Fixture issue", "--author", "test", "--json"], { encoding: "utf-8" });
     assert.equal(created.status, 0, created.stderr);
+    const task = spawnSync(INSTALLED_PM_BIN, ["create", "--pm-path", pmRoot, "--id", "pm-fixture-task", "--type", "Task", "--title", "Fixture task", "--author", "test", "--json"], { encoding: "utf-8" });
+    assert.equal(task.status, 0, task.stderr);
     const previousCwd = process.cwd();
     process.chdir(tmpDir);
     try {
       const focused = (await runRegisteredCommandForTest(commands, {
         command: "brief",
-        options: { focus: [["pm-fixture-issue"], "type:Issue"], format: "json", "no-governance": true },
+        options: { focus: [["pm-fixture-task"], "type:Issue"], format: "json", "no-governance": true },
         global: { json: false },
         pmRoot: ".agents/pm",
       })).result as { output?: string };
       const brief = JSON.parse(String(focused.output)) as { focus: Array<{ id: string; type: string }> };
-      assert.ok(brief.focus.some((item) => item.id === "pm-fixture-issue"));
-      assert.ok(brief.focus.some((item) => item.type === "Issue"));
+      assert.ok(brief.focus.some((item) => item.id === "pm-fixture-task"));
+      assert.ok(brief.focus.some((item) => item.id === "pm-fixture-issue" && item.type === "Issue"));
 
       const next = (await runRegisteredCommandForTest(commands, {
         command: "brief next",

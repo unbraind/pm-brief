@@ -4763,7 +4763,7 @@ function registerCommands(api: ExtensionApi): void {
   const commonFlags: FlagDefinition[] = [
     { long: "--token-budget", value_name: "n", description: "Approximate maximum output token budget (alias: --max-tokens; default: 4000 for brief, 2500 for prompt)", type: "string" },
     { long: "--max-tokens", value_name: "n", description: "Alias for --token-budget (default: 4000 for brief, 2500 for prompt)", type: "string" },
-    { long: "--focus", value_name: "id|type:Type", description: "Focus item id or 'type:Type' to highlight all items of a type (repeatable or comma-separated)", type: "string" },
+    { long: "--focus", value_name: "id|type:Type", description: "Focus item id or 'type:Type' to highlight all items of a type (repeatable or comma-separated)", type: "string", repeatable: true },
     { long: "--status", value_name: "status", description: "Statuses to include (comma-separated)", type: "string" },
     { long: "--assignee", value_name: "name", description: "Only include items assigned to this actor", type: "string" },
     { long: "--stale-days", value_name: "n", description: "Days before an open item is stale (default: 7)", type: "string" },

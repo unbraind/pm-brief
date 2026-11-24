@@ -185,19 +185,40 @@ test("ordinary brief rendering remains a document", () => {
   assert.doesNotMatch(result.stdout, /pmBriefRendered/);
 });
 
+test("installed brief keeps both repeated focus selectors", () => {
+  const selected = ids.slice(-2);
+  const result = pm(["brief", "--no-governance", "--format", "json", "--focus", selected[0]!, "--focus", selected[1]!]);
+  assert.deepEqual(rows(result, "focus").map((row) => (row as { id: string }).id).sort(), selected.sort());
+});
+
 /** Verify per-call SDK controls through the real harness over the same tracker. */
 test("SDK options and CLI globals select structured results before host shaping", async () => {
   const harness = await createExtensionTestHarness(extension, { name: "pm-brief", capabilities: ["commands", "services", "schema"] });
   try {
-    for (const command of ["brief", "brief prompt", "brief next", "brief stale", "brief momentum", "brief since", "brief duplicates", "brief governance"]) {
+    const commandOptions = {
+      brief: { noGovernance: true, maxTokens: "100000" },
+      "brief prompt": { noGovernance: true, maxTokens: "100000" },
+      "brief next": {},
+      "brief stale": {},
+      "brief momentum": {},
+      "brief since": { maxTokens: "100000" },
+      "brief duplicates": {},
+      "brief governance": {},
+    };
+    for (const [command, options] of Object.entries(commandOptions)) {
       for (const transport of ["options", "global"] as const) {
         const result = await harness.runCommand({ command, args: command === "brief since" ? ["2000-01-01"] : [], pmRoot: join(workspace, ".agents/pm"),
-          options: { noGovernance: true, maxTokens: "100000", ...(transport === "options" ? { outputBudget: "unbounded" } : {}) },
+          options: { ...options, ...(transport === "options" ? { outputBudget: "unbounded" } : {}) },
           global: transport === "global" ? { outputBudget: "unbounded" } : {},
         });
         assert.equal(result.handled, true, result.errorMessage ?? "handler must succeed");
         assert.equal((result.result as Record<string, unknown>).pmBriefRendered, undefined);
       }
+    }
+    for (const [flag, value] of [["noGovernance", true], ["maxTokens", "100000"]] as const) {
+      await assert.rejects(harness.runCommand({
+        command: "brief next", pmRoot: join(workspace, ".agents/pm"), options: { [flag]: value, outputBudget: "unbounded" },
+      }), { code: "unknown_option", message: new RegExp(`Unknown option '${flag}'`) });
     }
     const ordinary = await harness.runCommand({ command: "brief", pmRoot: join(workspace, ".agents/pm"), options: { output: join(workspace, "sdk-file.md"), noGovernance: true } });
     assert.equal(ordinary.handled, true);

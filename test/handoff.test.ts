@@ -208,12 +208,19 @@ test("real CLI create, preview, concurrent ack and show work without git in nati
 test("registered command refusals remain expected errors with remedies", async () => {
   const activation = await activateExtensionForTest(extension, { name: "pm-brief", capabilities: ["commands", "services", "schema"] });
   const input = join(workspace, "command-contract.json"); await writeFile(input, JSON.stringify(contract));
-  const invoke = (command: string, args: string[] = [], overrides: Record<string, unknown> = {}) => runRegisteredCommandForTest(activation.commands, { command: `brief handoff ${command}`, pmRoot, args, global: { author: "harness-agent" }, options: { input, tokenBudget: "16000", ...overrides } });
+  const invoke = (command: string, args: string[] = [], overrides: Record<string, unknown> = {}) =>
+    runRegisteredCommandForTest(activation.commands, {
+      command: `brief handoff ${command}`, pmRoot, args, global: { author: "harness-agent" },
+      options: { ...(command === "show" ? {} : { input }), tokenBudget: "16000", ...overrides },
+    });
   const preview = await invoke("preview"); assert.equal(preview.handled, true);
   const created = await invoke("create"); const packet = created.result as HandoffPacket;
   await writeFile(input, JSON.stringify(response(packet)));
   assert.equal((await invoke("ack", [packet.id])).handled, true);
   assert.equal((await invoke("show", [packet.id], { receiver: "harness-agent" })).handled, true);
+  await assert.rejects(invoke("show", [packet.id], { input }), {
+    code: "unknown_option", message: /Unknown option 'input'/,
+  });
   await writeFile(input, "[]"); await assert.rejects(invoke("create"), /handoff invalid/);
   await assert.rejects(invoke("show"), /handoff invalid/);
   await writeFile(input, "not json"); await assert.rejects(invoke("create"), /Cannot read handoff JSON input/);
