@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "repository": "unbraind/pm-brief",
-  "baseSha": "4572d0a11ce6b4cbd4f3f3a1a4715911b08dabe6",
-  "version": "2026.11.24",
-  "runId": 45408860964,
+  "baseSha": "c50bd2431f047cdba18a853231f5da1ffdb0ec7b",
+  "version": "2026.11.26",
+  "runId": 45823761698,
   "runAttempt": 1,
   "configDigest": "a07e2deabf5bb731b11c2ec72a8c6cddf5521bc19863eaf74b357e59d3eead9a"
 }
