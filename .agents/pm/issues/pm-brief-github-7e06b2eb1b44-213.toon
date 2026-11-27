@@ -1,0 +1,21 @@
+id: pm-brief-github-7e06b2eb1b44-213
+title: Shared delivery PR #192 is duplicated as importer identity and blocks gated sync
+description: "GH issue #213: https://github.com/unbraind/pm-brief/issues/213 · author @unbraind · created 2026-11-10T12:33:33Z · updated 2026-11-10T12:33:33Z"
+type: Issue
+status: open
+priority: 2
+tags[2]: "gh:unbraind/pm-brief#213","github_author:unbraind"
+created_at: "2026-11-10T12:33:33Z"
+updated_at: "2026-11-27T12:41:22.901Z"
+author: pm-github
+github_close_reason: ""
+github_closed_at: ""
+github_created_at: "2026-11-10T12:33:33Z"
+github_link_only: false
+github_number: 213
+github_release: ""
+github_state: open
+github_state_reason: unspecified
+github_updated_at: "2026-11-10T12:33:33Z"
+github_url: "https://github.com/unbraind/pm-brief/issues/213"
+body: "## Observed tracker-data blocker\nAt immutable default head `063caeee34dbc50ed6033637aa50d81a073b7ace`, [scheduled gated-sync job 129798023088](https://github.com/unbraind/pm-brief/actions/runs/42806839729/job/129798023088) uses pm-github **2026.11.4** and refuses its dry-run import:\n```\nimport plan is not idempotent — 1 duplicate provenance tag(s) in the existing corpus,\n0 new entries without a provenance tag, 0 conflicting targets.\nNo item was written. No branch was published.\n```\nThis is a repository tracker identity collision, not evidence of a generic SDK defect or data loss.\n\n## Exact records\nBoth current records carry `gh:unbraind/pm-brief#192`:\n- [chores/pm-brief-3y2c.toon](https://github.com/unbraind/pm-brief/blob/063caeee34dbc50ed6033637aa50d81a073b7ace/.agents/pm/chores/pm-brief-3y2c.toon)\n- [issues/pm-brief-yanp.toon](https://github.com/unbraind/pm-brief/blob/063caeee34dbc50ed6033637aa50d81a073b7ace/.agents/pm/issues/pm-brief-yanp.toon)\n\nThe chore adapts SDK admission fixtures; the separate issue fixes the bounded empty-window fixture and also has its own GH193 identity. The chore is closed while the issue remains open for verification.\n[PR192](https://github.com/unbraind/pm-brief/pull/192) is merged delivery evidence shared by these distinct records. Shared delivery must not be mistaken for one unique importer identity or a reason to merge/delete records.\n\n## Expected / impact\nGated issue sync can plan safely with unambiguous importer identities while both items retain their independent meaning, history, status and verified delivery references. Currently the entire scheduled import is blocked before writes.\n\n## Preservation-first acceptance and validation\n- Establish which reference is true importer identity versus shared delivery provenance, using the existing supported tracker representation. Retain the delivery link on both records in non-colliding evidence; do not blindly delete provenance.\n- Keep both IDs, bodies, criteria, statuses, closure timestamps, comments, relationships and existing history intact. Any metadata correction must use native append-only history and a recoverable backup.\n- In an isolated recoverable copy, rerun the same gated dry-run import and verify the duplicate count is zero without relaxing the gate.\n- Prove before/after preservation of both records and history prefixes; repeat import planning to establish stable identity and no new duplicate items.\n- Leave implementation/provider writes to the existing owner.\n\nEvidence limits: hosted refusal plus read-only full current tracker inventory and exact record inspection. No local import reproduction or correction was executed. All-status issues/PRs and canonical tracker records were checked for an existing owner before filing."
